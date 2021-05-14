@@ -6,7 +6,7 @@
 
   <groupId>org.codeperception</groupId>
   <artifactId>DottedNotes</artifactId>
-  <version>1.0-SNAPSHOT</version>
+  <version>1.0.0</version>
 
   <name>DottedNotes</name>
   <!-- FIXME change it to the project's website -->

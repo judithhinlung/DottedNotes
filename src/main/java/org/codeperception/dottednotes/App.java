@@ -33,6 +33,10 @@ public class App {
     throws FileNotFoundException, InvalidMidiDataException {
     Score score = null;
     Options options = new Options(args);
+    if (options.getShouldPrintUsage()) {
+      printUsage();
+      return;
+    }
     if (options.getSourceFile() != null) {
       score = getScore(options.getSourceFile());
     }
@@ -96,5 +100,22 @@ public class App {
       }
     }
     return fileName.substring(dotPosition + 1);
+  }
+
+  static void printUsage() {
+    String usage =
+      "java -jar dottednotes.1.0.0.jar --help\n" +
+      "  Outputs the usage instructions for all commands\n" +
+      "  aliases: -h\n" +
+      "java -jar dottednotes.1.0.0.jar <file|URL> <options...>\n" +
+      "  Imports a file for conversion.\n" +
+      "  A path is expected, relative to the root of the project.\n" +
+      "  --play Plays the complete score.\n" +
+      "  alias: -p\n" +
+      "  --convert <file> Exports the score in the format specified by the file extension.\n." +
+      "  A path is expected, relative to the root of the project.\n" +
+      "  alias: -c\n";
+    System.out.println(usage);
+    System.exit(1);
   }
 }
