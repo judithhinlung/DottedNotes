@@ -44,11 +44,10 @@ public class ScoreToMidiTest extends TestCase {
     return score;
   }
 
-  public boolean hasMessage(Track track, MidiMessage message, long tick) {
+  public boolean hasMessage(Track track, int status, long tick) {
     for (int i = 0; i < track.size(); i++) {
       MidiEvent event = track.get(i);
-      MidiMessage eventMessage = event.getMessage();
-      if (event.getTick() == tick && eventMessage.equals(message)) {
+      if (event.getTick() == tick && event.getMessage().getStatus() == status) {
         return true;
       }
     }

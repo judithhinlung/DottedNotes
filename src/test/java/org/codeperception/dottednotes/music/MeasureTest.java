@@ -414,4 +414,40 @@ public class MeasureTest extends TestCase {
     assertEquals(elements.get(5), note3);
     assertEquals(elements.get(6), note6);
   }
+
+  //-----------------//
+  // CheckAdjustDurationsForGraceNotes
+  //-----------------
+  public void testAdjustDurationsForGraceNote() {
+    Part p1 = new Part("p1");
+    p1.setStaves(2);
+    Measure m1 = new Measure(p1, 1);
+    m1.setTime(new TimeSignature(4, 4));
+    Note grace1 = new Note(m1, new Pitch("p", 3, 4), "16th");
+    grace1.setGrace(new Grace());
+    Note note1 = new Note(m1, new Pitch("p", 3, 4), new Fraction(1, 4));
+    Note grace2 = new Note(m1, new Pitch("p", 3, 4), "16th");
+    grace2.setGrace(new Grace());
+    Note grace3 = new Note(m1, new Pitch("p", 3, 5), "16th");
+    grace3.setGrace(new Grace());
+    Note note2 = new Note(m1, new Pitch("p", 3, 6), new Fraction(1, 4));
+    Note note3 = new Note(m1, new Pitch("p", 3, 4), new Fraction(2, 4));
+    m1.addElement(grace1);
+    m1.addElement(note1);
+    m1.addElement(grace2);
+    m1.addElement(grace3);
+    m1.addElement(note2);
+    m1.addElement(note3);
+    ArrayList<MeasureElement> elements = m1.getMeasureElements();
+    assertEquals(Fraction.ZERO, grace1.getMoment());
+    assertEquals(new Fraction(1, 32), note1.getMoment());
+    assertEquals(new Fraction(1, 32), grace1.getDuration());
+    assertEquals(new Fraction(7, 32), note1.getDuration());
+    assertEquals(new Fraction(1, 4), grace2.getMoment());
+    assertEquals(new Fraction(9, 32), grace3.getMoment());
+    assertEquals(new Fraction(5, 16), note2.getMoment());
+    assertEquals(new Fraction(1, 32), grace2.getDuration());
+    assertEquals(new Fraction(1, 32), grace3.getDuration());
+    assertEquals(new Fraction(3, 16), note2.getDuration());
+  }
 }

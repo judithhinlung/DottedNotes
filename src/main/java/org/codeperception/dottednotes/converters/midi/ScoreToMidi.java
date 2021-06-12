@@ -102,13 +102,7 @@ public class ScoreToMidi {
       ArrayList<MeasureElement> elements = measure.getMeasureElements();
       for (int i = 0; i < elements.size(); i++) {
         MeasureElement element = elements.get(i);
-        Fraction nextMoment;
-        if (i < elements.size() - 1) {
-          MeasureElement nextElement = elements.get(i + 1);
-          nextMoment = nextElement.getMoment().subtract(element.getMoment());
-        } else {
-          nextMoment = element.getDuration();
-        }
+        Fraction nextMoment = getNextMoment(i, elements);
         if (element instanceof Note) {
           Note note = (Note) element;
           addNoteToTrack(note, track, ticks);
@@ -168,6 +162,18 @@ public class ScoreToMidi {
     }
   }
 
+  private Fraction getNextMoment(int index, ArrayList<MeasureElement> elements) {
+    Fraction nextMoment = Fraction.ZERO;
+    MeasureElement element = elements.get(index);
+    if (index < elements.size() - 1) {
+      MeasureElement nextElement = elements.get(index + 1);
+      nextMoment = nextElement.getMoment().subtract(element.getMoment());
+    } else {
+      nextMoment = element.getDuration();
+    }
+    return nextMoment;
+  }
+
   public int getLastMeasureOfEnding(int ending, int measureNumber, Part part) {
     ArrayList<Measure> measures = part.getMeasures();
     Measure startMeasure = part.getMeasure(measureNumber);
@@ -205,76 +211,73 @@ public class ScoreToMidi {
       String text = note.getLyric().getText();
       track.add(TextMessage.Lyric.createEvent(text, tick));
     }
-    if (note.getGrace() == null) {
-      Pitch pitch = note.getPitch();
-      int duration = getMidiTicks(note.getDuration());
-      ArrayList<Articulation> articulations = note.getArticulations();
-      if (articulations.size() > 0) {
-        for (int i = 0; i < articulations.size(); i++) {
-          Articulation articulation = articulations.get(i);
-          if (articulation.getType().equals("staccatissimo")) {
-            duration /= 4;
-          } else if (articulation.getType().equals("staccato")) {
-            duration /= 2;
-          }
-        }
-      }
-      if (pitch.getType().equals("p")) {
-        int midiPitch = pitch.getMidiPitch();
-        int midiChannel = note.getMidiChannel();
-        ArrayList<Ornament> ornaments = note.getOrnaments();
-        if (note.getOrnaments().size() > 0) {
-          KeySignature key = note.getMeasure().getKey();
-          for (int i = 0; i < ornaments.size(); i++) {
-            Ornament ornament = ornaments.get(i);
-            if (ornament.getType().equals("turn")) {
-              int upperPitch = pitch.getNextStep(key).getMidiPitch();
-              int lowerPitch = 0;
-              if (ornament.getAccidental() != null) {
-                int accidental = ornament.getAccidental().getModifier();
-                lowerPitch = pitch.getPreviousStep(accidental).getMidiPitch();
-              } else {
-                lowerPitch = pitch.getPreviousStep(key).getMidiPitch();
-              }
-              duration /= 4;
-              noteOnOff(track, midiChannel, upperPitch, velocity, tick, duration);
-              tick += duration;
-              noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration);
-              tick += duration;
-              noteOnOff(track, midiChannel, lowerPitch, velocity, tick, duration);
-              tick += duration;
-              noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration);
-              return;
-            } else if (ornament.getType().equals("mordent")) {
-              int lowerPitch = 0;
-              if (ornament.getAccidental() != null) {
-                int accidental = ornament.getAccidental().getModifier();
-                lowerPitch = pitch.getPreviousStep(accidental).getMidiPitch();
-              } else {
-                lowerPitch = pitch.getPreviousStep(key).getMidiPitch();
-              }
-              duration /= 8;
-              noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration);
-              tick += duration;
-              noteOnOff(track, midiChannel, lowerPitch, velocity, tick, duration);
-              tick += duration;
-              noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration * 6);
-            }
-          }
-        }
-        if (note.getTie() != null) {
-          Tie tie = note.getTie();
-          if (tie.getType().equals("start")) {
-            noteOn(track, midiChannel, midiPitch, velocity, tick);
-          } else if (tie.getType().equals("stop")) {
-            noteOff(track, midiChannel, midiPitch, velocity, (tick + duration));
-          }
-        } else {
-          noteOnOff(track, note.getMidiChannel(), midiPitch, velocity, tick, duration);
+    Pitch pitch = note.getPitch();
+    int duration = getMidiTicks(note.getDuration());
+    ArrayList<Articulation> articulations = note.getArticulations();
+    if (articulations.size() > 0) {
+      for (int i = 0; i < articulations.size(); i++) {
+        Articulation articulation = articulations.get(i);
+        if (articulation.getType().equals("staccatissimo")) {
+          duration /= 4;
+        } else if (articulation.getType().equals("staccato")) {
+          duration /= 2;
         }
       }
     }
-    // TODO: Handle grace notes
+    if (pitch.getType().equals("p")) {
+      int midiPitch = pitch.getMidiPitch();
+      int midiChannel = note.getMidiChannel();
+      ArrayList<Ornament> ornaments = note.getOrnaments();
+      if (note.getOrnaments().size() > 0) {
+        KeySignature key = note.getMeasure().getKey();
+        for (int i = 0; i < ornaments.size(); i++) {
+          Ornament ornament = ornaments.get(i);
+          if (ornament.getType().equals("turn")) {
+            int upperPitch = pitch.getNextStep(key).getMidiPitch();
+            int lowerPitch = 0;
+            if (ornament.getAccidental() != null) {
+              int accidental = ornament.getAccidental().getModifier();
+              lowerPitch = pitch.getPreviousStep(accidental).getMidiPitch();
+            } else {
+              lowerPitch = pitch.getPreviousStep(key).getMidiPitch();
+            }
+            duration /= 4;
+            noteOnOff(track, midiChannel, upperPitch, velocity, tick, duration);
+            tick += duration;
+            noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration);
+            tick += duration;
+            noteOnOff(track, midiChannel, lowerPitch, velocity, tick, duration);
+            tick += duration;
+            noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration);
+            return;
+          } else if (ornament.getType().equals("mordent")) {
+            int lowerPitch = 0;
+            if (ornament.getAccidental() != null) {
+              int accidental = ornament.getAccidental().getModifier();
+              lowerPitch = pitch.getPreviousStep(accidental).getMidiPitch();
+            } else {
+              lowerPitch = pitch.getPreviousStep(key).getMidiPitch();
+            }
+            duration /= 8;
+            noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration);
+            tick += duration;
+            noteOnOff(track, midiChannel, lowerPitch, velocity, tick, duration);
+            tick += duration;
+            noteOnOff(track, midiChannel, midiPitch, velocity, tick, duration * 6);
+          }
+        }
+      }
+      if (note.getTie() != null) {
+        Tie tie = note.getTie();
+        if (tie.getType().equals("start")) {
+          noteOn(track, midiChannel, midiPitch, velocity, tick);
+        } else if (tie.getType().equals("stop")) {
+          noteOff(track, midiChannel, midiPitch, velocity, (tick + duration));
+        }
+      } else {
+        noteOnOff(track, note.getMidiChannel(), midiPitch, velocity, tick, duration);
+      }
+    }
   }
 
   private static void noteOnOff(

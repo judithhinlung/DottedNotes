@@ -68,4 +68,8 @@ public class MeasureElement {
   public Fraction getDuration() {
     return this.duration;
   }
+
+  public void setDuration(Fraction duration) {
+    this.duration = duration;
+  }
 }

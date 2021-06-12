@@ -33,6 +33,15 @@ public class Note extends MeasureElement {
     this.duration = duration;
   }
 
+  public Note(Measure measure, Pitch pitch, String type) {
+    super(measure);
+    this.pitch = pitch;
+    if (!isValidType(type)) {
+      throw new IllegalArgumentException("Invalid note type: " + type);
+    }
+    this.type = type;
+  }
+
   public Pitch getPitch() {
     return this.pitch;
   }
@@ -43,7 +52,7 @@ public class Note extends MeasureElement {
     return this.type;
   }
 
-  public void setType(String type) throws IllegalArgumentException {
+  boolean isValidType(String type) {
     String[] availableTypes = new String[] {
       "1024th",
       "512th",
@@ -60,7 +69,11 @@ public class Note extends MeasureElement {
       "long",
       "maxima",
     };
-    if (!Utils.contains(type, availableTypes)) {
+    return Utils.contains(type, availableTypes);
+  }
+
+  public void setType(String type) throws IllegalArgumentException {
+    if (!isValidType(type)) {
       throw new IllegalArgumentException("Invalid note type: " + type);
     }
     this.type = type;

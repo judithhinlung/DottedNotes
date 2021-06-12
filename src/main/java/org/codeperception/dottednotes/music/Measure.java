@@ -283,7 +283,9 @@ public class Measure {
       HashMap<Integer, Voice> voices = staff.getVoices();
       for (Map.Entry<Integer, Voice> entry : voices.entrySet()) {
         Voice voice = entry.getValue();
-        for (int j = 0; j < voice.getElements().size(); j++) {
+        ArrayList<MeasureElement> voiceElements = voice.getElements();
+        adjustDurationsForGraceNotes(voiceElements);
+        for (int j = 0; j < voiceElements.size(); j++) {
           MeasureElement element = voice.getElements().get(j);
           elementsList.add(element);
         }
@@ -291,6 +293,33 @@ public class Measure {
     }
     randomizedQuickSort(elementsList, 0, elementsList.size() - 1);
     return elementsList;
+  }
+
+  void adjustDurationsForGraceNotes(ArrayList<MeasureElement> elements) {
+    Fraction totalGraceDuration = Fraction.ZERO;
+    boolean isInGrace = false;
+    for (int i = 0; i < elements.size(); i++) {
+      MeasureElement element = elements.get(i);
+      if (element instanceof Note) {
+        Note note = (Note) element;
+        if (note.getGrace() != null) {
+          Fraction graceDuration = note.getDurationFromType(note.getType()).divide(2);
+          if (isInGrace) {
+            note.setMoment(note.getMoment().add(totalGraceDuration));
+          } else {
+            isInGrace = true;
+          }
+          note.setDuration(graceDuration);
+          totalGraceDuration = totalGraceDuration.add(graceDuration);
+        } else if (isInGrace) {
+          Fraction startMoment = note.getMoment().add(totalGraceDuration);
+          note.setMoment(startMoment);
+          note.setDuration(note.getDuration().subtract(totalGraceDuration));
+          isInGrace = false;
+          totalGraceDuration = Fraction.ZERO;
+        }
+      }
+    }
   }
 
   /**
