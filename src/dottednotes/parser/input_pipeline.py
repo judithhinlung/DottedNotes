@@ -1,10 +1,11 @@
 from pathlib import Path
+from typing import Union
 
 
 class InputPipeline:
     """Reads and pre-processes braille music files before parsing."""
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: Union[str, Path]) -> None:
         self.path = Path(path)
 
     def read(self) -> str:

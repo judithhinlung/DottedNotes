@@ -103,7 +103,7 @@ testpaths = ["tests"]
 - [x] `pyproject.toml` is present and valid
 - [x] `pip install -e ".[dev]"` completes without errors
 - [x] `import dottednotes` works in a Python shell
-- [ ] All files committed to main
+- [x] All files committed to main
 
 **Senior note:** The `-e` flag in `pip install -e` means "editable install" —
 changes you make to the source code are immediately reflected without
@@ -188,7 +188,7 @@ jobs:
 
 **Definition of Done:**
 - [x] `.github/workflows/ci.yml` exists and is valid YAML
-- [ ] CI runs automatically on push to main
+- [x] CI runs automatically on push to main
 - [ ] CI passes on both Python 3.9 and 3.11
 - [ ] GitHub Actions badge is visible on the repository page
 
@@ -436,8 +436,8 @@ eliminating the need to re-explain the project from scratch each time.
 **Definition of Done:**
 - [x] CLAUDE.md exists in the repository root
 - [x] TICKETS.md exists in the repository root
-- [ ] Both files are committed to main
-- [ ] Checked off tickets in TICKETS.md reflect actual project state
+- [x] Both files are committed to main
+- [x] Checked off tickets in TICKETS.md reflect actual project state
 
 ---
 
