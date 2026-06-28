@@ -1,33 +1,17 @@
-# Dottednotes
+# DottedNotes
 
-DottedNotes converts music from MusicXML to MIDI. Conversion support for other formats, including braille music and Lilypond, is planned for future releases. Stay tuned!
+A Python tool for converting braille music notation (.brf/.brl) 
+to LilyPond (.ly), with PDF and MIDI output.
 
-## Building
-```
-mvn clean install
-```
+## Why DottedNotes exists
 
-This command will (re)build the DottedNotes Maven artifacts (binary, source and doc).
+Blind musicians who compose in braille music notation currently 
+have no direct path from their native notation to audio playback 
+or publication-quality scores without sighted assistance. 
+DottedNotes closes that gap.
 
-## Usage
+## Current status
 
-After building, the application is available in the target directory as dottednotes.jar.
+Active development. See the project board for sprint progress.
 
-To run the application:
-
-```shell
-cd target
-java -jar dottednotes.jar <sourceFile> <options>
-```
-
-For example, to convert a file from MusicXML to MIDI and play the score:
-
-```Shell
-java -jar dottednotes.jar moonlight.xml --convert moonlight.midi --play
-```
-
-To get a list of all available commands and their usage, run the following command:
-
-```shell
-java -jar dottednotes.jar --help
-```
+## Planned workflow
