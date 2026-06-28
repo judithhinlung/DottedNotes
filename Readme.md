@@ -1,5 +1,7 @@
 # DottedNotes
 
+![CI](https://github.com/judithhinlung/DottedNotes/actions/workflows/ci.yml/badge.svg)
+
 A Python tool for converting braille music notation (.brf/.brl) 
 to LilyPond (.ly), with PDF and MIDI output.
 

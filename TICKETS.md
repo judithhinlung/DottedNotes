@@ -148,7 +148,7 @@ skip_covered = false
 
 ---
 
-### [ ] S0-4: Set up GitHub Actions CI
+### [d] S0-4: Set up GitHub Actions CI
 
 **Why:** CI means every push is automatically tested. This catches regressions
 before they accumulate and signals to potential employers that you practice
@@ -189,8 +189,8 @@ jobs:
 **Definition of Done:**
 - [x] `.github/workflows/ci.yml` exists and is valid YAML
 - [x] CI runs automatically on push to main
-- [ ] CI passes on both Python 3.9 and 3.11
-- [ ] GitHub Actions badge is visible on the repository page
+- [x] CI passes on both Python 3.9 and 3.11
+- [x] GitHub Actions badge is visible on the repository page
 
 **Senior note:** Testing on two Python versions (3.9 and 3.11) catches
 compatibility issues early. Python 3.9 is the minimum we support;
