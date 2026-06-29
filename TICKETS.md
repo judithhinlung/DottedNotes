@@ -198,7 +198,7 @@ compatibility issues early. Python 3.9 is the minimum we support;
 
 ---
 
-### [ ] S0-5: Document the BANA symbol table
+### [x] S0-5: Document the BANA symbol table
 
 **Why:** This is the ground truth reference for the entire project.
 Having it as a Python dictionary means every other module can import it
@@ -263,11 +263,11 @@ ACCIDENTAL_CELLS = {
    and begin populating the NOTE_CELLS dictionary
 
 **Definition of Done:**
-- [ ] `bana_symbols.py` exists with SymbolCategory enum defined
-- [ ] At least the 7 natural note names (C through B) for quarter note duration
+- [x] `bana_symbols.py` exists with SymbolCategory enum defined
+- [x] At least the 7 natural note names (C through B) for quarter note duration
       are correctly entered in NOTE_CELLS
-- [ ] `docs/bana_reference.md` exists with a human-readable symbol table
-- [ ] Module imports without errors: `from dottednotes.bana_symbols import NOTE_CELLS`
+- [x] `docs/bana_reference.md` exists with a human-readable symbol table
+- [x] Module imports without errors: `from dottednotes.bana_symbols import NOTE_CELLS`
 
 **Senior note:** Do not try to enter the entire BANA symbol table at once —
 it is large and error-prone to do all at once. Enter enough to support

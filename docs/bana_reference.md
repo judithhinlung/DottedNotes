@@ -28,21 +28,21 @@ Each note cell encodes both pitch and duration in a single 6-dot braille cell.
 
 **Duration class** is added to the pitch base using dots 3 and 6:
 
-| Duration group     | Modifier        | base_duration |
-|--------------------|-----------------|---------------|
-| Whole / 16th note  | add dots 3, 6   | 1             |
-| Half / 8th note    | add dot 3 only  | 2             |
-| Quarter / 32nd     | add dot 6 only  | 4             |
+| Duration group      | Modifier        | base_duration |
+|---------------------|-----------------|---------------|
+| Whole / 16th note   | add dots 3, 6   | 1             |
+| Half / 32nd note    | add dot 3 only  | 2             |
+| Quarter / 64th note  | add dot 6 only  | 4             |
 
 ### Duration ambiguity
 
 Each note cell is ambiguous between two durations (e.g., the cell for
-C quarter is identical to the cell for C 32nd). The parser resolves this
+C quarter is identical to the cell for C 64th). The parser resolves this
 using rhythmic context and the BANA value indicator sign (Sprint 2).
 
 ---
 
-## Note Cells — Quarter / 32nd (dot 6 added)
+## Note Cells — Quarter / 64th (dot 6 added)
 
 | Symbol | Unicode  | Dots         | Note |
 |--------|----------|--------------|------|
@@ -66,7 +66,7 @@ using rhythmic context and the BANA value indicator sign (Sprint 2).
 | ⠮      | U+282E   | 2, 3, 4, 6      | A    |
 | ⠾      | U+283E   | 2, 3, 4, 5, 6   | B    |
 
-## Note Cells — Half / 8th (dot 3 added)
+## Note Cells — Half / 32nd (dot 3 added)
 
 | Symbol | Unicode  | Dots         | Note |
 |--------|----------|--------------|------|
@@ -87,16 +87,16 @@ scientific pitch notation (octave 4 = middle C octave).
 
 | Symbol | Unicode | Dots    | Octave | Name               |
 |--------|---------|---------|--------|--------------------|
-| ⠈⠈    | (two cells) | 4, 4 | 1     | Sub-contra         |
-| ⠈      | U+2808  | 4       | 2      | Contra             |
-| ⠘      | U+2818  | 4, 5    | 3      | Great              |
-| ⠸      | U+2838  | 4, 5, 6 | 4      | Small (middle C)   |
-| ⠐      | U+2810  | 5       | 5      | One-line           |
-| ⠨      | U+2828  | 4, 6    | 6      | Two-line           |
-| ⠰      | U+2830  | 5, 6    | 7      | Three-line         |
-| ⠠      | U+2820  | 6       | 8      | Four-line          |
+| ⠈⠈    | (two cells) | 4, 4 | 0     | Sub-contra         |
+| ⠈      | U+2808  | 4       | 1      | Contra             |
+| ⠘      | U+2818  | 4, 5    | 2      | Great              |
+| ⠸      | U+2838  | 4, 5, 6 | 3      | Small              |
+| ⠐      | U+2810  | 5       | 4      | One-line (middle C)|
+| ⠨      | U+2828  | 4, 6    | 5      | Two-line           |
+| ⠰      | U+2830  | 5, 6    | 6      | Three-line         |
+| ⠠      | U+2820  | 6       | 7      | Four-line          |
 
-Octave 1 (sub-contra) is a two-cell mark (⠈ followed by ⠈) and is handled
+Octave 0 (sub-contra) is a two-cell mark (⠈ followed by ⠈) and is handled
 specially in the parser.
 
 ---
@@ -108,8 +108,8 @@ Rests use the same duration ambiguity scheme as notes (base_duration 1/2/4).
 | Symbol | Unicode | Dots       | Duration group |
 |--------|---------|------------|----------------|
 | ⠍      | U+280D  | 1, 3, 4    | whole / 16th   |
-| ⠥      | U+2825  | 1, 3, 6    | half / 8th     |
-| ⠧      | U+2827  | 1, 2, 3, 6 | quarter / 32nd |
+| ⠥      | U+2825  | 1, 3, 6    | half / 32nd    |
+| ⠧      | U+2827  | 1, 2, 3, 6 | quarter / 64th |
 
 ---
 
