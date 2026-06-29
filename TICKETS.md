@@ -293,10 +293,10 @@ Bugs always hide in real data.
 5. Add a `tests/fixtures/README.md` explaining what each file is and its source
 
 **Definition of Done:**
-- [ ] At least 3 .brf fixture files exist in `tests/fixtures/`
-- [ ] Fengyang Flower Drum is one of them (developer-authored, known correct output)
-- [ ] `tests/fixtures/README.md` documents each file's title, composer, and source
-- [ ] All fixture files are committed to the repository
+- [x] At least 3 .brf fixture files exist in `tests/fixtures/`
+- [x] Fengyang Flower Drum is one of them (developer-authored, known correct output)
+- [x] `tests/fixtures/README.md` documents each file's title, composer, and source
+- [x] All fixture files are committed to the repository
 
 **Senior note:** The Fengyang file is your most valuable test case because you
 know exactly what the correct LilyPond output should look like — you wrote it
