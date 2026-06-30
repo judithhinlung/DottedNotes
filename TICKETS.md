@@ -1,4 +1,4 @@
-# DottedNotes — Project Tickets
+ƒ# DottedNotes — Project Tickets
 
 This file contains all sprints and tickets for the DottedNotes project.
 Check off tickets as you complete them: change `[ ]` to `[x]`.
@@ -449,7 +449,7 @@ Estimated time: 3–4 days.
 
 ---
 
-### [ ] S1-1: Implement BrailleSymbol base class
+### [x] S1-1: Implement BrailleSymbol base class
 
 **Why:** Every musical symbol in braille is a BrailleSymbol.
 Having a base class enforces consistent structure and
@@ -494,11 +494,11 @@ def test_braille_symbol_requires_to_lilypond():
 ```
 
 **Definition of Done:**
-- [ ] `BrailleSymbol` class exists in `models/base.py`
-- [ ] Class has `dots`, `category`, and `raw_brl` fields
-- [ ] `to_lilypond()` raises `NotImplementedError` when called on base class
-- [ ] `__repr__` produces a readable string without visual decorations
-- [ ] Unit test for NotImplementedError passes
+- [x] `BrailleSymbol` class exists in `models/base.py`
+- [x] Class has `dots`, `category`, and `raw_brl` fields
+- [x] `to_lilypond()` raises `NotImplementedError` when called on base class
+- [x] `__repr__` produces a readable string without visual decorations
+- [x] Unit test for NotImplementedError passes
 
 ---
 

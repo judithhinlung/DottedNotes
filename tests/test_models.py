@@ -1,6 +1,8 @@
+from dottednotes.bana_symbols import SymbolCategory
 from dottednotes.models import (
     Articulation,
     ArticulationType,
+    BrailleSymbol,
     Duration,
     Dynamic,
     DynamicLevel,
@@ -11,6 +13,28 @@ from dottednotes.models import (
     Score,
     Staff,
 )
+
+
+def test_braille_symbol_requires_to_lilypond():
+    """BrailleSymbol subclasses must implement to_lilypond."""
+    import pytest
+
+    sym = BrailleSymbol(
+        dots=frozenset([1, 2]),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠃'
+    )
+    with pytest.raises(NotImplementedError):
+        sym.to_lilypond()
+
+
+def test_braille_symbol_repr():
+    sym = BrailleSymbol(
+        dots=frozenset([1, 2]),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠃'
+    )
+    assert repr(sym) == "BrailleSymbol(dots=frozenset({1, 2}), category=NOTE)"
 
 
 def test_duration_to_lilypond():

@@ -1,4 +1,5 @@
 from .articulation import Articulation, ArticulationType
+from .base import BrailleSymbol
 from .duration import Duration
 from .dynamic import Dynamic, DynamicLevel
 from .measure import Measure
@@ -10,6 +11,7 @@ from .staff import Staff
 __all__ = [
     "Articulation",
     "ArticulationType",
+    "BrailleSymbol",
     "Duration",
     "Dynamic",
     "DynamicLevel",

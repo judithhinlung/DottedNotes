@@ -32,6 +32,8 @@ The same note cell represents two possible durations (e.g. C quarter and C
 rhythmic context and the BANA value indicator sign.
 """
 
+from __future__ import annotations
+
 from enum import Enum, auto
 
 
