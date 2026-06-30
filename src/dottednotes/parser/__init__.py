@@ -1,4 +1,4 @@
 from .braille_parser import BrailleParser
-from .input_pipeline import InputPipeline
+from .input_pipeline import BRLInputPipeline, InputPipeline
 
-__all__ = ["BrailleParser", "InputPipeline"]
+__all__ = ["BrailleParser", "BRLInputPipeline", "InputPipeline"]
