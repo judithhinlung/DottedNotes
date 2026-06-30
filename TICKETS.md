@@ -391,7 +391,7 @@ def test_same_content_both_encodings():
 
 ---
 
-### [ ] S0-8: Update README.md
+### [x] S0-8: Update README.md
 
 **Why:** The README is the first thing potential employers, collaborators,
 and users see. It should tell the story of the project clearly.
@@ -414,11 +414,11 @@ and users see. It should tell the story of the project clearly.
 3. Commit with message: "Update README for Python rewrite"
 
 **Definition of Done:**
-- [ ] README accurately describes the Python project, not the Java version
-- [ ] Installation instructions work when followed from scratch
-- [ ] CI badge is present and shows passing status
-- [ ] Accessibility motivation is clearly stated in the README
-- [ ] No references to Maven or Java remain in the README
+- [x] README accurately describes the Python project, not the Java version
+- [x] Installation instructions work when followed from scratch
+- [x] CI badge is present and shows passing status
+- [x] Accessibility motivation is clearly stated in the README
+- [x] No references to Maven or Java remain in the README
 
 ---
 
