@@ -382,12 +382,12 @@ def test_same_content_both_encodings():
 ```
 
 **Definition of Done:**
-- [ ] `BRLInputPipeline` class exists and imports without errors
-- [ ] `_detect_encoding()` correctly identifies Unicode and ASCII braille
-- [ ] `_ascii_to_unicode()` converts ASCII braille to correct Unicode characters
-- [ ] `load()` accepts both .brf and .brl file extensions
-- [ ] All unit tests pass
-- [ ] Loading the Fengyang .brf fixture file does not raise an exception
+- [x] `BRLInputPipeline` class exists and imports without errors
+- [x] `_detect_encoding()` correctly identifies Unicode and ASCII braille
+- [x] `_ascii_to_unicode()` converts ASCII braille to correct Unicode characters
+- [x] `load()` accepts both .brf and .brl file extensions
+- [x] All unit tests pass
+- [x] Loading the Fengyang .brf fixture file does not raise an exception
 
 ---
 
@@ -422,7 +422,7 @@ and users see. It should tell the story of the project clearly.
 
 ---
 
-### [ ] S0-9: Add CLAUDE.md and TICKETS.md to repository
+### [x] S0-9: Add CLAUDE.md and TICKETS.md to repository
 
 **Why:** These files give Claude Code full context on every future session,
 eliminating the need to re-explain the project from scratch each time.
@@ -474,7 +474,7 @@ class BrailleSymbol:
             f"{self.__class__.__name__} must implement to_lilypond()"
         )
 
-    def __repr__(self) -> str:
+    de  f __repr__(self) -> str:
         return (f"{self.__class__.__name__}("
                 f"dots={self.dots}, "
                 f"category={self.category.name})")
