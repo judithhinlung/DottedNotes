@@ -68,7 +68,7 @@ class SymbolCategory(Enum):
 # ---------------------------------------------------------------------------
 
 NOTE_CELLS: dict[str, tuple[str, int] | None] = {
-    '⠀': None,  # blank cell (space/padding)
+    '⠀': None,  # blank cell — measure separator (no dots); classified as BAR_LINE, not NOTE
 
     # --- Quarter / 64th notes (dot 6 added to pitch base) ---
     '⠹': ('C', 4),  # dots 1,4,5,6
@@ -142,4 +142,16 @@ REST_CELLS: dict[str, int] = {
     '⠍': 1,  # dots 1,3,4    — whole rest (or 16th rest)
     '⠥': 2,  # dots 1,3,6    — half rest  (or 32nd rest)
     '⠧': 4,  # dots 1,2,3,6  — quarter rest (or 64th rest)
+}
+
+# ---------------------------------------------------------------------------
+# Bar line / measure separator
+# In BANA braille music, measures are separated by a blank braille cell
+# (U+2800, no dots) — the same character as a braille space.
+# There is no special bar-line symbol; whitespace between note groups is
+# how the reader knows a new measure has begun.
+# ---------------------------------------------------------------------------
+
+BAR_LINE_CELLS: dict[str, str] = {
+    '⠀': 'measure_separator',  # U+2800 — blank braille cell (no dots)
 }

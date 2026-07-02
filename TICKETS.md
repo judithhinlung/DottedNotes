@@ -984,7 +984,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S2-1: Implement BrailleTokenizer
+### [x] S2-1: Implement BrailleTokenizer
 
 **Why:** The tokenizer is the first stage of parsing — it converts
 a raw stream of Unicode braille characters into a sequence of
@@ -1002,12 +1002,12 @@ typed tokens that the parser can reason about.
    the parser handles unknown symbols gracefully
 
 **Definition of Done:**
-- [ ] `BrailleTokenizer` class exists
-- [ ] Tokenizer produces correct token types for note cells
-- [ ] Tokenizer produces correct token types for bar lines
-- [ ] Unknown symbols produce UNKNOWN tokens, not exceptions
-- [ ] Token includes position information for error reporting
-- [ ] Unit tests pass
+- [x] `BrailleTokenizer` class exists
+- [x] Tokenizer produces correct token types for note cells
+- [x] Tokenizer produces correct token types for bar lines
+- [x] Unknown symbols produce UNKNOWN tokens, not exceptions
+- [x] Token includes position information for error reporting
+- [x] Unit tests pass
 
 ---
 
