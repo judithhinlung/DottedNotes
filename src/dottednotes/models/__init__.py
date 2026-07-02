@@ -4,7 +4,7 @@ from .base import BrailleSymbol
 from .duration import Duration
 from .dynamic import Dynamic, DynamicLevel
 from .measure import Measure
-from .note import Note
+from .note import Note, Rest
 from .ornament import Ornament, OrnamentType
 from .score import Score
 from .staff import Staff
@@ -20,6 +20,7 @@ __all__ = [
     "DynamicLevel",
     "Measure",
     "Note",
+    "Rest",
     "Ornament",
     "OrnamentType",
     "Score",

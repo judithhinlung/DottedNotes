@@ -12,6 +12,7 @@ from dottednotes.models import (
     Note,
     Ornament,
     OrnamentType,
+    Rest,
     Score,
     Staff,
 )
@@ -166,6 +167,37 @@ def test_invalid_octave_raises():
     import pytest
     with pytest.raises(ValueError):
         _make_note('C', 9, 4)
+
+
+def test_quarter_rest():
+    rest = Rest(
+        dots=frozenset(),
+        category=SymbolCategory.REST,
+        raw_brl='⠀',
+        duration=Duration(value=4)
+    )
+    assert rest.to_lilypond() == "r4"
+
+
+def test_full_measure_rest():
+    rest = Rest(
+        dots=frozenset(),
+        category=SymbolCategory.REST,
+        raw_brl='⠀',
+        duration=Duration(value=1),
+        is_full_measure=True
+    )
+    assert rest.to_lilypond() == "R1"
+
+
+def test_dotted_half_rest():
+    rest = Rest(
+        dots=frozenset(),
+        category=SymbolCategory.REST,
+        raw_brl='⠀',
+        duration=Duration(value=2, dots=1)
+    )
+    assert rest.to_lilypond() == "r2."
 
 
 def test_measure_add_note():

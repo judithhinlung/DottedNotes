@@ -44,3 +44,16 @@ class Note(BrailleSymbol):
         duration_str = self.duration.to_lilypond()
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}"
+
+
+@dataclass
+class Rest(BrailleSymbol):
+    """A rest (silence) of a given duration."""
+    duration: Duration
+    is_full_measure: bool = False  # True for whole-measure rests (R1 in LilyPond)
+
+    def to_lilypond(self) -> str:
+        """Return LilyPond rest string e.g. 'r4', 'R1', 'r2.'"""
+        if self.is_full_measure:
+            return f"R{self.duration.to_lilypond()}"
+        return f"r{self.duration.to_lilypond()}"
