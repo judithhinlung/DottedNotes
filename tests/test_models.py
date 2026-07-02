@@ -287,3 +287,63 @@ def test_note_with_multiple_articulations():
     ]
     note = _make_note('G', 5, 8, articulations=articulations)
     assert note.to_lilypond() == "g''8---."
+
+
+def test_dynamic_ppp():
+    assert Dynamic(DynamicLevel.PPP).to_lilypond() == r'\ppp'
+
+
+def test_dynamic_pp():
+    assert Dynamic(DynamicLevel.PP).to_lilypond() == r'\pp'
+
+
+def test_dynamic_p():
+    assert Dynamic(DynamicLevel.P).to_lilypond() == r'\p'
+
+
+def test_dynamic_mp():
+    assert Dynamic(DynamicLevel.MP).to_lilypond() == r'\mp'
+
+
+def test_dynamic_mf():
+    assert Dynamic(DynamicLevel.MF).to_lilypond() == r'\mf'
+
+
+def test_dynamic_f():
+    assert Dynamic(DynamicLevel.F).to_lilypond() == r'\f'
+
+
+def test_dynamic_ff():
+    assert Dynamic(DynamicLevel.FF).to_lilypond() == r'\ff'
+
+
+def test_dynamic_fff():
+    assert Dynamic(DynamicLevel.FFF).to_lilypond() == r'\fff'
+
+
+def test_dynamic_sf():
+    assert Dynamic(DynamicLevel.SF).to_lilypond() == r'\sf'
+
+
+def test_dynamic_sfz():
+    assert Dynamic(DynamicLevel.SFZ).to_lilypond() == r'\sfz'
+
+
+def test_dynamic_fp():
+    assert Dynamic(DynamicLevel.FP).to_lilypond() == r'\fp'
+
+
+def test_dynamic_crescendo_start():
+    assert Dynamic(DynamicLevel.CRESCENDO_START).to_lilypond() == r'\<'
+
+
+def test_dynamic_crescendo_end():
+    assert Dynamic(DynamicLevel.CRESCENDO_END).to_lilypond() == r'\!'
+
+
+def test_dynamic_decrescendo_start():
+    assert Dynamic(DynamicLevel.DECRESCENDO_START).to_lilypond() == r'\>'
+
+
+def test_dynamic_decrescendo_end():
+    assert Dynamic(DynamicLevel.DECRESCENDO_END).to_lilypond() == r'\!'

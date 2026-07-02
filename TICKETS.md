@@ -857,7 +857,7 @@ class Articulation(BrailleSymbol):
 
 ---
 
-### [ ] S1-7: Implement Dynamic class
+### [x] S1-7: Implement Dynamic class
 
 **Why:** Dynamics are essential for musical expression and
 are present in virtually every real score.
@@ -916,10 +916,10 @@ class Dynamic(BrailleSymbol):
 2. Write unit tests for all dynamic levels.
 
 **Definition of Done:**
-- [ ] `Dynamic` class with `DynamicLevel` enum exists
-- [ ] `to_lilypond()` returns correct LilyPond string for all levels
-- [ ] Hairpin dynamics (crescendo/decrescendo) produce correct output
-- [ ] All unit tests pass
+- [x] `Dynamic` class with `DynamicLevel` enum exists
+- [x] `to_lilypond()` returns correct LilyPond string for all levels
+- [x] Hairpin dynamics (crescendo/decrescendo) produce correct output
+- [x] All unit tests pass
 
 ---
 
