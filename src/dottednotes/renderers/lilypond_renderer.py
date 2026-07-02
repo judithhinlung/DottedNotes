@@ -29,9 +29,4 @@ class LilypondRenderer:
         return [self._render_note(n) for n in measure.notes]
 
     def _render_note(self, note: Note) -> str:
-        dur = note.duration.to_lilypond()
-        if note.is_rest:
-            return f"r{dur}"
-        # LilyPond octave marks: middle C is c', each ' raises by one octave
-        octave_marks = "'" * max(0, note.octave - 3) or "," * max(0, 3 - note.octave)
-        return f"{note.pitch}{octave_marks}{dur}"
+        return note.to_lilypond()

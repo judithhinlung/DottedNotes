@@ -1,5 +1,7 @@
 from dottednotes.bana_symbols import SymbolCategory
 from dottednotes.models import (
+    Accidental,
+    AccidentalType,
     Articulation,
     ArticulationType,
     BrailleSymbol,
@@ -95,26 +97,81 @@ def test_duration_in_beats_double_dotted():
     assert Duration(value=4, dots=2).duration_in_beats() == 1.75
 
 
-def test_note_defaults():
-    note = Note(pitch="c", octave=4, duration=Duration(4))
-    assert not note.is_rest
-    assert not note.is_chord
-    assert not note.tie
-    assert note.articulations == []
-    assert note.ornaments == []
-    assert note.dynamic is None
+def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None):
+    return Note(
+        dots=frozenset(),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠀',
+        note_name=note_name,
+        octave=octave,
+        duration=Duration(value=duration_value, dots=dots),
+        accidental=accidental,
+        articulations=articulations or [],
+    )
 
 
-def test_note_with_articulation():
+def test_middle_c_quarter():
+    note = _make_note('C', 4, 4)
+    assert note.to_lilypond() == "c'4"
+
+
+def test_b_flat_half_note():
+    note = _make_note('B', 4, 2, accidental=Accidental(AccidentalType.FLAT))
+    assert note.to_lilypond() == "bes'2"
+
+
+def test_f_sharp_eighth():
+    note = _make_note('F', 5, 8, accidental=Accidental(AccidentalType.SHARP))
+    assert note.to_lilypond() == "fis''8"
+
+
+def test_all_natural_note_names():
+    expected = {
+        'C': 'c', 'D': 'd', 'E': 'e', 'F': 'f',
+        'G': 'g', 'A': 'a', 'B': 'b',
+    }
+    for name, ly in expected.items():
+        note = _make_note(name, 4, 4)
+        assert note.to_lilypond().startswith(ly), f"{name} should produce {ly}..."
+
+
+def test_octave_marks_all_octaves():
+    expected_marks = {
+        1: "c,,4", 2: "c,4", 3: "c4", 4: "c'4",
+        5: "c''4", 6: "c'''4", 7: "c''''4",
+    }
+    for octave, expected in expected_marks.items():
+        note = _make_note('C', octave, 4)
+        assert note.to_lilypond() == expected, f"octave {octave}: expected {expected!r}"
+
+
+def test_dotted_quarter_note():
+    note = _make_note('G', 4, 4, dots=1)
+    assert note.to_lilypond() == "g'4."
+
+
+def test_note_with_staccato():
     art = Articulation(ArticulationType.STACCATO)
-    note = Note(pitch="g", octave=5, duration=Duration(8), articulations=[art])
-    assert note.articulations[0].type == ArticulationType.STACCATO
+    note = _make_note('D', 4, 4, articulations=[art])
+    assert note.to_lilypond() == "d'4-."
+
+
+def test_invalid_note_name_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        _make_note('H', 4, 4)
+
+
+def test_invalid_octave_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        _make_note('C', 9, 4)
 
 
 def test_measure_add_note():
     measure = Measure(number=1)
-    measure.add_note(Note(pitch="c", octave=4, duration=Duration(4)))
-    measure.add_note(Note(pitch="e", octave=4, duration=Duration(4)))
+    measure.add_note(_make_note('C', 4, 4))
+    measure.add_note(_make_note('E', 4, 4))
     assert len(measure.notes) == 2
 
 

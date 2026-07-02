@@ -1,3 +1,4 @@
+from .accidental import Accidental, AccidentalType
 from .articulation import Articulation, ArticulationType
 from .base import BrailleSymbol
 from .duration import Duration
@@ -9,6 +10,8 @@ from .score import Score
 from .staff import Staff
 
 __all__ = [
+    "Accidental",
+    "AccidentalType",
     "Articulation",
     "ArticulationType",
     "BrailleSymbol",
