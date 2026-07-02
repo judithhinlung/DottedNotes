@@ -44,6 +44,57 @@ def test_duration_to_lilypond():
     assert Duration(1).to_lilypond() == "1"
 
 
+def test_duration_to_lilypond_all_valid_values():
+    for value in [1, 2, 4, 8, 16, 32, 64]:
+        assert Duration(value).to_lilypond() == str(value)
+
+
+def test_double_dotted_half():
+    assert Duration(value=2, dots=2).to_lilypond() == "2.."
+
+
+def test_invalid_duration_value_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        Duration(value=3)
+
+
+def test_invalid_duration_value_zero_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        Duration(value=0)
+
+
+def test_invalid_dot_count_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        Duration(value=4, dots=3)
+
+
+def test_duration_in_beats_quarter():
+    assert Duration(value=4).duration_in_beats() == 1.0
+
+
+def test_duration_in_beats_dotted_quarter():
+    assert Duration(value=4, dots=1).duration_in_beats() == 1.5
+
+
+def test_duration_in_beats_half():
+    assert Duration(value=2).duration_in_beats() == 2.0
+
+
+def test_duration_in_beats_whole():
+    assert Duration(value=1).duration_in_beats() == 4.0
+
+
+def test_duration_in_beats_eighth():
+    assert Duration(value=8).duration_in_beats() == 0.5
+
+
+def test_duration_in_beats_double_dotted():
+    assert Duration(value=4, dots=2).duration_in_beats() == 1.75
+
+
 def test_note_defaults():
     note = Note(pitch="c", octave=4, duration=Duration(4))
     assert not note.is_rest
