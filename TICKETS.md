@@ -923,7 +923,7 @@ class Dynamic(BrailleSymbol):
 
 ---
 
-### [ ] S1-8: Write Sprint 1 integration test
+### [x] S1-8: Write Sprint 1 integration test
 
 **Why:** Individual unit tests verify each class in isolation.
 An integration test verifies they work correctly together.
@@ -969,10 +969,10 @@ dots=frozenset([1,4]),
 3. Run `pytest tests/ --cov=dottednotes` and verify models/ has >80% coverage
 
 **Definition of Done:**
-- [ ] Integration test passes
-- [ ] All Sprint 1 unit tests pass (no regressions)
-- [ ] `models/` directory has >80% test coverage
-- [ ] `pytest tests/` runs clean with no warnings
+- [x] Integration test passes
+- [x] All Sprint 1 unit tests pass (no regressions)
+- [x] `models/` directory has >80% test coverage
+- [x] `pytest tests/` runs clean with no warnings
 
 ---
 

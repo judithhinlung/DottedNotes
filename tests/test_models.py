@@ -347,3 +347,24 @@ def test_dynamic_decrescendo_start():
 
 def test_dynamic_decrescendo_end():
     assert Dynamic(DynamicLevel.DECRESCENDO_END).to_lilypond() == r'\!'
+
+
+def test_note_with_all_components():
+    """Integration test: note with accidental, duration, and articulation."""
+    note = Note(
+        dots=frozenset([1, 4]),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠉',
+        note_name='B',
+        octave=4,
+        duration=Duration(value=4, dots=1),
+        accidental=Accidental(
+            dots=frozenset(),
+            category=SymbolCategory.ACCIDENTAL,
+            raw_brl='⠀',
+            type=AccidentalType.FLAT,
+        ),
+        articulations=[Articulation(ArticulationType.STACCATO)],
+    )
+    # B-flat, octave 4, dotted quarter, staccato
+    assert note.to_lilypond() == "bes'4.-."
