@@ -758,7 +758,7 @@ def test_dotted_half_rest():
 
 ---
 
-### [ ] S1-5: Implement Accidental class
+### [x] S1-5: Implement Accidental class
 
 **Why:** Accidentals are necessary for correct pitch representation
 in any key other than C major / A minor.
@@ -803,10 +803,10 @@ class Accidental(BrailleSymbol):
 3. Write unit tests for all five accidental types.
 
 **Definition of Done:**
-- [ ] `Accidental` class with `AccidentalType` enum exists
-- [ ] `to_lilypond()` returns correct suffix for all five types
-- [ ] Natural accidental returns empty string (correct LilyPond behavior)
-- [ ] All unit tests pass
+- [x] `Accidental` class with `AccidentalType` enum exists
+- [x] `to_lilypond()` returns correct suffix for all five types
+- [x] Natural accidental returns empty string (correct LilyPond behavior)
+- [x] All unit tests pass
 
 ---
 
@@ -940,7 +940,8 @@ def test_note_with_all_components():
     from dottednotes.bana_symbols import SymbolCategory
 
     note = Note(
-        dots=frozenset([1,4]),
+
+dots=frozenset([1,4]),
         category=SymbolCategory.NOTE,
         raw_brl='\u2809',
         note_name='B',
