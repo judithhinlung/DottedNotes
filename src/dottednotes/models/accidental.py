@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from dottednotes.bana_symbols import SymbolCategory
+from dottednotes.models.base import BrailleSymbol
+
 
 class AccidentalType(Enum):
     SHARP = auto()
@@ -20,7 +23,7 @@ ACCIDENTAL_TO_LILYPOND_SUFFIX = {
 
 
 @dataclass
-class Accidental:
+class Accidental(BrailleSymbol):
     """An accidental (sharp, flat, natural, etc.)"""
     type: AccidentalType
 

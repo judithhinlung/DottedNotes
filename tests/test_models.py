@@ -117,12 +117,12 @@ def test_middle_c_quarter():
 
 
 def test_b_flat_half_note():
-    note = _make_note('B', 4, 2, accidental=Accidental(AccidentalType.FLAT))
+    note = _make_note('B', 4, 2, accidental=Accidental(dots=frozenset(), category=SymbolCategory.ACCIDENTAL, raw_brl='⠣', type=AccidentalType.FLAT))
     assert note.to_lilypond() == "bes'2"
 
 
 def test_f_sharp_eighth():
-    note = _make_note('F', 5, 8, accidental=Accidental(AccidentalType.SHARP))
+    note = _make_note('F', 5, 8, accidental=Accidental(dots=frozenset(), category=SymbolCategory.ACCIDENTAL, raw_brl='⠩', type=AccidentalType.SHARP))
     assert note.to_lilypond() == "fis''8"
 
 
@@ -167,6 +167,35 @@ def test_invalid_octave_raises():
     import pytest
     with pytest.raises(ValueError):
         _make_note('C', 9, 4)
+
+
+def _make_accidental(accidental_type):
+    return Accidental(
+        dots=frozenset(),
+        category=SymbolCategory.ACCIDENTAL,
+        raw_brl='⠀',
+        type=accidental_type,
+    )
+
+
+def test_accidental_sharp():
+    assert _make_accidental(AccidentalType.SHARP).to_lilypond() == 'is'
+
+
+def test_accidental_flat():
+    assert _make_accidental(AccidentalType.FLAT).to_lilypond() == 'es'
+
+
+def test_accidental_natural():
+    assert _make_accidental(AccidentalType.NATURAL).to_lilypond() == ''
+
+
+def test_accidental_double_sharp():
+    assert _make_accidental(AccidentalType.DOUBLE_SHARP).to_lilypond() == 'isis'
+
+
+def test_accidental_double_flat():
+    assert _make_accidental(AccidentalType.DOUBLE_FLAT).to_lilypond() == 'eses'
 
 
 def test_quarter_rest():
