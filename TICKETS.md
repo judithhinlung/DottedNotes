@@ -501,7 +501,7 @@ def test_braille_symbol_requires_to_lilypond():
 - [x] Unit test for NotImplementedError passes
 
 ---
-
+                    
 ### [ ] S1-2: Implement Duration class
 
 **Why:** Duration is the most frequently used supporting class —
