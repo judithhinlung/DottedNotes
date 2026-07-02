@@ -698,10 +698,10 @@ def test_invalid_note_name_raises():
 
 ---
 
-### [ ] S1-4: Implement Rest class
+### [x] S1-4: Implement Rest class
 
 **Why:** Rests are as important as notes.
-A piece with missing rests will have incorrect rhythmic structure.
+A piece withmissing rests will have incorrect rhythmic structure.
 
 **Steps:**
 1. Add `Rest` class to `src/dottednotes/models/note.py`:
@@ -750,11 +750,11 @@ def test_dotted_half_rest():
 ```
 
 **Definition of Done:**
-- [ ] `Rest` class exists with `duration` and `is_full_measure` fields
-- [ ] `to_lilypond()` produces `r` prefix for regular rests
-- [ ] `to_lilypond()` produces `R` prefix for full-measure rests
-- [ ] Dotted rests produce correct output
-- [ ] All unit tests pass
+- [x] `Rest` class exists with `duration` and `is_full_measure` fields
+- [x] `to_lilypond()` produces `r` prefix for regular rests
+- [x] `to_lilypond()` produces `R` prefix for full-measure rests
+- [x] Dotted rests produce correct output
+- [x] All unit tests pass
 
 ---
 
