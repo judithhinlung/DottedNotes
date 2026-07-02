@@ -8,13 +8,46 @@ from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, Br
 
 
 def test_braille_parser_returns_score():
-    score = BrailleParser().parse("")
+    score = BrailleParser(tokens=[]).parse()
     assert isinstance(score, Score)
 
 
 def test_braille_parser_empty_input_empty_score():
-    score = BrailleParser().parse("")
+    score = BrailleParser(tokens=[]).parse()
     assert score.staves == []
+
+
+def test_braille_parser_accepts_token_list():
+    tokens = BrailleTokenizer().tokenize('⠐⠹')
+    parser = BrailleParser(tokens=tokens)
+    result = parser.parse()
+    assert isinstance(result, Score)
+
+
+def test_braille_parser_default_octave():
+    parser = BrailleParser(tokens=[])
+    parser._reset_state()
+    assert parser._current_octave == 4
+
+
+def test_braille_parser_default_key_signature():
+    parser = BrailleParser(tokens=[])
+    parser._reset_state()
+    assert parser._key_signature == 0  # C major
+
+
+def test_braille_parser_default_time_signature():
+    parser = BrailleParser(tokens=[])
+    parser._reset_state()
+    assert parser._time_signature == (4, 4)
+
+
+def test_braille_parser_state_resets_between_parses():
+    parser = BrailleParser(tokens=[])
+    parser.parse()
+    parser._current_octave = 6  # simulate mid-parse mutation
+    parser.parse()
+    assert parser._current_octave == 4  # reset on second parse
 
 
 def test_input_pipeline_read(tmp_path: Path):

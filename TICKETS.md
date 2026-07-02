@@ -1011,7 +1011,7 @@ typed tokens that the parser can reason about.
 
 ---
 
-### [ ] S2-2: Implement BrailleParser skeleton
+### [x] S2-2: Implement BrailleParser skeleton
 
 **Why:** The parser is the core of the project.
 Starting with a skeleton and filling it in incrementally
@@ -1036,10 +1036,10 @@ def test_parser_returns_score():
 ```
 
 **Definition of Done:**
-- [ ] `BrailleParser` class exists and imports without errors
-- [ ] `parse()` method exists and returns a `Score`
-- [ ] Parser state (octave, duration, key, time) is initialized correctly
-- [ ] Unit test passes
+- [x] `BrailleParser` class exists and imports without errors
+- [x] `parse()` method exists and returns a `Score`
+- [x] Parser state (octave, duration, key, time) is initialized correctly
+- [x] Unit test passes
 
 ---
 
