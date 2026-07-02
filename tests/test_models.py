@@ -248,3 +248,42 @@ def test_score_add_staff():
     score.add_staff(Staff(name="left hand"))
     assert len(score.staves) == 2
     assert score.title == "Ode to Joy"
+
+
+def test_articulation_staccato():
+    assert Articulation(ArticulationType.STACCATO).to_lilypond() == '-.'
+
+
+def test_articulation_accent():
+    assert Articulation(ArticulationType.ACCENT).to_lilypond() == '->'
+
+
+def test_articulation_tenuto():
+    assert Articulation(ArticulationType.TENUTO).to_lilypond() == '--'
+
+
+def test_articulation_marcato():
+    assert Articulation(ArticulationType.MARCATO).to_lilypond() == '-^'
+
+
+def test_articulation_portato():
+    assert Articulation(ArticulationType.PORTATO).to_lilypond() == '-_'
+
+
+def test_articulation_staccatissimo():
+    assert Articulation(ArticulationType.STACCATISSIMO).to_lilypond() == '-!'
+
+
+def test_note_with_accent():
+    art = Articulation(ArticulationType.ACCENT)
+    note = _make_note('C', 4, 4, articulations=[art])
+    assert note.to_lilypond() == "c'4->"
+
+
+def test_note_with_multiple_articulations():
+    articulations = [
+        Articulation(ArticulationType.TENUTO),
+        Articulation(ArticulationType.STACCATO),
+    ]
+    note = _make_note('G', 5, 8, articulations=articulations)
+    assert note.to_lilypond() == "g''8---."
