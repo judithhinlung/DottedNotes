@@ -502,7 +502,7 @@ def test_braille_symbol_requires_to_lilypond():
 
 ---
                     
-### [ ] S1-2: Implement Duration class
+### [x] S1-2: Implement Duration class
 
 **Why:** Duration is the most frequently used supporting class —
 every Note and Rest has one. Getting it right early prevents
@@ -573,11 +573,11 @@ def test_duration_in_beats():
 ```
 
 **Definition of Done:**
-- [ ] `Duration` class exists with `value` and `dots` fields
-- [ ] `__post_init__` validates both fields and raises `ValueError` on bad input
-- [ ] `to_lilypond()` produces correct LilyPond strings for all valid durations
-- [ ] `duration_in_beats()` returns correct float values including dotted durations
-- [ ] All unit tests pass
+- [x] `Duration` class exists with `value` and `dots` fields
+- [x] `__post_init__` validates both fields and raises `ValueError` on bad input
+- [x] `to_lilypond()` produces correct LilyPond strings for all valid durations
+- [x] `duration_in_beats()` returns correct float values including dotted durations
+- [x] All unit tests pass
 
 ---
 
