@@ -581,7 +581,7 @@ def test_duration_in_beats():
 
 ---
 
-### [ ] S1-3: Implement Note class
+### [x] S1-3: Implement Note class
 
 **Why:** Note is the central class of the entire project.
 Everything else exists to support Notes.
@@ -688,13 +688,13 @@ def test_invalid_note_name_raises():
 ```
 
 **Definition of Done:**
-- [ ] `Note` class exists and inherits from `BrailleSymbol`
-- [ ] `to_lilypond()` produces correct output for all 7 natural note names
-- [ ] `to_lilypond()` includes octave marks for all octaves 1–7
-- [ ] `to_lilypond()` includes accidental when present
-- [ ] `to_lilypond()` appends articulation strings when present
-- [ ] Invalid note names raise `ValueError`
-- [ ] All unit tests pass
+- [x] `Note` class exists and inherits from `BrailleSymbol`
+- [x] `to_lilypond()` produces correct output for all 7 natural note names
+- [x] `to_lilypond()` includes octave marks for all octaves 1–7
+- [x] `t    o_lilypond()` includes accidental when present
+- [x] `to_lilypond()` appends articulation strings when present
+- [    x] Invalid note names raise `ValueError`
+- [x] All unit tests pass
 
 ---
 
