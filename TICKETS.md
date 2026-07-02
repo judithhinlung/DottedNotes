@@ -810,7 +810,7 @@ class Accidental(BrailleSymbol):
 
 ---
 
-### [ ] S1-6: Implement Articulation class
+### [x] S1-6: Implement Articulation class
 
 **Why:** Staccato, accent, tenuto, and other articulations
 are essential for correct musical expression.
@@ -851,9 +851,9 @@ class Articulation(BrailleSymbol):
 2. Write unit tests for all articulation types.
 
 **Definition of Done:**
-- [ ] `Articulation` class with `ArticulationType` enum exists
-- [ ] `to_lilypond()` returns correct LilyPond string for all types
-- [ ] All unit tests pass
+- [x] `Articulation` class with `ArticulationType` enum exists
+- [x] `to_lilypond()` returns correct LilyPond string for all types
+- [x] All unit tests pass
 
 ---
 
