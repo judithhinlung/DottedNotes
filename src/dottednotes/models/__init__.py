@@ -3,6 +3,7 @@ from .articulation import Articulation, ArticulationType
 from .base import BrailleSymbol
 from .duration import Duration
 from .dynamic import Dynamic, DynamicLevel
+from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
 from .note import Note, Rest
 from .ornament import Ornament, OrnamentType
@@ -18,6 +19,8 @@ __all__ = [
     "Duration",
     "Dynamic",
     "DynamicLevel",
+    "KEY_TO_LILYPOND",
+    "KeySignature",
     "Measure",
     "Note",
     "Rest",

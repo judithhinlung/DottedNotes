@@ -129,6 +129,46 @@ OCTAVE_MARKS: dict[str, int] = {
 }
 
 # ---------------------------------------------------------------------------
+# Key signature cells
+# Maps Unicode braille char → sharps_or_flats count
+# (positive = sharps, negative = flats, 0 not listed — no cell for C major)
+#
+# POPULATE ONLY WITH VERIFIED VALUES from the BANA Braille Music Technical
+# Manual, Chapter 6 (Key Signatures).  Do not guess dot patterns.
+# The developer (a blind composer) should verify each entry against the manual
+# before adding it.
+# ---------------------------------------------------------------------------
+
+KEY_SIGNATURE_CELLS: dict[str, int] = {
+    # --- Sharps ---
+    # 1–3 sharps: repeated sharp-sign cells (⠩ = dots 1,4,6 = U+2829).
+    # Same cell as the accidental sharp; parser uses positional context to
+    # distinguish key-signature use from mid-note accidental use (S3-4).
+    '⠩': 1,                    # ⠩       G major / E minor   (1 sharp)
+    '⠩⠩': 2,              # ⠩⠩     D major / B minor   (2 sharps)
+    '⠩⠩⠩': 3,        # ⠩⠩⠩   A major / F♯ minor  (3 sharps)
+    # 4–7 sharps: number sign (⠼ dots 3,4,5,6) + braille digit + sharp sign (⠩)
+    # Braille digits: 4=⠙(1,4,5) 5=⠑(1,5) 6=⠋(1,2,4) 7=⠛(1,2,4,5)
+    '⠼⠙⠩': 4,        # ⠼⠙⠩   E major  / C♯ minor (4 sharps)
+    '⠼⠑⠩': 5,        # ⠼⠑⠩   B major  / G♯ minor (5 sharps)
+    '⠼⠋⠩': 6,        # ⠼⠋⠩   F♯ major / D♯ minor (6 sharps)
+    '⠼⠛⠩': 7,        # ⠼⠛⠩   C♯ major / A♯ minor (7 sharps)
+
+    # --- Flats ---
+    # 1–3 flats: repeated flat-sign cells (⠣ = dots 1,2,6 = U+2823).
+    # ⠣ also starts multi-cell bar-line sequences; tokenizer uses longest-match
+    # lookahead (⠣⠅, ⠣⠅⠄, ⠣⠶, ⠣⠆) before treating ⠣ as key/accidental.
+    '⠣': -1,                   # ⠣       F major / D minor   (1 flat)
+    '⠣⠣': -2,             # ⠣⠣     B♭ major / G minor  (2 flats)
+    '⠣⠣⠣': -3,       # ⠣⠣⠣   E♭ major / C minor  (3 flats)
+    # 4–7 flats: number sign (⠼) + braille digit + flat sign (⠣)
+    '⠼⠙⠣': -4,       # ⠼⠙⠣   A♭ major / F minor  (4 flats)
+    '⠼⠑⠣': -5,       # ⠼⠑⠣   D♭ major / B♭ minor (5 flats)
+    '⠼⠋⠣': -6,       # ⠼⠋⠣   G♭ major / E♭ minor (6 flats)
+    '⠼⠛⠣': -7,       # ⠼⠛⠣   C♭ major / A♭ minor (7 flats)
+}
+
+# ---------------------------------------------------------------------------
 # Accidental cells
 # Maps Unicode braille char → accidental type string
 # ---------------------------------------------------------------------------

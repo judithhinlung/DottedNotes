@@ -1,3 +1,5 @@
+import pytest
+
 from dottednotes.bana_symbols import SymbolCategory
 from dottednotes.models import (
     Accidental,
@@ -8,6 +10,8 @@ from dottednotes.models import (
     Duration,
     Dynamic,
     DynamicLevel,
+    KEY_TO_LILYPOND,
+    KeySignature,
     Measure,
     Note,
     Ornament,
@@ -368,3 +372,97 @@ def test_note_with_all_components():
     )
     # B-flat, octave 4, dotted quarter, staccato
     assert note.to_lilypond() == "bes'4.-."
+
+
+# ---------------------------------------------------------------------------
+# S3-1: KeySignature class
+# ---------------------------------------------------------------------------
+
+def _make_ks(sharps_or_flats: int) -> KeySignature:
+    """Helper: build a KeySignature with dummy BrailleSymbol fields."""
+    return KeySignature(
+        dots=frozenset(),
+        category=SymbolCategory.KEY_SIGNATURE,
+        raw_brl='',
+        sharps_or_flats=sharps_or_flats,
+    )
+
+
+# --- to_lilypond() for all 15 standard keys ---
+
+def test_key_c_major():
+    assert _make_ks(0).to_lilypond() == r'\key c \major'
+
+def test_key_g_major():
+    assert _make_ks(1).to_lilypond() == r'\key g \major'
+
+def test_key_d_major():
+    assert _make_ks(2).to_lilypond() == r'\key d \major'
+
+def test_key_a_major():
+    assert _make_ks(3).to_lilypond() == r'\key a \major'
+
+def test_key_e_major():
+    assert _make_ks(4).to_lilypond() == r'\key e \major'
+
+def test_key_b_major():
+    assert _make_ks(5).to_lilypond() == r'\key b \major'
+
+def test_key_fis_major():
+    assert _make_ks(6).to_lilypond() == r'\key fis \major'
+
+def test_key_cis_major():
+    assert _make_ks(7).to_lilypond() == r'\key cis \major'
+
+def test_key_f_major():
+    assert _make_ks(-1).to_lilypond() == r'\key f \major'
+
+def test_key_bes_major():
+    assert _make_ks(-2).to_lilypond() == r'\key bes \major'
+
+def test_key_ees_major():
+    assert _make_ks(-3).to_lilypond() == r'\key ees \major'
+
+def test_key_aes_major():
+    assert _make_ks(-4).to_lilypond() == r'\key aes \major'
+
+def test_key_des_major():
+    assert _make_ks(-5).to_lilypond() == r'\key des \major'
+
+def test_key_ges_major():
+    assert _make_ks(-6).to_lilypond() == r'\key ges \major'
+
+def test_key_ces_major():
+    assert _make_ks(-7).to_lilypond() == r'\key ces \major'
+
+
+# --- KEY_TO_LILYPOND table completeness ---
+
+def test_key_to_lilypond_covers_all_standard_keys():
+    assert set(KEY_TO_LILYPOND.keys()) == set(range(-7, 8))
+
+
+# --- Validation ---
+
+def test_key_signature_sharps_out_of_range_raises():
+    with pytest.raises(ValueError):
+        _make_ks(8)
+
+def test_key_signature_flats_out_of_range_raises():
+    with pytest.raises(ValueError):
+        _make_ks(-8)
+
+def test_key_signature_boundary_values_are_valid():
+    _make_ks(7)   # C# major — must not raise
+    _make_ks(-7)  # Cb major — must not raise
+
+
+# --- BrailleSymbol contract ---
+
+def test_key_signature_has_raw_brl_field():
+    ks = _make_ks(1)
+    assert hasattr(ks, 'raw_brl')
+
+def test_key_signature_category_is_key_signature():
+    ks = _make_ks(0)
+    assert ks.category == SymbolCategory.KEY_SIGNATURE

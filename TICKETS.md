@@ -1311,7 +1311,7 @@ Estimated time: 3–4 days.
 
 ---
 
-### [ ] S3-1: Implement KeySignature class
+### [x] S3-1: Implement KeySignature class
 
 **Why:** Without a key signature class, the renderer cannot emit `\key` directives
 and every note with an accidental has to carry its own `\accidental` mark in the
@@ -1390,13 +1390,13 @@ def test_key_signature_out_of_range_raises():
    Test every key in KEY_TO_LILYPOND.
 
 **Definition of Done:**
-- [ ] `KeySignature` class exists in `models/key_signature.py`
-- [ ] `sharps_or_flats` field validated to –7 … +7
-- [ ] `to_lilypond()` returns correct `\key <note> \major` for all 15 standard keys
-- [ ] `KEY_SIGNATURE_CELLS` in `bana_symbols.py` is populated and verified against
+- [x] `KeySignature` class exists in `models/key_signature.py`
+- [x] `sharps_or_flats` field validated to –7 … +7
+- [x] `to_lilypond()` returns correct `\key <note> \major` for all 15 standard keys
+- [x] `KEY_SIGNATURE_CELLS` in `bana_symbols.py` is populated and verified against
       the BANA manual (not guessed)
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** Only implement major keys now — the same key signature cell covers
 both a major key and its relative minor.  Adding a `mode` field (MAJOR/MINOR) is
