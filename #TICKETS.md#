@@ -1081,106 +1081,51 @@ def test_octave_persists_without_mark():
 
 ---
 
-### [x] S2-4: Implement note value ambiguity resolution
+### [ ] S2-4: Implement note value ambiguity resolution
 
 **Why:** This is the hardest problem in the entire project.
 In braille music, the dot pattern for a whole note is identical to
 a 16th note, and a half note is identical to an 8th note.
 The parser must determine the intended duration from rhythmic context.
 
-**Approach implemented:** measure-level buffering with a three-state
-sequential machine.  All notes in a measure are collected as
-`_PendingNote` objects (with `base_duration` from the symbol table),
-then `_resolve_measure_durations()` resolves every note at once at the
-bar line.  No value indicator is used (see `VALUE_INDICATOR_CELL` in
-`bana_symbols.py` — left as `None`, never found in real music).
-
-**Three-state machine — NORMAL / RUN / INDIVIDUAL**
-
-Initial state: NORMAL.
-
-**NORMAL:**
-- `base_1`, next cell is `base_8`   → resolve as 16th, enter RUN
-- `base_1`, next cell is `base_1`   → resolve as 16th, enter INDIVIDUAL
-- `base_1`, any other next (or end) → resolve as whole note, stay NORMAL
-- `base_8`                          → genuine 8th note, stay NORMAL
-- `base_2`                          → half or 32nd (count-based, see below), stay NORMAL
-- `base_4`                          → quarter note, stay NORMAL
-
-**RUN** (a single `base_1` cell started a 16th-note run):
-- `base_8`                          → 16th note (run continuation), stay RUN
-- `base_1`, next cell is `base_8`   → 16th note (new run leader), stay RUN
-- `base_1`, next cell is `base_1`   → 16th note, enter INDIVIDUAL
-- `base_1`, any other next (or end) → whole note, enter NORMAL
-- `base_2` / `base_4`               → half/32nd or quarter, enter NORMAL
-
-**INDIVIDUAL** (two or more consecutive `base_1` cells):
-- `base_1`                          → 16th note, stay INDIVIDUAL
-- `base_8`                          → genuine 8th note (NOT a run continuation), enter NORMAL
-- `base_2` / `base_4`               → half/32nd or quarter, enter NORMAL
-
-**Key rule:** only a *single* `base_1` cell can start a run.  Two or
-more consecutive `base_1` cells enter INDIVIDUAL state; any `base_8`
-cell that follows them is a genuine 8th note, never a run continuation.
-
-**Half/32nd resolution (count-based):**
-Count all `base_2` cells in the measure.  If `count_2 × 2 > beats`
-(they would overflow the measure as half notes), resolve all `base_2`
-cells as 32nd notes; otherwise resolve all as half notes.
-
-**Quarter resolution:** `base_4` cells are always quarter notes.
-
-**16th-note runs — BANA rule (BANA Chapter 15):**
-The first note of a run uses a whole/16th-class cell; subsequent notes
-use 8th-class cells.  When 16th notes are immediately followed by a
-genuine 8th note, the transcriber CANNOT use a run — individual
-16th-note cells must be written instead.  This makes the notation
-self-delimiting: in valid BANA braille, a `base_8` cell after a single
-`base_1` run leader is always a run continuation, never a genuine 8th.
-
-**Triplet exception (not yet implemented):**
-A triplet run of six 16th notes may be written as one `base_1` cell
-followed by five `base_8` cells.  Verify against BANA manual before
-implementing; the current machine would misread this as one 16th note
-followed by five genuine 8th notes.
-
 **Steps:**
-1. In `BrailleParser`, add `_PendingNote` dataclass:
+1. Research the BANA rules for note value disambiguation:
+   - In 4/4 time, if you have seen only quarter-note-equivalent values
+     so far in the measure, a new ambiguous cell is more likely the
+     longer value
+   - The "value indicator" sign in BANA explicitly marks when the
+     short (16th/8th) interpretation is intended
+2. Implement `_resolve_note_value(ambiguous_value, context)` method:
 ```python
-@dataclass
-class _PendingNote:
-    note_name: str
-    octave: int
-    base_duration: int   # 1, 2, 4, or 8 from NOTE_CELLS
-    raw_brl: str
+def _resolve_note_value(self, ambiguous_value: int) -> int:
+    """
+    Resolve ambiguous braille note value to actual duration.
+    ambiguous_value is either 1 (whole/16th) or 2 (half/8th).
+    Returns the resolved duration value (1, 2, 8, or 16).
+    """
+    # Check if a value indicator was seen before this note
+    if self._short_value_indicator_active:
+        self._short_value_indicator_active = False
+        return ambiguous_value * 8  # 1→8 (eighth) or 2→16 (16th)
+    # Default: use the long value interpretation
+    return ambiguous_value  # 1→1 (whole) or 2→2 (half)
 ```
-2. In `parse()`, buffer notes into a `pending` list and call
-   `_finalize_measure(pending, measure_number)` at each BAR_LINE token
-   and at end of input.
-3. Implement `_resolve_measure_durations(pending)` using the three-state
-   machine described above.
-4. Implement `_validate_measure_beat_count(measure)` — warn (plain text)
-   if resolved beat total does not match the time signature; do not raise.
-5. Write unit tests:
-   - Single `base_1` cell alone → whole note
-   - Two consecutive `base_1` cells → both 16th notes
-   - Single `base_1` + three `base_8` cells → four 16th notes (run)
-   - Two `base_1` cells + two `base_8` cells → two 16th notes + two genuine 8th notes
-   - Run interrupted by a quarter cell: `base_1`, `base_8`, `base_4`, `base_8` → 16th, 16th, quarter, genuine 8th
-   - Single `base_1` cell followed by a quarter cell → whole note, quarter
+3. Track `_short_value_indicator_active` state in the parser
+4. Track `_beats_used_in_measure` to validate against time signature
+5. Write tests with known BRF input and expected duration output
 
 **Definition of Done:**
-- [x] `_resolve_measure_durations()` exists and implements the three-state machine
-- [x] `_validate_measure_beat_count()` warns on beat-count mismatch (plain text)
-- [x] No value indicator logic needed — `VALUE_INDICATOR_CELL` stays `None`
-- [x] All unit tests listed in Steps pass
-- [x] `pytest tests/` passes with no regressions
+- [ 	     ] `_resolve_note_value()` exists and handles both ambiguous values
+- [ ] Short value indicator is recognized and consumed
+- [ ] Default resolution (long value) is used when no indicator present
+- [ ] Beat-counting validation catches rhythmically incorrect measures
+- [ ] Unit tests cover: whole note, 16th note (with indicator),
+      half note, 8th note (with indicator)
 
-**Senior note:** The value indicator cited in older BANA literature has
-never been observed in real music (confirmed by the developer).  Do not
-implement it speculatively.  The three-state machine handles all known
-real-world cases.  If you encounter a `.brf` file that the machine
-misparsed, add a failing test first, then extend the machine.
+**Senior note:** If you are unsure about a specific BANA rule for
+disambiguation, do not guess — write a test that documents your
+uncertainty with a comment, and move on. It is better to have an
+honest TODO than a silent wrong answer.
 
 ---
 

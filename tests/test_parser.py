@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import pytest
@@ -113,6 +114,196 @@ def test_note_name_from_note_cell():
     text = '⠐⠹⠱⠫⠻⠳⠪⠺'
     notes = _parse(text)
     assert [n.note_name for n in notes] == ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+
+
+# --- S2-4: note value ambiguity resolution (measure-level) ---
+#
+# The parser buffers all notes in a measure, then resolves each ambiguous
+# group at the measure boundary:
+#   base_duration 1 (whole/16th): if count * 4 beats > measure beats → 16th
+#   base_duration 2 (half/32nd):  if count * 2 beats > measure beats → 32nd
+#   base_duration 4:              always quarter
+#
+# Tests use ⠽=C whole/16th, ⠝=C half/32nd, ⠹=C quarter.
+
+
+def test_single_whole_cell_resolves_as_whole():
+    # 1 whole-class note in 4/4: 1 * 4 = 4 == 4 beats → whole (1)
+    notes = _parse('⠐⠽')
+    assert notes[0].duration.value == 1
+
+
+def test_two_whole_cells_resolve_as_16th():
+    # 2 whole-class notes in 4/4: 2 * 4 = 8 > 4 beats → 16th (16)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠽')
+    assert notes[0].duration.value == 16
+    assert notes[1].duration.value == 16
+
+
+def test_two_half_cells_resolve_as_half():
+    # 2 half-class notes in 4/4: 2 * 2 = 4 == 4 beats → half (2)
+    notes = _parse('⠐⠝⠝')
+    assert notes[0].duration.value == 2
+    assert notes[1].duration.value == 2
+
+
+def test_three_half_cells_resolve_as_32nd():
+    # 3 half-class notes in 4/4: 3 * 2 = 6 > 4 beats → 32nd (32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠝⠝⠝')
+    assert all(n.duration.value == 32 for n in notes)
+
+
+def test_four_quarter_cells_resolve_as_quarter():
+    # quarter-class notes (base_duration 4) always resolve to 4
+    notes = _parse('⠐⠹⠹⠹⠹')
+    assert all(n.duration.value == 4 for n in notes)
+
+
+def test_quarter_note_duration_in_parsed_output():
+    # ⠐=oct4, ⠹=C quarter — base_duration 4 → always 4
+    notes = _parse('⠐⠹')
+    assert notes[0].duration.value == 4
+
+
+def test_whole_note_duration_in_parsed_output():
+    # ⠐=oct4, ⠽=C whole — single note fills 4/4 exactly → whole (1)
+    notes = _parse('⠐⠽')
+    assert notes[0].duration.value == 1
+
+
+def test_half_note_duration_in_parsed_output():
+    # ⠐=oct4, ⠝=C half — single half note in 4/4 → half (2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠝')
+    assert notes[0].duration.value == 2
+
+
+def test_validate_measure_no_warning_when_correct():
+    # 4 quarter notes fills 4/4 exactly — no warning expected
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠹⠹⠹')
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_validate_measure_warns_on_mismatch():
+    # 3 quarter notes in 4/4 = 3 beats, expected 4 → UserWarning
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠹⠹')
+    with pytest.warns(UserWarning, match="Measure 1"):
+        BrailleParser(tokens=tokens).parse()
+
+
+# --- 8th note cells and 16th-note run detection ---
+#
+# 8th note cells use the bare pitch base (no dots 3 or 6).
+# They default to genuine 8th notes but become 16th-note run continuations
+# when they directly follow a whole/16th cell that resolved to a 16th note.
+# Cells: ⠙=C ⠑=D ⠋=E ⠛=F ⠓=G ⠊=A ⠚=B (all 8th-note class, base_duration=8)
+
+
+def test_eighth_note_cell_c_tokenized_as_note():
+    # ⠙ = C 8th-note cell (dots 1,4,5)
+    tokens = BrailleTokenizer().tokenize('⠙')
+    assert tokens[0].category == SymbolCategory.NOTE
+
+
+def test_all_eighth_note_cells_tokenized_as_note():
+    # All 7 8th-note cells should classify as NOTE, not UNKNOWN
+    tokens = BrailleTokenizer().tokenize('⠙⠑⠋⠛⠓⠊⠚')
+    assert all(t.category == SymbolCategory.NOTE for t in tokens)
+
+
+def test_eight_eighth_notes_resolve_to_eighth():
+    # 8 × 8th note = 4 beats in 4/4 → fills measure, no ambiguity
+    notes = _parse('⠐⠙⠙⠙⠙⠙⠙⠙⠙')
+    assert all(n.duration.value == 8 for n in notes)
+
+
+def test_eighth_note_names_all_pitch_cells():
+    # Verify each 8th-note cell maps to the correct note name
+    # 7 notes × 0.5 beats = 3.5 ≠ 4/4 → suppress beat-count warning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠙⠑⠋⠛⠓⠊⠚')
+    assert [n.note_name for n in notes] == ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+
+
+def test_eighth_before_16th_group_stays_eighth():
+    # 2 whole/16th cells → count_1=2, 2*4=8>4 → resolve_1=16.
+    # The 8th cell precedes both 16th cells, so it is a genuine 8th note.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠙⠽⠽')  # 8th, 16th, 16th
+    assert notes[0].duration.value == 8   # genuine 8th (no preceding 16th)
+    assert notes[1].duration.value == 16  # first 16th-note cell
+
+
+def test_eighth_after_single_16th_cell_is_run_continuation():
+    # A single base_1 cell followed by base_8 cells is a 16th-note run.
+    # All four notes here are 16th notes.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠙⠙⠙')  # 16th (run leader), run-16th × 3
+    assert all(n.duration.value == 16 for n in notes)
+
+
+def test_eighth_after_two_consecutive_16th_cells_is_genuine():
+    # Two consecutive base_1 cells are individual 16th notes (INDIVIDUAL state).
+    # A base_8 cell that follows is a genuine 8th note, not a run continuation.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠽⠙⠙')  # 16th, 16th (individual), 8th, 8th
+    assert notes[0].duration.value == 16
+    assert notes[1].duration.value == 16
+    assert notes[2].duration.value == 8   # genuine 8th
+    assert notes[3].duration.value == 8   # genuine 8th
+
+
+def test_run_ends_at_quarter_cell():
+    # A single base_1 starts a run; the following base_8 is a continuation.
+    # A quarter note (base_4) ends the run; the next base_8 is a genuine 8th.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠙⠹⠙')  # 16th (run leader), run-16th, quarter, 8th
+    assert notes[0].duration.value == 16  # run leader
+    assert notes[1].duration.value == 16  # run continuation
+    assert notes[2].duration.value == 4   # quarter ends the run
+    assert notes[3].duration.value == 8   # genuine 8th after run ends
+
+
+def test_single_16th_cell_starts_run_with_eighth_cells():
+    # A single base_1 cell followed by base_8 cells is a 16th-note run.
+    # The old count-based check (1 * 4 == 4, not > 4) would have wrongly
+    # resolved the base_1 as a whole note.  The sequential rule is correct.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠙⠙⠙')  # 16th + 3 run continuations
+    assert all(n.duration.value == 16 for n in notes)
+
+
+def test_consecutive_16th_cells_without_eighth_cells():
+    # Three consecutive base_1 cells → all 16th notes (no base_8 needed).
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠽⠽')
+    assert all(n.duration.value == 16 for n in notes)
+
+
+def test_16th_context_does_not_bleed_past_quarter():
+    # A quarter (base_4) ends the 16th context; a base_1 cell after it
+    # with no qualifying successor is a whole note.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠙⠹⠽')  # 16th, run-16th, quarter, whole
+    assert notes[0].duration.value == 16
+    assert notes[1].duration.value == 16
+    assert notes[2].duration.value == 4
+    assert notes[3].duration.value == 1   # whole, not 16th
 
 
 def test_input_pipeline_read(tmp_path: Path):

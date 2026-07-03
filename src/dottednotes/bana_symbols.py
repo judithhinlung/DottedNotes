@@ -70,6 +70,17 @@ class SymbolCategory(Enum):
 NOTE_CELLS: dict[str, tuple[str, int] | None] = {
     '⠀': None,  # blank cell — measure separator (no dots); classified as BAR_LINE, not NOTE
 
+    # --- Eighth / 128th notes (pitch base only — no duration modifier dots) ---
+    # In a 16th-note run, these cells represent run continuations (16th notes);
+    # see BrailleParser._resolve_measure_durations() for run detection.
+    '⠙': ('C', 8),  # dots 1,4,5
+    '⠑': ('D', 8),  # dots 1,5
+    '⠋': ('E', 8),  # dots 1,2,4
+    '⠛': ('F', 8),  # dots 1,2,4,5
+    '⠓': ('G', 8),  # dots 1,2,5
+    '⠊': ('A', 8),  # dots 2,4
+    '⠚': ('B', 8),  # dots 2,4,5
+
     # --- Quarter / 64th notes (dot 6 added to pitch base) ---
     '⠹': ('C', 4),  # dots 1,4,5,6
     '⠱': ('D', 4),  # dots 1,5,6
@@ -143,6 +154,20 @@ REST_CELLS: dict[str, int] = {
     '⠥': 2,  # dots 1,3,6    — half rest  (or 32nd rest)
     '⠧': 4,  # dots 1,2,3,6  — quarter rest (or 64th rest)
 }
+
+# ---------------------------------------------------------------------------
+# Value indicator
+# The BANA value indicator is a prefix cell that explicitly marks whether a
+# note should be read as its long or short duration value.  In practice it
+# appears to be extremely rare: the developer (a blind composer) has never
+# encountered it in real music, and secondary BANA sources do not define its
+# dot pattern.  Duration disambiguation is handled instead by the sequential
+# context rules in BrailleParser._resolve_measure_durations().
+#
+# Leave as None until a verified cell is identified in an actual .brf file.
+# ---------------------------------------------------------------------------
+
+VALUE_INDICATOR_CELL: str | None = None
 
 # ---------------------------------------------------------------------------
 # Bar line / measure separator

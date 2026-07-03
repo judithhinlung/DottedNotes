@@ -28,19 +28,50 @@ Each note cell encodes both pitch and duration in a single 6-dot braille cell.
 
 **Duration class** is added to the pitch base using dots 3 and 6:
 
-| Duration group      | Modifier        | base_duration |
-|---------------------|-----------------|---------------|
-| Whole / 16th note   | add dots 3, 6   | 1             |
-| Half / 32nd note    | add dot 3 only  | 2             |
+| Duration group       | Modifier        | base_duration |
+|----------------------|-----------------|---------------|
+| Eighth / 128th note  | no modifier     | 8             |
 | Quarter / 64th note  | add dot 6 only  | 4             |
+| Half / 32nd note     | add dot 3 only  | 2             |
+| Whole / 16th note    | add dots 3, 6   | 1             |
 
 ### Duration ambiguity
 
-Each note cell is ambiguous between two durations (e.g., the cell for
-C quarter is identical to the cell for C 64th). The parser resolves this
-using rhythmic context and the BANA value indicator sign (Sprint 2).
+Each note cell is ambiguous between two durations spaced a factor of 16
+apart (e.g., whole and 16th notes share the same cell pattern).
+The parser resolves this using sequential context rules (see
+BrailleParser._resolve_measure_durations).  A formal "value indicator"
+cell is mentioned in some BANA literature but does not appear in
+real-world music; its dot pattern has not been verified and it is not
+currently implemented.
+
+### 16th-note runs
+
+Three or more 16th notes in a group are notated as a run:
+the **first** note uses the standard whole/16th-class cell (dots 3+6 added),
+while each **subsequent** note in the group uses an 8th-note-class cell
+(bare pitch base, no dots 3 or 6).  The parser detects this by:
+
+1. Resolving the whole/16th group first (if count × 4 beats overflows the
+   measure → they are 16th notes).
+2. Any 8th-note-class cell that directly follows a 16th-note cell is a
+   run continuation and is also resolved to a 16th note.
+3. A cell from any other duration class ends the run; 8th-class cells
+   after that point are genuine 8th notes.
 
 ---
+
+## Note Cells — Eighth / 128th (no duration modifier)
+
+| Symbol | Unicode  | Dots      | Note |
+|--------|----------|-----------|------|
+| ⠙      | U+2819   | 1, 4, 5   | C    |
+| ⠑      | U+2811   | 1, 5      | D    |
+| ⠋      | U+280B   | 1, 2, 4   | E    |
+| ⠛      | U+281B   | 1, 2, 4, 5| F    |
+| ⠓      | U+2813   | 1, 2, 5   | G    |
+| ⠊      | U+280A   | 2, 4      | A    |
+| ⠚      | U+281A   | 2, 4, 5   | B    |
 
 ## Note Cells — Quarter / 64th (dot 6 added)
 
