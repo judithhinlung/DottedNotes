@@ -1304,19 +1304,471 @@ def test_simple_melody_renders_to_lilypond():
 
 # Sprint 3: Key Signatures, Time Signatures, Clefs
 
-
+Goal: Parse key signatures, time signatures, and clef signs from a .brf file
+and produce correct LilyPond output. After this sprint, the parser handles
+any standard key and time signature, not just C major 4/4.
 Estimated time: 3–4 days.
 
-### [ ] S3-1: Implement KeySignature class
-### [ ] S3-2: Implement TimeSignature class
-### [ ] S3-3: Implement Clef class
-### [ ] S3-4: Add key and time signature parsing to BrailleParser
-### [ ] S3-5: Integration test with non-C-major key
+---
 
-*Detailed steps to be written when Sprint 2 is complete.*
-*Senior note: Write the detailed tickets for the next sprint
-at the end of the current sprint, when you have learned
-what the actual complexity looks like.*
+### [ ] S3-1: Implement KeySignature class
+
+**Why:** Without a key signature class, the renderer cannot emit `\key` directives
+and every note with an accidental has to carry its own `\accidental` mark in the
+LilyPond output — which is wrong. The key signature is also needed by the parser
+to track which accidentals are "in force" for the current measure.
+
+**Steps:**
+1. Create `src/dottednotes/models/key_signature.py`:
+```python
+from dataclasses import dataclass
+from dottednotes.models.base import BrailleSymbol
+from dottednotes.bana_symbols import SymbolCategory
+
+# Maps sharps_or_flats count → (lilypond_note, mode_string)
+# Positive = sharps, negative = flats, 0 = C major
+KEY_TO_LILYPOND: dict[int, tuple[str, str]] = {
+     7: ('cis', 'major'),
+     6: ('fis', 'major'),
+     5: ('b',   'major'),
+     4: ('e',   'major'),
+     3: ('a',   'major'),
+     2: ('d',   'major'),
+     1: ('g',   'major'),
+     0: ('c',   'major'),
+    -1: ('f',   'major'),
+    -2: ('bes', 'major'),
+    -3: ('ees', 'major'),
+    -4: ('aes', 'major'),
+    -5: ('des', 'major'),
+    -6: ('ges', 'major'),
+    -7: ('ces', 'major'),
+}
+
+@dataclass
+class KeySignature(BrailleSymbol):
+    """A key signature.  sharps_or_flats > 0 = sharps, < 0 = flats, 0 = C major."""
+    sharps_or_flats: int    # range –7 … +7
+
+    def __post_init__(self):
+        if not -7 <= self.sharps_or_flats <= 7:
+            raise ValueError(
+                f"sharps_or_flats must be –7 … +7, got {self.sharps_or_flats}"
+            )
+
+    def to_lilypond(self) -> str:
+        note, mode = KEY_TO_LILYPOND[self.sharps_or_flats]
+        return f'\\key {note} \\{mode}'
+```
+2. Populate `KEY_SIGNATURE_CELLS` in `bana_symbols.py` — map each Unicode braille
+   character to its `sharps_or_flats` value.
+   Verify every cell against BANA Braille Music Technical Manual, Chapter 6
+   (Key Signatures) before entering it.  Do not guess.
+   The table should cover at minimum 0 through ±4 sharps/flats; add ±5–7 if
+   they appear in the manual.
+3. Add `KEY_SIGNATURE_CELLS: dict[str, int]` to the `bana_symbols.py` exports.
+4. Update `SymbolCategory.KEY_SIGNATURE` — it is already defined; no change needed.
+5. Write unit tests in `tests/test_models.py`:
+```python
+def test_key_c_major():
+    ks = KeySignature(..., sharps_or_flats=0)
+    assert ks.to_lilypond() == r'\key c \major'
+
+def test_key_g_major():
+    ks = KeySignature(..., sharps_or_flats=1)
+    assert ks.to_lilypond() == r'\key g \major'
+
+def test_key_f_major():
+    ks = KeySignature(..., sharps_or_flats=-1)
+    assert ks.to_lilypond() == r'\key f \major'
+
+def test_key_signature_out_of_range_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        KeySignature(..., sharps_or_flats=8)
+```
+   Test every key in KEY_TO_LILYPOND.
+
+**Definition of Done:**
+- [ ] `KeySignature` class exists in `models/key_signature.py`
+- [ ] `sharps_or_flats` field validated to –7 … +7
+- [ ] `to_lilypond()` returns correct `\key <note> \major` for all 15 standard keys
+- [ ] `KEY_SIGNATURE_CELLS` in `bana_symbols.py` is populated and verified against
+      the BANA manual (not guessed)
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** Only implement major keys now — the same key signature cell covers
+both a major key and its relative minor.  Adding a `mode` field (MAJOR/MINOR) is
+Sprint 4 or later work.  Do not add it speculatively.
+The LilyPond note name for keys with accidentals uses `is` (sharp) and `es` (flat)
+suffixes (e.g. `fis`, `bes`), which matches the note name convention already used
+by the `Note` class.
+
+---
+
+### [ ] S3-2: Implement TimeSignature class
+
+**Why:** The parser already hard-codes `(4, 4)` for the time signature.
+A real `TimeSignature` class lets the parser read the actual time signature from
+the file and pass it through to the LilyPond output and the beat-count validator.
+
+**Steps:**
+1. Create `src/dottednotes/models/time_signature.py`:
+```python
+from dataclasses import dataclass
+from dottednotes.models.base import BrailleSymbol
+from dottednotes.bana_symbols import SymbolCategory
+
+VALID_DENOMINATORS = {1, 2, 4, 8, 16, 32}
+
+@dataclass
+class TimeSignature(BrailleSymbol):
+    """A time (meter) signature."""
+    numerator: int      # beats per measure (top number)
+    denominator: int    # beat unit — must be a power of 2 (bottom number)
+
+    def __post_init__(self):
+        if self.numerator < 1:
+            raise ValueError(f"numerator must be >= 1, got {self.numerator}")
+        if self.denominator not in VALID_DENOMINATORS:
+            raise ValueError(
+                f"denominator must be a power of 2, got {self.denominator}"
+            )
+
+    def beats_per_measure(self) -> float:
+        """Total duration of one measure expressed as quarter-note beats."""
+        return self.numerator * (4 / self.denominator)
+
+    def to_lilypond(self) -> str:
+        return f'\\time {self.numerator}/{self.denominator}'
+
+    def as_tuple(self) -> tuple[int, int]:
+        """Return (numerator, denominator) for compatibility with legacy code."""
+        return (self.numerator, self.denominator)
+```
+2. Populate `TIME_SIGNATURE_CELLS` in `bana_symbols.py`.
+   In BANA braille music, time signatures are written with a number indicator
+   (⠼, dots 3,4,5,6) followed by digit cells.
+   After the number indicator, digit cells use the same dot patterns as
+   literary braille letters a–j, mapping to digits 1–9 and 0 respectively.
+   The separator between the top and bottom numbers is a specific cell —
+   verify its dot pattern from the BANA manual before entering it.
+   Also verify whether common time (C, equivalent to 4/4) and cut time
+   (alla breve, equivalent to 2/2) have dedicated single-cell symbols.
+3. Add `NUMBER_SIGN: str` and `TIME_SIGNATURE_SEPARATOR: str` constants to
+   `bana_symbols.py` so the tokenizer and parser can look them up by name
+   rather than hardcoding dot patterns.
+4. Write unit tests:
+```python
+def test_time_4_4():
+    ts = TimeSignature(..., numerator=4, denominator=4)
+    assert ts.to_lilypond() == r'\time 4/4'
+    assert ts.beats_per_measure() == 4.0
+
+def test_time_3_4():
+    ts = TimeSignature(..., numerator=3, denominator=4)
+    assert ts.to_lilypond() == r'\time 3/4'
+    assert ts.beats_per_measure() == 3.0
+
+def test_time_6_8():
+    ts = TimeSignature(..., numerator=6, denominator=8)
+    assert ts.to_lilypond() == r'\time 6/8'
+    assert ts.beats_per_measure() == 3.0  # 6 * (4/8) = 3.0
+
+def test_time_invalid_denominator_raises():
+    import pytest
+    with pytest.raises(ValueError):
+        TimeSignature(..., numerator=4, denominator=3)
+```
+
+**Definition of Done:**
+- [ ] `TimeSignature` class exists in `models/time_signature.py`
+- [ ] `beats_per_measure()` returns the correct float for all tested meters
+- [ ] `to_lilypond()` returns the correct `\time n/d` string
+- [ ] `NUMBER_SIGN` and `TIME_SIGNATURE_SEPARATOR` constants are in `bana_symbols.py`
+      and verified against the BANA manual
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** `beats_per_measure()` replaces the `self._time_signature[0]` raw
+number currently used in `BrailleParser._resolve_measure_durations()`.
+When you wire the parser in S3-4, update that call to use `TimeSignature.beats_per_measure()`.
+For 6/8 time the beat unit is the dotted quarter (= 3 eighth notes), but
+`_resolve_measure_durations()` reasons in terms of quarter-note beats — so
+`beats_per_measure()` must return 3.0 for 6/8, not 6.
+
+---
+
+### [ ] S3-3: Implement Clef class
+
+**Why:** The LilyPond renderer needs to emit `\clef treble` or `\clef bass` at the
+start of each staff.  Treble is the implicit default in LilyPond, so without a
+clef directive the output is technically correct for treble-only scores — but
+rendering a bass-clef passage without `\clef bass` will place all the notes on
+the wrong lines for sighted performers.
+
+**Steps:**
+1. Create `src/dottednotes/models/clef.py`:
+```python
+from dataclasses import dataclass
+from enum import Enum, auto
+from dottednotes.models.base import BrailleSymbol
+from dottednotes.bana_symbols import SymbolCategory
+
+class ClefType(Enum):
+    TREBLE = auto()
+    BASS = auto()
+    ALTO = auto()    # viola clef
+    TENOR = auto()   # upper strings in high passage
+
+CLEF_TO_LILYPOND = {
+    ClefType.TREBLE: 'treble',
+    ClefType.BASS:   'bass',
+    ClefType.ALTO:   'alto',
+    ClefType.TENOR:  'tenor',
+}
+
+@dataclass
+class Clef(BrailleSymbol):
+    """A clef sign."""
+    clef_type: ClefType
+
+    def to_lilypond(self) -> str:
+        return f'\\clef {CLEF_TO_LILYPOND[self.clef_type]}'
+```
+2. Populate `CLEF_CELLS` in `bana_symbols.py` — map each Unicode braille character
+   to the corresponding `ClefType`.
+   Verify every cell from the BANA manual before entering it.
+   Implement at minimum treble and bass; alto and tenor if they appear in
+   the manual and you have time.
+3. Add `CLEF_CELLS: dict[str, ClefType]` to the exports in `bana_symbols.py`.
+4. Write unit tests:
+```python
+def test_clef_treble():
+    clef = Clef(..., clef_type=ClefType.TREBLE)
+    assert clef.to_lilypond() == r'\clef treble'
+
+def test_clef_bass():
+    clef = Clef(..., clef_type=ClefType.BASS)
+    assert clef.to_lilypond() == r'\clef bass'
+```
+
+**Definition of Done:**
+- [ ] `Clef` class with `ClefType` enum exists in `models/clef.py`
+- [ ] `to_lilypond()` returns correct `\clef <type>` for all implemented clef types
+- [ ] `CLEF_CELLS` in `bana_symbols.py` is populated and verified against the BANA manual
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** Clef changes mid-staff are rare in the pieces you are likely to
+parse first.  Do not add mid-staff clef-change logic yet; a plain `\clef` at the
+top of the staff is sufficient for Sprint 3.
+
+---
+
+### [ ] S3-4: Add key and time signature parsing to BrailleParser
+
+**Why:** The parser currently ignores key signature and time signature cells.
+All the logic from S3-1 through S3-3 is useless unless the parser reads the
+cells and updates its state — and unless the renderer emits the directives
+before the first note.
+
+**Steps:**
+1. Update `BrailleTokenizer` to recognize the new cell categories:
+   - Cells in `KEY_SIGNATURE_CELLS` → `SymbolCategory.KEY_SIGNATURE`
+   - Cells in `CLEF_CELLS` → `SymbolCategory.CLEF`
+   - `NUMBER_SIGN` cell → new `SymbolCategory.NUMBER_SIGN` or handle with
+     lookahead (see below)
+   For time signatures, the tokenizer must use lookahead: when it sees the
+   number indicator (⠼), peek ahead to consume the digit cells and the
+   separator, and emit a single `TIME_SIGNATURE` token carrying the full
+   multi-character sequence.  This avoids the digit cells being misread as
+   8th-note pitch cells (they share the same dot patterns).
+2. Update `BrailleParser._reset_state()` to use the new class types:
+```python
+self._key_signature: KeySignature = KeySignature(
+    dots=frozenset(), category=SymbolCategory.KEY_SIGNATURE,
+    raw_brl='', sharps_or_flats=0
+)
+self._time_signature: TimeSignature = TimeSignature(
+    dots=frozenset(), category=SymbolCategory.TIME_SIGNATURE,
+    raw_brl='', numerator=4, denominator=4
+)
+self._clef: Clef = Clef(
+    dots=frozenset(), category=SymbolCategory.CLEF,
+    raw_brl='', clef_type=ClefType.TREBLE
+)
+```
+3. Add token handlers to `BrailleParser.parse()`:
+```python
+elif token.category == SymbolCategory.KEY_SIGNATURE:
+    self._handle_key_signature(token)
+elif token.category == SymbolCategory.TIME_SIGNATURE:
+    self._handle_time_signature(token)
+elif token.category == SymbolCategory.CLEF:
+    self._handle_clef(token)
+```
+4. Implement the three handlers:
+```python
+def _handle_key_signature(self, token: BrailleToken) -> None:
+    from dottednotes.bana_symbols import KEY_SIGNATURE_CELLS
+    self._key_signature = KeySignature(
+        dots=frozenset(), category=SymbolCategory.KEY_SIGNATURE,
+        raw_brl=token.character,
+        sharps_or_flats=KEY_SIGNATURE_CELLS[token.character],
+    )
+
+def _handle_time_signature(self, token: BrailleToken) -> None:
+    # token.character holds the full sequence e.g. "⠼⠙⠲⠙" for 4/4
+    # Parse numerator and denominator from the sequence
+    ...
+
+def _handle_clef(self, token: BrailleToken) -> None:
+    from dottednotes.bana_symbols import CLEF_CELLS
+    self._clef = Clef(
+        dots=frozenset(), category=SymbolCategory.CLEF,
+        raw_brl=token.character,
+        clef_type=CLEF_CELLS[token.character],
+    )
+```
+5. Store key/time/clef on the `Staff` object so the renderer can use them:
+   - After parsing, call `staff.key_signature = self._key_signature` etc.
+   - Add `key_signature`, `time_signature`, and `clef` fields to `Staff`.
+6. Update `_resolve_measure_durations()` to use
+   `self._time_signature.beats_per_measure()` in place of
+   `float(self._time_signature[0])`.
+7. Update `_validate_measure_beat_count()` similarly.
+8. Update `Staff.to_lilypond()` to prepend key, time, and clef directives
+   before the first measure:
+```python
+def to_lilypond(self, start_midi: int = 60) -> str:
+    header_parts = []
+    if self.key_signature.sharps_or_flats != 0:
+        header_parts.append('    ' + self.key_signature.to_lilypond())
+    header_parts.append('    ' + self.time_signature.to_lilypond())
+    if self.clef.clef_type != ClefType.TREBLE:
+        header_parts.append('    ' + self.clef.to_lilypond())
+    # ... then measure lines as before
+```
+   Only emit `\key c \major` if there are accidentals in the piece; omit it
+   for C major since LilyPond defaults to C major.
+   Always emit `\time` since the default 4/4 is not guaranteed.
+9. Write unit tests for parser state:
+```python
+def test_parser_reads_key_signature():
+    # Build token stream: key_sig_cell + note
+    ...
+    assert parser._key_signature.sharps_or_flats == 1  # G major
+
+def test_parser_reads_time_signature():
+    # Build token stream: time_sig_sequence + notes
+    ...
+    assert parser._time_signature.numerator == 3
+    assert parser._time_signature.denominator == 4
+```
+
+**Definition of Done:**
+- [ ] Tokenizer classifies key signature, time signature, and clef cells correctly
+- [ ] Tokenizer handles the number indicator context so digit cells are not
+      misread as note cells
+- [ ] Parser updates `_key_signature`, `_time_signature`, and `_clef` state on
+      each recognized token
+- [ ] `Staff` stores key, time, and clef after parsing
+- [ ] `Staff.to_lilypond()` prepends the appropriate `\key`, `\time`, `\clef`
+      directives before the first measure
+- [ ] `_resolve_measure_durations()` uses `TimeSignature.beats_per_measure()`
+- [ ] All new unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** The hardest part of this ticket is the tokenizer context switch for
+time signatures.  The number indicator (⠼) followed by digit cells is the only
+place in BANA music notation where cells that look like 8th-note pitch cells are
+not notes.  The safest fix is to use the same lookahead pattern already used for
+multi-cell bar lines: when the tokenizer sees ⠼, consume everything up to and
+including the bottom-number digits and emit a single `TIME_SIGNATURE` token.
+Avoid leaving this to the parser — the token stream is simpler to reason about
+when every token is unambiguously categorized.
+
+---
+
+### [ ] S3-5: Integration test — parse a non-C-major piece
+
+**Why:** Every piece of code written in S3-1 through S3-4 must be exercised
+end-to-end before Sprint 3 can be called done.  A G major piece exercises
+key signature parsing, F# accidental handling, and LilyPond key output.
+
+**Steps:**
+1. Create `tests/fixtures/g_major_scale.brf` — a short G major scale in 4/4,
+   containing:
+   - A G major key signature cell (1 sharp)
+   - A 4/4 time signature
+   - 8 quarter notes ascending G–A–B–C–D–E–F#–G across two measures
+   Create this on your BrailleNotetaker and export it, or construct it manually
+   using the BANA cells verified in S3-1 through S3-4.
+2. Add a matching `tests/fixtures/g_major_scale.ly` file with the expected
+   LilyPond output, for reference during debugging.
+3. Write the integration test in `tests/test_parser.py`:
+```python
+def test_parse_g_major_scale():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    assert len(score.staves) == 1
+    staff = score.staves[0]
+
+    # Key signature: 1 sharp (G major)
+    assert staff.key_signature.sharps_or_flats == 1
+
+    # Time signature: 4/4
+    assert staff.time_signature.numerator == 4
+    assert staff.time_signature.denominator == 4
+
+    # Two measures, 4 notes each
+    assert len(staff.measures) == 2
+    assert len(staff.measures[0].notes) == 4
+    assert len(staff.measures[1].notes) == 4
+
+    # First note: G in octave 4, quarter duration
+    first_note = staff.measures[0].notes[0]
+    assert first_note.note_name == 'G'
+    assert first_note.octave == 4
+    assert first_note.duration.value == 4
+```
+4. Write a render test:
+```python
+def test_g_major_scale_renders_to_lilypond():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly = score.to_lilypond()
+
+    assert r'\key g \major' in ly
+    assert r'\time 4/4' in ly
+    # F# appears as fis in LilyPond
+    assert 'fis' in ly
+```
+5. If the lilypond binary is available, add a compile check (same pattern as
+   `test_simple_melody_lilypond_compiles`).
+
+**Definition of Done:**
+- [ ] `tests/fixtures/g_major_scale.brf` exists and is verified correct braille
+- [ ] `tests/fixtures/g_major_scale.ly` exists as a reference
+- [ ] Integration test passes: correct staves, measures, and first note
+- [ ] Render test passes: `\key g \major`, `\time 4/4`, and `fis` all appear
+      in the LilyPond output
+- [ ] If lilypond binary is present, the output compiles without errors
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** The F# in G major will be written in the .brf file as an
+explicit accidental before the F note cell (since the parser does not yet carry
+key signature context into note-level pitch resolution — that is Sprint 4 work).
+The test should assert `fis` appears in the output but should not assert that
+the accidental is gone from the braille — that simplification comes later.
+If constructing the fixture manually, double-check the octave mark before the
+first note: G major scales often start on G4 or G3 depending on register.
 
 ---
 
