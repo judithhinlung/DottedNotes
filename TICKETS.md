@@ -1213,7 +1213,7 @@ will have incorrect bar groupings.
 
 ---
 
-### [ ] S2-6: Sprint 2 integration test — parse a simple melody
+### [x] S2-6: Sprint 2 integration test — parse a simple melody
 
 **Why:** End-to-end test of the full parsing pipeline
 from .brf file to Note objects.
@@ -1252,15 +1252,15 @@ def test_parse_simple_melody():
 3. Run the integration test and iterate until it passes
 
 **Definition of Done:**
-- [ ] Integration test passes end-to-end
-- [ ] Correct number of measures parsed
-- [ ] First note has correct pitch, octave, and duration
-- [ ] No exceptions raised during parsing
-- [ ] `pytest tests/` passes with no regressions
+- [x] Integration test passes end-to-end
+- [x] Correct number of measures parsed
+- [x] First note has correct pitch, octave, and duration
+- [x] No exceptions raised during parsing
+- [x] `pytest tests/` passes with no regressions
 
 ---
 
-### [ ] S2-7: Integration test — render parsed melody to LilyPond
+### [x] S2-7: Integration test — render parsed melody to LilyPond
 
 **Why:** Parsing is only useful if the output compiles.
 This test closes the loop from .brf all the way to valid LilyPond.
@@ -1294,15 +1294,16 @@ def test_simple_melody_renders_to_lilypond():
 ```
 
 **Definition of Done:**
-- [ ] `score.to_lilypond()` returns a valid string
-- [ ] LilyPond output contains required header elements
-- [ ] If lilypond binary is available, output compiles without errors
-- [ ] Test is skipped gracefully if lilypond is not installed
+- [x] `score.to_lilypond()` returns a valid string
+- [x] LilyPond output contains required header elements
+- [x] If lilypond binary is available, output compiles without errors
+- [x] Test is skipped gracefully if lilypond is not installed
       (do not fail CI just because lilypond is not in the CI environment)
 
 ---
 
 # Sprint 3: Key Signatures, Time Signatures, Clefs
+
 
 Estimated time: 3–4 days.
 

@@ -12,6 +12,16 @@ NOTE_NAME_TO_LILYPOND = {
 
 _LILYPOND_OCTAVE_BASE = 3  # octave 3 = c (no marks) in LilyPond; c' = C4 = middle C
 
+# Semitone offset from C within an octave (no accidental applied)
+_NOTE_SEMITONES: dict[str, int] = {
+    'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11,
+}
+
+# How each accidental type shifts the MIDI pitch (keyed by AccidentalType.name)
+_ACCIDENTAL_MIDI_OFFSETS: dict[str, int] = {
+    'SHARP': 1, 'FLAT': -1, 'NATURAL': 0, 'DOUBLE_SHARP': 2, 'DOUBLE_FLAT': -2,
+}
+
 
 @dataclass
 class Note(BrailleSymbol):
@@ -45,6 +55,48 @@ class Note(BrailleSymbol):
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}"
 
+    def _midi_pitch(self) -> int:
+        """MIDI pitch number for this note (C4 = 60)."""
+        semitone = _NOTE_SEMITONES[self.note_name]
+        if self.accidental:
+            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(self.accidental.type.name, 0)
+        return 12 * (self.octave + 1) + semitone
+
+    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+        """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
+
+        Computes the octave marks needed so that the note's absolute pitch is
+        preserved relative to prev_midi, following LilyPond's nearest-neighbor rule:
+        choose the occurrence of the pitch class within a tritone of prev_midi,
+        then add ' or , marks to reach the actual target octave.
+        """
+        semitone = _NOTE_SEMITONES[self.note_name]
+        if self.accidental:
+            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(self.accidental.type.name, 0)
+
+        # Natural relative MIDI: the occurrence of this pitch class closest to prev_midi
+        base = (prev_midi // 12) * 12 + semitone
+        while base < prev_midi - 5:
+            base += 12
+        while base > prev_midi + 6:
+            base -= 12
+
+        target_midi = self._midi_pitch()
+        diff = target_midi - base
+        octave_adj = diff // 12
+        if octave_adj > 0:
+            octave_str = "'" * octave_adj
+        elif octave_adj < 0:
+            octave_str = "," * (-octave_adj)
+        else:
+            octave_str = ""
+
+        ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
+        accidental_str = self.accidental.to_lilypond() if self.accidental else ''
+        duration_str = self.duration.to_lilypond()
+        articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
+        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}", target_midi
+
 
 @dataclass
 class Rest(BrailleSymbol):
@@ -57,3 +109,7 @@ class Rest(BrailleSymbol):
         if self.is_full_measure:
             return f"R{self.duration.to_lilypond()}"
         return f"r{self.duration.to_lilypond()}"
+
+    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+        """Rests do not change the pitch reference; pass prev_midi through unchanged."""
+        return self.to_lilypond(), prev_midi

@@ -639,3 +639,168 @@ def test_bar_line_sequences_dict_has_all_four_types():
     assert 'final_double_bar' in BAR_LINE_SEQUENCES.values()
     assert 'forward_repeat' in BAR_LINE_SEQUENCES.values()
     assert 'end_repeat' in BAR_LINE_SEQUENCES.values()
+
+
+# --- S2-6: integration test — parse simple_melody.brf ---
+#
+# simple_melody.brf: 8 measures, 4/4, C major, quarter and half notes only.
+# Braille layout (Unicode):
+#   M1  ⠐⠹⠹⠝   = oct4, C-qtr, C-qtr, C-half     (c c c2)
+#   M2  ⠹⠹⠕    = C-qtr, C-qtr, D-half             (c c d2)
+#   M3  ⠫⠫⠱⠹  = E-qtr, E-qtr, D-qtr, C-qtr       (e e d c)
+#   M4  ⠹⠹⠝    = C-qtr, C-qtr, C-half             (c c c2)
+#   M5  ⠹⠱⠫⠻  = C-qtr, D-qtr, E-qtr, F-qtr       (c d e f)
+#   M6  ⠳⠪⠺⠨⠹ = G-qtr, A-qtr, B-qtr, oct5, C-qtr (g a b c5)
+#   M7  ⠐⠹⠹⠹⠹ = oct4, C-qtr x4                   (c c c c)
+#   M8  ⠹⠹⠝⠣⠅ = C-qtr, C-qtr, C-half, final bar  (c c c2 "|.")
+
+
+def test_parse_simple_melody():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+
+    assert len(score.staves) == 1
+    assert len(score.staves[0].measures) == 8
+
+    first_note = score.staves[0].measures[0].notes[0]
+    assert first_note.note_name == 'C'
+    assert first_note.octave == 4
+    assert first_note.duration.value == 4  # quarter note
+
+
+def test_parse_simple_melody_measure_note_counts():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+    measures = score.staves[0].measures
+
+    assert len(measures[0].notes) == 3   # c c c2
+    assert len(measures[1].notes) == 3   # c c d2
+    assert len(measures[2].notes) == 4   # e e d c
+    assert len(measures[5].notes) == 4   # g a b c5
+    assert len(measures[6].notes) == 4   # c c c c
+
+
+def test_parse_simple_melody_octave_jump_to_5():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+    measures = score.staves[0].measures
+
+    # Measure 6: last note is C in octave 5 (octave mark ⠨ precedes it)
+    last_note_m6 = measures[5].notes[-1]
+    assert last_note_m6.note_name == 'C'
+    assert last_note_m6.octave == 5
+
+
+def test_parse_simple_melody_octave_return_to_4():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+    measures = score.staves[0].measures
+
+    # Measure 7: octave mark ⠐ resets to 4; all notes are C4
+    for note in measures[6].notes:
+        assert note.note_name == 'C'
+        assert note.octave == 4
+
+
+def test_parse_simple_melody_final_bar_type():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    assert score.staves[0].measures[-1].bar_line_type == 'final_double_bar'
+
+
+def test_parse_simple_melody_no_beat_count_warnings():
+    # All 8 measures fill 4/4 exactly; no UserWarning should be emitted
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        BrailleParser(tokens=tokens).parse()
+
+
+# --- S2-7: integration test — render parsed simple_melody to LilyPond ---
+
+
+def test_simple_melody_renders_to_lilypond():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly_output = score.to_lilypond()
+
+    assert isinstance(ly_output, str)
+    assert len(ly_output) > 0
+    assert r'\version' in ly_output
+    assert r'\relative' in ly_output
+
+
+def test_simple_melody_lilypond_contains_all_measures():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly_output = score.to_lilypond()
+    # 8 measure barlines: 7 '|' separators + final \bar "|."
+    assert ly_output.count('|') >= 8
+
+
+def test_simple_melody_lilypond_relative_mode_octave_jump():
+    """C5 in measure 6 must render without explicit octave marks (stepwise from B4)."""
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly_output = score.to_lilypond()
+    # Measure 6 stepwise ascent should contain 'g4 a4 b4 c4' (no extra ' on the c)
+    assert 'g4 a4 b4 c4' in ly_output
+
+
+def test_simple_melody_lilypond_relative_mode_octave_descent():
+    """C4 in measure 7 (returning from C5) must render as 'c,' in relative mode."""
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly_output = score.to_lilypond()
+    assert 'c,4' in ly_output
+
+
+def test_simple_melody_lilypond_final_bar():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly_output = score.to_lilypond()
+    assert r'\bar "|."' in ly_output
+
+
+def test_simple_melody_lilypond_compiles(tmp_path: Path):
+    """If the lilypond binary is installed, the rendered output must compile cleanly."""
+    import shutil
+    import subprocess
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'simple_melody.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+    ly_output = score.to_lilypond()
+
+    if not shutil.which('lilypond'):
+        pytest.skip('lilypond binary not found; skipping compile test')
+
+    ly_file = tmp_path / 'simple_melody.ly'
+    ly_file.write_text(ly_output, encoding='utf-8')
+    result = subprocess.run(
+        ['lilypond', '--silent', '-o', str(tmp_path / 'simple_melody'), str(ly_file)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"LilyPond compilation failed:\n{result.stderr}"
+    )
