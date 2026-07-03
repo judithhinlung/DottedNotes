@@ -50,6 +50,71 @@ def test_braille_parser_state_resets_between_parses():
     assert parser._current_octave == 4  # reset on second parse
 
 
+# --- S2-3: octave mark recognition and tracking ---
+
+def _parse(text: str) -> list:
+    """Helper: tokenize and parse braille text, return notes from first measure."""
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    return score.staves[0].measures[0].notes
+
+
+def test_octave_mark_sets_octave():
+    # ⠨ = octave 5 mark, ⠹ = C quarter note
+    notes = _parse('⠨⠹')
+    assert notes[0].note_name == 'C'
+    assert notes[0].octave == 5
+
+
+def test_octave_mark_octave4():
+    # ⠐ = octave 4, ⠹ = C quarter
+    notes = _parse('⠐⠹')
+    assert notes[0].octave == 4
+
+
+def test_octave_persists_without_mark():
+    # ⠐ = octave 4, ⠹ = C quarter, ⠱ = D quarter (no new octave mark)
+    notes = _parse('⠐⠹⠱')
+    assert notes[0].note_name == 'C'
+    assert notes[0].octave == 4
+    assert notes[1].note_name == 'D'
+    assert notes[1].octave == 4  # octave persists
+
+
+def test_octave_mark_changes_midstream():
+    # ⠐ = octave 4, ⠹ = C, ⠨ = octave 5, ⠱ = D
+    notes = _parse('⠐⠹⠨⠱')
+    assert notes[0].octave == 4
+    assert notes[1].octave == 5
+
+
+def test_all_octave_marks():
+    # One note per octave mark, verify each is tracked correctly
+    # ⠈=oct1, ⠘=oct2, ⠸=oct3, ⠐=oct4, ⠨=oct5, ⠰=oct6, ⠠=oct7
+    # Use C quarter (⠹) after each mark
+    cases = [('⠈', 1), ('⠘', 2), ('⠸', 3), ('⠐', 4), ('⠨', 5), ('⠰', 6), ('⠠', 7)]
+    for mark, expected_octave in cases:
+        notes = _parse(mark + '⠹')
+        assert notes[0].octave == expected_octave, (
+            f"Octave mark {mark!r} should give octave {expected_octave}"
+        )
+
+
+def test_note_without_preceding_mark_uses_default_octave():
+    # No octave mark — parser default is octave 4
+    notes = _parse('⠹')
+    assert notes[0].octave == 4
+
+
+def test_note_name_from_note_cell():
+    # Verify all 7 natural note names are correctly parsed from their cells
+    # Using quarter-note cells, octave 4 for simplicity
+    # ⠐=oct4, cells: C=⠹ D=⠱ E=⠫ F=⠻ G=⠳ A=⠪ B=⠺
+    text = '⠐⠹⠱⠫⠻⠳⠪⠺'
+    notes = _parse(text)
+    assert [n.note_name for n in notes] == ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+
+
 def test_input_pipeline_read(tmp_path: Path):
     brf = tmp_path / "sample.brf"
     brf.write_text("⠀⠼⠙⠲", encoding="utf-8")

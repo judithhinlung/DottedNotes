@@ -1043,7 +1043,7 @@ def test_parser_returns_score():
 
 ---
 
-### [ ] S2-3: Implement octave mark recognition and tracking
+### [x] S2-3: Implement octave mark recognition and tracking
 
 **Why:** Octave tracking is stateful and critical for correct pitch output.
 A wrong octave propagates through every subsequent note until
@@ -1073,11 +1073,11 @@ def test_octave_persists_without_mark():
 ```
 
 **Definition of Done:**
-- [ ] Octave mark tokens are recognized and consumed by the parser
-- [ ] `_current_octave` state is updated on each octave mark
-- [ ] Notes following an octave mark use the correct octave
-- [ ] Notes without a preceding octave mark use the last known octave
-- [ ] Unit tests pass
+- [x] Octave mark tokens are recognized and consumed by the parser
+- [x] `_current_octave` state is updated on each octave mark
+- [x] Notes following an octave mark use the correct octave
+- [x] Notes without a preceding octave mark use the last known octave
+- [x] Unit tests pass
 
 ---
 
