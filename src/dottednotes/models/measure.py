@@ -11,6 +11,7 @@ class Measure:
     # positive = sharps, negative = flats
     key_signature: int = 0
     clef: str = "treble"
+    bar_line_type: str = 'measure_separator'
 
     def add_note(self, note: Note) -> None:
         self.notes.append(note)

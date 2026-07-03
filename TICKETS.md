@@ -1184,7 +1184,7 @@ misparsed, add a failing test first, then extend the machine.
 
 ---
 
-### [ ] S2-5: Implement bar line recognition
+### [x] S2-5: Implement bar line recognition
 
 **Why:** Bar lines delimit measures. Without correct bar line parsing,
 the Measure structure will be wrong and the LilyPond output
@@ -1205,11 +1205,11 @@ will have incorrect bar groupings.
    notation ambiguities that we want to parse best-effort)
 
 **Definition of Done:**
-- [ ] All four bar line types are recognized
-- [ ] Bar line tokens trigger measure finalization
-- [ ] Beat count validation runs and produces a warning on mismatch
-- [ ] Warning is plain text and screen-reader friendly
-- [ ] Unit tests pass
+- [x] All four bar line types are recognized
+- [x] Bar line tokens trigger measure finalization
+- [x] Beat count validation runs and produces a warning on mismatch
+- [x] Warning is plain text and screen-reader friendly
+- [x] Unit tests pass
 
 ---
 

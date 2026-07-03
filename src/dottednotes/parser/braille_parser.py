@@ -3,7 +3,13 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 
-from ..bana_symbols import NOTE_CELLS, OCTAVE_MARKS, SymbolCategory
+from ..bana_symbols import (
+    BAR_LINE_CELLS,
+    BAR_LINE_SEQUENCES,
+    NOTE_CELLS,
+    OCTAVE_MARKS,
+    SymbolCategory,
+)
 from ..models.duration import Duration
 from ..models.measure import Measure
 from ..models.note import Note
@@ -55,8 +61,12 @@ class BrailleParser:
                 pending.append(self._buffer_note(token))
             elif token.category == SymbolCategory.BAR_LINE:
                 if pending:
+                    bar_type = (
+                        BAR_LINE_SEQUENCES.get(token.character)
+                        or BAR_LINE_CELLS.get(token.character, 'measure_separator')
+                    )
                     staff.add_measure(
-                        self._finalize_measure(pending, measure_number)
+                        self._finalize_measure(pending, measure_number, bar_type)
                     )
                     pending = []
                     measure_number += 1
@@ -92,10 +102,17 @@ class BrailleParser:
     # ------------------------------------------------------------------
 
     def _finalize_measure(
-        self, pending: list[_PendingNote], number: int
+        self,
+        pending: list[_PendingNote],
+        number: int,
+        bar_line_type: str = 'measure_separator',
     ) -> Measure:
         resolved = self._resolve_measure_durations(pending)
-        measure = Measure(number=number, time_signature=self._time_signature)
+        measure = Measure(
+            number=number,
+            time_signature=self._time_signature,
+            bar_line_type=bar_line_type,
+        )
         for pnote, dur_value in zip(pending, resolved):
             measure.add_note(Note(
                 dots=frozenset(),

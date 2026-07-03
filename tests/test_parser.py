@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from dottednotes.bana_symbols import BAR_LINE_CELLS, SymbolCategory
+from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory
 from dottednotes.models import Score
 from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline
 
@@ -514,3 +514,128 @@ def test_tokenizer_token_is_dataclass():
     assert hasattr(t, 'category')
     assert hasattr(t, 'position')
     assert hasattr(t, 'line')
+
+
+# --- S2-5: multi-cell bar line tokenization ---
+
+def test_tokenizer_section_double_bar():
+    # ⠣⠅⠄ (dots 1,2,6 + dots 1,3 + dot 3) → single BAR_LINE token
+    tokens = BrailleTokenizer().tokenize('⠣⠅⠄')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.BAR_LINE
+    assert tokens[0].character == '⠣⠅⠄'
+
+
+def test_tokenizer_final_double_bar():
+    # ⠣⠅ (dots 1,2,6 + dots 1,3) → single BAR_LINE token
+    tokens = BrailleTokenizer().tokenize('⠣⠅')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.BAR_LINE
+    assert tokens[0].character == '⠣⠅'
+
+
+def test_tokenizer_forward_repeat():
+    # ⠣⠶ (dots 1,2,6 + dots 2,3,5,6) → single BAR_LINE token
+    tokens = BrailleTokenizer().tokenize('⠣⠶')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.BAR_LINE
+    assert tokens[0].character == '⠣⠶'
+
+
+def test_tokenizer_end_repeat():
+    # ⠣⠆ (dots 1,2,6 + dots 2,3) → single BAR_LINE token
+    tokens = BrailleTokenizer().tokenize('⠣⠆')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.BAR_LINE
+    assert tokens[0].character == '⠣⠆'
+
+
+def test_section_double_bar_preferred_over_final_double_bar():
+    # ⠣⠅⠄ must resolve as the 3-cell section_double_bar, not ⠣⠅ + lone ⠄
+    tokens = BrailleTokenizer().tokenize('⠣⠅⠄')
+    assert len(tokens) == 1
+    assert tokens[0].character == '⠣⠅⠄'
+
+
+def test_flat_sign_not_misread_as_bar_line():
+    # ⠣ followed by a note cell (not a bar line second cell) → ACCIDENTAL, not BAR_LINE
+    tokens = BrailleTokenizer().tokenize('⠣⠽')  # flat + C whole/16th
+    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+    assert all(t.category != SymbolCategory.BAR_LINE for t in tokens)
+
+
+def test_flat_at_end_of_input_is_accidental():
+    # ⠣ with no following cell → ACCIDENTAL
+    tokens = BrailleTokenizer().tokenize('⠣')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+
+
+def test_tokenizer_position_after_two_cell_bar_line():
+    # After consuming a 2-cell forward repeat, the next token's position should be 2
+    tokens = BrailleTokenizer().tokenize('⠣⠶⠐')  # forward_repeat + octave mark
+    assert len(tokens) == 2
+    assert tokens[0].character == '⠣⠶'
+    assert tokens[0].position == 0
+    assert tokens[1].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[1].position == 2
+
+
+def test_tokenizer_position_after_three_cell_bar_line():
+    # After consuming a 3-cell bar line, the next token's position should be 3
+    tokens = BrailleTokenizer().tokenize('⠣⠅⠄⠐')  # section_double_bar + octave mark
+    assert len(tokens) == 2
+    assert tokens[0].character == '⠣⠅⠄'
+    assert tokens[0].position == 0
+    assert tokens[1].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[1].position == 3
+
+
+# --- S2-5: bar_line_type on Measure objects ---
+
+def _parse_measures(text: str) -> list:
+    """Helper: tokenize and parse braille text, return all measures from first staff."""
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    return score.staves[0].measures
+
+
+def test_measure_default_bar_line_type_is_measure_separator():
+    # A measure ended by a blank cell has bar_line_type 'measure_separator'
+    measures = _parse_measures('⠐⠹⠀⠐⠹')  # C quarter, blank bar, C quarter
+    assert measures[0].bar_line_type == 'measure_separator'
+
+
+def test_final_double_bar_sets_bar_line_type():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        measures = _parse_measures('⠐⠹⠣⠅')  # C quarter then final double bar
+    assert measures[0].bar_line_type == 'final_double_bar'
+
+
+def test_section_double_bar_sets_bar_line_type():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        measures = _parse_measures('⠐⠹⠣⠅⠄')  # C quarter then section double bar
+    assert measures[0].bar_line_type == 'section_double_bar'
+
+
+def test_forward_repeat_sets_bar_line_type():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        measures = _parse_measures('⠐⠹⠣⠶')  # C quarter then forward repeat
+    assert measures[0].bar_line_type == 'forward_repeat'
+
+
+def test_end_repeat_sets_bar_line_type():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        measures = _parse_measures('⠐⠹⠣⠆')  # C quarter then end repeat
+    assert measures[0].bar_line_type == 'end_repeat'
+
+
+def test_bar_line_sequences_dict_has_all_four_types():
+    assert 'section_double_bar' in BAR_LINE_SEQUENCES.values()
+    assert 'final_double_bar' in BAR_LINE_SEQUENCES.values()
+    assert 'forward_repeat' in BAR_LINE_SEQUENCES.values()
+    assert 'end_repeat' in BAR_LINE_SEQUENCES.values()

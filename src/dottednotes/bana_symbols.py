@@ -172,11 +172,21 @@ VALUE_INDICATOR_CELL: str | None = None
 # ---------------------------------------------------------------------------
 # Bar line / measure separator
 # In BANA braille music, measures are separated by a blank braille cell
-# (U+2800, no dots) — the same character as a braille space.
-# There is no special bar-line symbol; whitespace between note groups is
-# how the reader knows a new measure has begun.
+# (U+2800, no dots).  Special bar line types use multi-cell sequences,
+# all starting with ⠣ (dots 1,2,6 = U+2823), which is also the flat
+# accidental cell — the tokenizer uses lookahead to distinguish them.
 # ---------------------------------------------------------------------------
 
 BAR_LINE_CELLS: dict[str, str] = {
     '⠀': 'measure_separator',  # U+2800 — blank braille cell (no dots)
+}
+
+# Multi-cell bar line sequences (all begin with ⠣, dots 1,2,6 = U+2823).
+# The 3-cell entry MUST be listed before the 2-cell ⠣⠅ entry so the
+# tokenizer checks the longer match first.
+BAR_LINE_SEQUENCES: dict[str, str] = {
+    '⠣⠅⠄': 'section_double_bar',  # dots 1,2,6 + dots 1,3 + dot 3  (end of section)
+    '⠣⠅':  'final_double_bar',    # dots 1,2,6 + dots 1,3           (end of piece)
+    '⠣⠶':  'forward_repeat',      # dots 1,2,6 + dots 2,3,5,6
+    '⠣⠆':  'end_repeat',          # dots 1,2,6 + dots 2,3
 }

@@ -159,6 +159,26 @@ table before adding to the code.
 
 ---
 
+## Bar Lines
+
+The regular bar line is a blank braille cell (no dots, U+2800).  All special bar
+line types begin with ⠣ (dots 1,2,6 = U+2823), which is also the flat accidental
+cell.  The tokenizer uses lookahead to distinguish bar line sequences from a flat
+sign preceding a note.
+
+| Symbol | Unicode       | Dots                          | Type                 | LilyPond         |
+|--------|---------------|-------------------------------|----------------------|------------------|
+| ⠀      | U+2800        | (none)                        | Regular bar line     | (space)          |
+| ⠣⠅⠄   | U+2823 U+2805 U+2804 | 1,2,6 + 1,3 + 3        | Double bar (section) | `\bar "||"`      |
+| ⠣⠅     | U+2823 U+2805 | 1,2,6 + 1,3                   | Double bar (final)   | `\bar "|."`      |
+| ⠣⠶     | U+2823 U+2836 | 1,2,6 + 2,3,5,6               | Forward repeat       | `\bar ".|:"`     |
+| ⠣⠆     | U+2823 U+2806 | 1,2,6 + 2,3                   | End repeat           | `\bar ":|."`     |
+
+Note: the 3-cell sequence ⠣⠅⠄ must be checked before ⠣⠅ because the 2-cell
+sequence is a prefix of the 3-cell one.
+
+---
+
 ## TODO (later sprints)
 
 - Key signatures (BANA section 7) — Sprint 3
@@ -168,5 +188,4 @@ table before adding to the code.
 - Ornaments (BANA section 15) — Sprint 6
 - Chords and in-accord (BANA section 9) — Sprint 5
 - Ties and slurs (BANA section 13) — Sprint 4
-- Bar lines and repeat signs — Sprint 2
-- Value indicator sign (duration disambiguation) — Sprint 2
+- Value indicator sign (duration disambiguation) — left as None; not encountered in real music
