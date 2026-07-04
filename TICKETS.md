@@ -1772,16 +1772,518 @@ first note: G major scales often start on G4 or G3 depending on register.
 
 ---
 
-# Sprint 4: Articulations and Dynamics
+# Sprint 4: Articulations, Dynamics, Ornaments, and Text
 
-Estimated time: 3–4 days.
+Goal: Parse articulations, dynamics, slurs, ties, ornaments (trill, mordent,
+grace notes), and word-sign text markings from a .brf file and produce correct
+LilyPond output for all of them.
+Estimated time: 1-1.5 weeks.
 
-### [ ] S4-1: Add articulation parsing to BrailleParser
+---
+
+### [x] S4-1: Add articulation parsing to BrailleParser
+
+**Why:** The `Articulation` model and its `to_lilypond()` method already exist
+(Sprint 1).  This ticket wires the BANA symbol table and parser to actually
+produce articulation-carrying notes from a real .brf file.
+
+**Verified BANA symbols (developer-confirmed dot patterns):**
+
+| Articulation     | Braille cells    | Unicode  | LilyPond      |
+|------------------|------------------|----------|---------------|
+| Staccato         | 2,3,6            | ⠦        | `-.`          |
+| Staccatissimo    | 6 + 2,3,6        | ⠠⠦      | `-!`          |
+| Mezzo staccato   | 5 + 2,3,6        | ⠐⠦      | `-_`          |
+| Tenuto           | 4,5,6 + 2,3,6    | ⠸⠦      | `--`          |
+| Accent           | 4,6 + 2,3,6      | ⠨⠦      | `->`          |
+| Expressive accent| 4,5 + 2,3,6      | ⠘⠦      | `-^`          |
+| Swell            | 3,6 + 3          | ⠤⠄      | `\espressivo` |
+
+Reversed accent (dots 4 + 2,3,6) skipped — no LilyPond equivalent.
+Arpeggios deferred to Sprint 5.
+
+**BANA placement rule:** Articulations come BEFORE the note they modify.
+The order within a cell sequence is: articulation → accidental → octave mark → note.
+Octave marks are always the cell immediately before the note.
+
+**Doubling rule:** Any articulation sign (except swell) may be doubled to
+indicate it applies to 4 or more successive notes.  A doubled sign (same sign
+twice with no note between them) activates carry mode for that type.  A single
+instance of the sign while carry mode is active marks the last note and ends carry.
+
+**Steps:**
+1. Add `ARTICULATION_CELLS: dict[str, str]` to `bana_symbols.py` using the
+   verified cells in the table above.
+2. Update `BrailleTokenizer` to check 2-cell articulation pairs (longest match
+   first) immediately before the `_classify()` fallthrough.  Several 2-cell
+   pair first-cells (⠠, ⠐, ⠸, ⠨, ⠘) are also OCTAVE_MARKS; the 2-cell check
+   must come first.  The second cell ⠦ (dots 2,3,6) never follows an octave
+   mark legitimately so this is always unambiguous.
+3. Update `models/articulation.py`: rename `MARCATO` → `EXPRESSIVE_ACCENT`
+   and `PORTATO` → `MEZZO_STACCATO` to match BANA terminology; add `SWELL`.
+4. In `BrailleParser._reset_state()`, add:
+   ```python
+   self._pending_articulations: list[Articulation] = []
+   self._active_articulations: set[ArticulationType] = set()
+   self._terminating_articulations: set[ArticulationType] = set()
+   self._last_articulation_seen: ArticulationType | None = None
+   ```
+5. Add `_handle_articulation(token)` with carry-mode logic:
+   - Type in `_active_articulations` → terminator: add to pending, mark terminating.
+   - Type == `_last_articulation_seen` → doubled sign: activate carry, reset last_seen.
+   - Otherwise → single sign: add to pending, set last_seen.
+6. In `_buffer_note()`, combine `_pending_articulations` and `_active_articulations`
+   (deduplicated); clear pending; end carry for terminating types; reset last_seen.
+7. In `_finalize_measure()`, pass `articulations=pnote.articulations` to `Note(...)`.
+8. Write unit tests covering: single articulation attachment, no carry-forward for
+   single signs, doubled sign carry mode, terminator sign ending carry.
+
+**Definition of Done:**
+- [x] `ARTICULATION_CELLS` in `bana_symbols.py` is populated with verified cells
+- [x] Tokenizer classifies all 7 articulation cells/pairs as `SymbolCategory.ARTICULATION`
+- [x] 2-cell articulation pairs take priority over OCTAVE_MARK classification
+- [x] Parser attaches articulations to the note that follows them
+- [x] Single sign does not carry forward to subsequent notes
+- [x] Doubled sign activates carry mode; terminator sign ends it
+- [x] `Note.to_lilypond()` includes articulation suffixes
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
+
+---
+
 ### [ ] S4-2: Add dynamic parsing to BrailleParser
-### [ ] S4-3: Implement slur and tie parsing
-### [ ] S4-4: Integration test using Fengyang Flower Drum .brf
 
-*Detailed steps to be written when Sprint 3 is complete.*
+**Why:** Dynamics are present in virtually every piece of real music.
+Without them the LilyPond output plays at a uniform volume and is incomplete.
+The `Dynamic` model already exists; this ticket adds recognition and
+attachment to notes.
+
+**Steps:**
+1. Add `DYNAMIC_CELLS: dict[str, str]` to `bana_symbols.py`.
+   Map each braille sequence to a `DynamicLevel` name string
+   (`'P'`, `'F'`, `'PP'`, `'FF'`, `'MF'`, `'MP'`, `'FFF'`, `'PPP'`,
+   `'SF'`, `'SFZ'`, `'FP'`).
+   Also add:
+   `'CRESCENDO_START'` and `'DECRESCENDO_START'` for hairpin begins,
+   `'CRESCENDO_END'` / `'DECRESCENDO_END'` for hairpin ends.
+   **Verify every cell against BANA section 16 before entering.**
+   Important: some dynamic cells share dot patterns with note cells or
+   accidental cells -- correct classification depends entirely on context.
+   In BANA braille music, dynamics appear at the beginning of a measure
+   or immediately before a note, never mid-note.  The tokenizer must use
+   this positional context to disambiguate.
+2. Update `BrailleTokenizer` to classify dynamic sequences as
+   `SymbolCategory.DYNAMIC`.  If a multi-cell indicator prefix is required
+   (common in BANA to distinguish dynamic letters from note cells), implement
+   lookahead in the same style used for time signatures and clef cells.
+3. Add a `dynamic: Dynamic | None = None` field to the `Note` dataclass
+   in `models/note.py`.  In LilyPond, dynamics attach to notes as suffixes:
+   `c4\p`, `g2\ff`, `d8\<` (hairpin start), `e4\!` (hairpin end).
+   Update `Note.to_lilypond()` to append the dynamic string when present.
+4. In `BrailleParser.parse()`, buffer a pending dynamic:
+   ```python
+   self._pending_dynamic: Dynamic | None = None
+   ```
+   When a `DYNAMIC` token is encountered, store it.  When the next note is
+   finalized, attach it to `note.dynamic` and clear the buffer.
+   Hairpin ends attach to the note at the close of the crescendo, not the
+   start -- record this in test fixture comments.
+5. Write unit tests:
+   ```python
+   def test_dynamic_p_attaches_to_following_note():
+       notes = _parse(DYNAMIC_P_CELL + '⠐⠹')
+       assert notes[0].dynamic.level == DynamicLevel.P
+
+   def test_dynamic_renders_in_lilypond():
+       notes = _parse(DYNAMIC_F_CELL + '⠐⠹')
+       assert notes[0].to_lilypond() == "c'4\\f"
+
+   def test_dynamic_does_not_carry_forward():
+       notes = _parse(DYNAMIC_P_CELL + '⠐⠹⠱')
+       assert notes[0].dynamic is not None
+       assert notes[1].dynamic is None
+   ```
+   Define `DYNAMIC_P_CELL` and `DYNAMIC_F_CELL` as module-level constants
+   once the real cells are verified.
+
+**Definition of Done:**
+- [ ] `DYNAMIC_CELLS` in `bana_symbols.py` is populated and verified
+      against BANA section 16
+- [ ] Tokenizer disambiguates dynamic cells from note/accidental cells
+      using positional context or lookahead
+- [ ] `Note` dataclass has a `dynamic` field
+- [ ] `Note.to_lilypond()` appends the dynamic suffix when present
+- [ ] Dynamic does not carry forward to subsequent notes
+- [ ] Hairpin begin and end cells are recognized and attached correctly
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** The disambiguation problem between dynamic letter cells and
+note cells is real and requires care.  The safest approach is a context rule:
+if the current parser state is "at measure start" or "immediately after a bar
+line," treat letter-like cells as dynamics; if the state is "mid-measure after
+a note," treat them as notes.  This matches BANA's own layout convention.
+
+---
+
+### [ ] S4-3: Implement slur and tie parsing
+
+**Why:** Ties connect two same-pitch notes into a single sustained sound.
+Slurs group notes into phrases.  Without them a legato melody becomes
+detached and phrasing information is lost entirely.
+
+**Steps:**
+1. Add tie and slur cells to `bana_symbols.py`.
+   **Verify against BANA section 13 before entering.**
+   Starting points (confirm before use):
+   - Tie: U+2809 (dots 1,4) -- appears between the two tied notes
+   - Short slur (single-cell): verify from manual
+   - Slur begin (multi-note phrase): verify from manual
+   - Slur end: verify from manual
+   Define named constants:
+   ```python
+   TIE_CELL: str = '...'         # verify from BANA section 13
+   SLUR_BEGIN_CELL: str = '...'  # verify from BANA section 13
+   SLUR_END_CELL: str = '...'    # verify from BANA section 13
+   ```
+2. Add `SymbolCategory.TIE` and `SymbolCategory.SLUR` to the enum in
+   `bana_symbols.py`.
+3. Update `BrailleTokenizer` to classify tie and slur cells.
+4. Add fields to the `Note` dataclass:
+   ```python
+   tied: bool = False        # True if this note is tied to the next
+   slur_begin: bool = False  # True if a slur starts on this note
+   slur_end: bool = False    # True if a slur ends on this note
+   ```
+5. Update `Note.to_lilypond()`:
+   - Tie: emit `~` after the note (e.g. `c'4~`)
+   - Slur begin: emit `(` after duration (e.g. `g4(`)
+   - Slur end: emit `)` after duration (e.g. `a4)`)
+   - Combined: `fis4(~` is valid LilyPond (tied slur start); keep `tied`
+     and `slur_begin` as independent booleans.
+6. In `BrailleParser.parse()`:
+   - A `TIE` token sets `tied = True` on the most recently finalized note.
+   - A `SLUR_BEGIN` token sets `slur_begin = True` on the following note.
+   - A `SLUR_END` token sets `slur_end = True` on the most recently
+     finalized note.
+7. Write unit tests:
+   ```python
+   def test_tie_sets_tied_flag():
+       notes = _parse('⠐⠹' + TIE_CELL + '⠹')
+       assert notes[0].tied is True
+       assert notes[1].tied is False
+
+   def test_tie_renders_tilde():
+       notes = _parse('⠐⠹' + TIE_CELL + '⠹')
+       assert '~' in notes[0].to_lilypond()
+
+   def test_slur_begin_and_end():
+       notes = _parse('⠐' + SLUR_BEGIN + '⠹⠱⠫' + SLUR_END)
+       assert notes[0].slur_begin is True
+       assert notes[2].slur_end is True
+       assert notes[1].slur_begin is False
+   ```
+
+**Definition of Done:**
+- [ ] `TIE_CELL`, `SLUR_BEGIN_CELL`, `SLUR_END_CELL` in `bana_symbols.py`
+      verified against BANA section 13
+- [ ] `Note` has `tied`, `slur_begin`, `slur_end` fields
+- [ ] `Note.to_lilypond()` emits `~`, `(`, `)` correctly
+- [ ] A note that is both tied and slur-begin renders correctly (`c4(~`)
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** Ties always connect two notes of the same pitch; slurs can
+cross any interval.  The parser does not need to validate pitch equality for
+ties -- just set the flag.  Grace notes (Sprint 4-4) do not participate in
+ties; a tie token after a grace note should attach to the main note.
+
+---
+
+### [ ] S4-4: Implement Ornament model and add ornament parsing
+
+**Why:** Trills, mordents, and grace notes appear constantly in Baroque and
+Classical repertoire, and grace notes are common in folk music.  Without
+ornament support the output is musically incomplete for much real-world
+repertoire.
+
+**Steps:**
+1. Create `src/dottednotes/models/ornament.py`:
+   ```python
+   from dataclasses import dataclass
+   from enum import Enum, auto
+
+   class OrnamentType(Enum):
+       TRILL = auto()
+       MORDENT = auto()          # lower mordent (standard)
+       UPPER_MORDENT = auto()    # prall (upper mordent)
+       TURN = auto()
+       TREMOLO = auto()
+       GRACE_NOTE = auto()       # appoggiatura (slurred grace note)
+       ACCIACCATURA = auto()     # crushed grace note (short slash)
+
+   ORNAMENT_TO_LILYPOND: dict[OrnamentType, str] = {
+       OrnamentType.TRILL:         r'\trill',
+       OrnamentType.MORDENT:       r'\mordent',
+       OrnamentType.UPPER_MORDENT: r'\prall',
+       OrnamentType.TURN:          r'\turn',
+       OrnamentType.TREMOLO:       ':32',
+   }
+
+   @dataclass
+   class Ornament:
+       type: OrnamentType
+
+       def to_lilypond(self) -> str:
+           return ORNAMENT_TO_LILYPOND[self.type]
+   ```
+   Grace notes and acciaccaturas are NOT handled by `Ornament.to_lilypond()`
+   -- they require a full `Note` object to wrap (see step 3).
+2. The `Note` dataclass already has an `ornaments: list` field (Sprint 1).
+   Verify `Note.to_lilypond()` appends ornament strings after duration
+   (e.g. `c4\trill`).
+3. Add a `GraceNote` dataclass to `models/ornament.py`:
+   ```python
+   @dataclass
+   class GraceNote:
+       note: 'Note'
+       acciaccatura: bool = False  # True -> \acciaccatura; False -> \grace
+
+       def to_lilypond(self) -> str:
+           prefix = r'\acciaccatura' if self.acciaccatura else r'\grace'
+           return f'{prefix} {{ {self.note.to_lilypond()} }}'
+   ```
+   Add `grace_note: GraceNote | None = None` to the `Note` dataclass.
+   When present, `Note.to_lilypond()` prepends the grace note block:
+   `\grace { c8 } c4` for an appoggiatura on a C quarter note.
+4. Add `ORNAMENT_CELLS: dict[str, str]` to `bana_symbols.py`.
+   Map each Unicode braille sequence to an `OrnamentType` name string.
+   **Verify every cell against BANA section 15 before entering.**
+   Also add named constants:
+   ```python
+   GRACE_NOTE_INDICATOR: str = '...'    # verify from BANA section 15
+   ACCIACCATURA_INDICATOR: str = '...'  # verify (may differ from grace note)
+   ```
+5. Update `BrailleTokenizer` to classify ornament and grace note indicator
+   cells as `SymbolCategory.ORNAMENT`.
+6. In `BrailleParser.parse()`:
+   - Standard ornament cell: buffer and attach to the next note's `ornaments`
+     list (ornaments precede the note they modify in BANA).
+   - Grace note indicator: consume the following NOTE token as a `GraceNote`
+     and attach to the next real note's `grace_note` field.  The grace note
+     cell is typically an 8th-note-class cell.
+7. Write unit tests:
+   ```python
+   def test_trill_attaches_to_following_note():
+       notes = _parse(TRILL_CELL + '⠐⠹')
+       assert any(o.type == OrnamentType.TRILL for o in notes[0].ornaments)
+
+   def test_trill_renders_in_lilypond():
+       notes = _parse(TRILL_CELL + '⠐⠹')
+       assert r'\trill' in notes[0].to_lilypond()
+
+   def test_grace_note_wraps_note_object():
+       from dottednotes.models.ornament import GraceNote
+       notes = _parse(GRACE_NOTE_INDICATOR + '⠨⠙' + '⠐⠹')
+       assert isinstance(notes[0].grace_note, GraceNote)
+       assert notes[0].grace_note.note.note_name == 'C'
+
+   def test_grace_note_renders_before_main_note():
+       notes = _parse(GRACE_NOTE_INDICATOR + '⠨⠙' + '⠐⠹')
+       ly = notes[0].to_lilypond()
+       assert r'\grace' in ly
+       assert ly.index(r'\grace') < ly.index("c'")
+   ```
+
+**Definition of Done:**
+- [ ] `Ornament` class with `OrnamentType` enum exists in `models/ornament.py`
+- [ ] `GraceNote` dataclass exists and wraps a `Note`
+- [ ] `Note` has `grace_note: GraceNote | None` field
+- [ ] `Note.to_lilypond()` prepends grace note block when present
+- [ ] `Note.to_lilypond()` appends standard ornament strings (e.g. `\trill`)
+- [ ] `ORNAMENT_CELLS`, `GRACE_NOTE_INDICATOR`, `ACCIACCATURA_INDICATOR`
+      in `bana_symbols.py` verified against BANA section 15
+- [ ] Tokenizer classifies ornament cells as `SymbolCategory.ORNAMENT`
+- [ ] Parser attaches ornaments and grace notes to the correct notes
+- [ ] Grace notes are excluded from `_validate_measure_beat_count()`
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** Grace notes do not count toward the measure beat total --
+skip them in `_validate_measure_beat_count()`.  A grace note without a
+following real note (e.g. at end of input) should emit a parser warning,
+not an exception.  In BANA the grace note indicator is followed immediately
+by the grace note cell (a real note cell, usually 8th-note class), then the
+main note; the parser must consume the grace note cell specially, not treat
+it as a `_PendingNote` in the measure.
+
+---
+
+### [ ] S4-5: Implement word sign / text marking parsing
+
+**Why:** Tempo markings and expression directions (Allegro, dolce, con moto)
+appear at the start of pieces and throughout a score.  They are encoded in
+BANA braille music using a word sign that switches context to literary braille.
+Without this, the parser silently drops these markings and the LilyPond output
+contains no tempo information -- important for both human performers and MIDI.
+
+**Steps:**
+1. Create `src/dottednotes/models/text_marking.py`:
+   ```python
+   from dataclasses import dataclass
+   from enum import Enum, auto
+
+   TEMPO_TERMS = frozenset({
+       'Allegro', 'Andante', 'Adagio', 'Presto', 'Moderato',
+       'Largo', 'Vivace', 'Lento', 'Prestissimo', 'Allegretto',
+   })
+
+   class TextMarkingType(Enum):
+       TEMPO = auto()       # e.g. Allegro, Andante
+       EXPRESSION = auto()  # e.g. dolce, espressivo, con moto
+       REHEARSAL = auto()   # rehearsal letters or numbers
+       GENERAL = auto()     # any other in-score text
+
+   @dataclass
+   class TextMarking:
+       text: str
+       type: TextMarkingType = TextMarkingType.GENERAL
+
+       def to_lilypond(self) -> str:
+           if self.type == TextMarkingType.TEMPO:
+               return f'\\tempo "{self.text}"'
+           return f'\\mark \\markup {{ "{self.text}" }}'
+   ```
+   Extend `TEMPO_TERMS` with any Italian terms the developer commonly uses.
+2. Add `SymbolCategory.WORD_SIGN` to the enum in `bana_symbols.py`.
+3. Add the word sign cell to `bana_symbols.py`:
+   ```python
+   WORD_SIGN: str = '...'          # verify from BANA word sign chapter
+   WORD_SIGN_END: str | None = ... # None if words end at blank cell
+   ```
+   **Verify against the BANA manual before entering.**  The word sign in
+   music context signals that what follows should be read as literary braille
+   letters until a blank cell or line break.  Check both the 1997 and 2015
+   BANA revisions and note which the developer's files use.
+4. In `BrailleTokenizer`, implement a WORD_MODE state machine:
+   - Entering WORD_MODE: tokenizer sees the WORD_SIGN cell
+   - In WORD_MODE: each cell is decoded as a literary braille letter
+     (reverse the `ASCII_TO_DOTS` mapping in `input_pipeline.py`)
+     and appended to a text buffer
+   - Exiting WORD_MODE: a blank cell (U+2800) or newline returns to
+     MUSIC_MODE and emits the accumulated text as a single WORD_SIGN token
+   Do not use lookahead for this -- use an explicit state variable.
+5. Add fields to `Measure` and `Staff`:
+   ```python
+   # Measure
+   text_markings: list[TextMarking] = field(default_factory=list)
+
+   # Staff
+   tempo: TextMarking | None = None
+   ```
+6. In `BrailleParser.parse()`, when a `WORD_SIGN` token is encountered:
+   - Classify the text against `TEMPO_TERMS`; create a `TextMarking`.
+   - If it appears before the first measure, assign to `staff.tempo`.
+   - Otherwise, append to the current measure's `text_markings` list.
+7. Update `Staff.to_lilypond()` to emit `\tempo` before the first measure
+   when `staff.tempo` is set.  Update `Measure.to_lilypond()` to prepend
+   expression markings.
+8. Write unit tests:
+   ```python
+   def test_word_sign_produces_text_token():
+       tokens = BrailleTokenizer().tokenize(WORD_SIGN + BANA_LETTERS_ALLEGRO)
+       assert tokens[0].category == SymbolCategory.WORD_SIGN
+
+   def test_allegro_classified_as_tempo():
+       score = parse_text(WORD_SIGN_ALLEGRO + '⠐⠹⠀')
+       assert score.staves[0].tempo.type == TextMarkingType.TEMPO
+       assert score.staves[0].tempo.text == 'Allegro'
+
+   def test_tempo_renders_in_lilypond():
+       score = parse_text(WORD_SIGN_ALLEGRO + '⠐⠹⠀')
+       assert r'\tempo "Allegro"' in score.to_lilypond()
+
+   def test_expression_renders_as_mark():
+       # "dolce" is EXPRESSION, not TEMPO
+       score = parse_text(WORD_SIGN_DOLCE + '⠐⠹⠀')
+       assert r'\mark \markup { "dolce" }' in score.to_lilypond()
+   ```
+
+**Definition of Done:**
+- [ ] `TextMarking` class with `TextMarkingType` enum exists in
+      `models/text_marking.py`
+- [ ] `WORD_SIGN` cell verified against BANA manual and added to
+      `bana_symbols.py`
+- [ ] Tokenizer state machine correctly enters and exits WORD_MODE
+- [ ] `Measure` has `text_markings: list[TextMarking]` field
+- [ ] `Staff` has `tempo: TextMarking | None` field
+- [ ] Common Italian tempo terms are classified as `TextMarkingType.TEMPO`
+- [ ] `Staff.to_lilypond()` emits `\tempo` before the first measure
+- [ ] `Measure.to_lilypond()` prepends expression markings
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+**Senior note:** The WORD_MODE state switch is the key implementation
+challenge.  The same dot patterns that represent notes in music context
+represent letters in literary context -- the tokenizer must not process
+any cell in WORD_MODE as a note.  The TEMPO_TERMS set is a curated list,
+not an exhaustive one; anything not in the set falls back to EXPRESSION.
+Metronome marks (e.g. `\tempo 4 = 120`) are Sprint 6 work; for now a
+quoted string is sufficient.
+
+---
+
+### [ ] S4-6: Integration test -- Fengyang Flower Drum with Sprint 4 elements
+
+**Why:** Sprints 1-3 were each verified end-to-end with fixture files.
+Sprint 4 introduces five new categories of musical information.
+An integration test with a real .brf file confirms all five work together in
+the full pipeline, not just in unit test isolation.
+
+**Steps:**
+1. Load `tests/fixtures/fengyang_flower_drum.brf` and inspect the parsed
+   output.  Identify which Sprint 4 categories are present:
+   - Articulations, dynamics, slurs/ties, ornaments, text markings.
+   If any category is absent from the Fengyang file, create a short
+   supplementary fixture `tests/fixtures/sprint4_sample.brf` covering the
+   missing ones -- verified or composed by the developer.
+2. Write a smoke test:
+   ```python
+   def test_fengyang_parses_without_error():
+       pipeline = BRLInputPipeline()
+       text = pipeline.load(FIXTURES / 'fengyang_flower_drum.brf')
+       score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+       assert len(score.staves) >= 1
+   ```
+3. Add a specific assertion for each Sprint 4 category present in the file:
+   ```python
+   def test_fengyang_contains_articulations():
+       ...
+       all_notes = [n for staff in score.staves
+                    for m in staff.measures for n in m.notes]
+       assert any(n.articulations for n in all_notes)
+   ```
+   Mark tests for absent categories with `pytest.mark.skip` and a comment
+   naming which fixture covers that category.
+4. Add a LilyPond render test:
+   ```python
+   def test_fengyang_renders_to_lilypond():
+       ...
+       ly = score.to_lilypond()
+       assert r'\version' in ly
+       assert r'\relative' in ly
+       assert any(mark in ly for mark in ['-.', '--', '->', '-^'])
+   ```
+5. Add a compile test using the same pattern as
+   `test_simple_melody_lilypond_compiles`, skipping if lilypond is absent.
+
+**Definition of Done:**
+- [ ] `test_fengyang_parses_without_error` passes
+- [ ] At least one Sprint 4 category verified in the Fengyang file
+- [ ] `test_fengyang_renders_to_lilypond` passes
+- [ ] Compile test passes if lilypond is installed
+- [ ] No regressions in any earlier sprint tests
+- [ ] `pytest tests/` passes clean
 
 ---
 

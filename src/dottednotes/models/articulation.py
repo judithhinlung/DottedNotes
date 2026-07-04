@@ -4,20 +4,22 @@ from enum import Enum
 
 class ArticulationType(Enum):
     STACCATO = "staccato"
+    STACCATISSIMO = "staccatissimo"
+    MEZZO_STACCATO = "mezzo_staccato"
     TENUTO = "tenuto"
     ACCENT = "accent"
-    MARCATO = "marcato"
-    STACCATISSIMO = "staccatissimo"
-    PORTATO = "portato"
+    EXPRESSIVE_ACCENT = "expressive_accent"
+    SWELL = "swell"
 
 
 _ARTICULATION_TO_LILYPOND = {
     ArticulationType.STACCATO: '-.',
-    ArticulationType.ACCENT: '->',
-    ArticulationType.TENUTO: '--',
-    ArticulationType.MARCATO: '-^',
-    ArticulationType.PORTATO: '-_',
     ArticulationType.STACCATISSIMO: '-!',
+    ArticulationType.MEZZO_STACCATO: '-_',
+    ArticulationType.TENUTO: '--',
+    ArticulationType.ACCENT: '->',
+    ArticulationType.EXPRESSIVE_ACCENT: '-^',
+    ArticulationType.SWELL: r'\espressivo',
 }
 
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from dottednotes.bana_symbols import (
     ACCIDENTAL_CELLS,
+    ARTICULATION_CELLS,
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
     CLEF_CELLS,
@@ -190,6 +191,21 @@ class BrailleTokenizer:
                         i += 1
                         continue
                 # ⠩ not classified as key sig → sharp accidental
+
+            # --- articulation: 2-cell pair (longest match first) or single cell ---
+            # Several 2-cell pairs start with cells that are also OCTAVE_MARKS
+            # (⠠, ⠐, ⠸, ⠨, ⠘). Checking the pair before _classify() resolves
+            # the ambiguity: the second cell ⠦ (dots 2,3,6) never follows an
+            # octave mark legitimately, so this check is always unambiguous.
+            two = text[i:i + 2]
+            if two in ARTICULATION_CELLS:
+                tokens.append(BrailleToken(two, SymbolCategory.ARTICULATION, i, line))
+                i += 2
+                continue
+            if char in ARTICULATION_CELLS:
+                tokens.append(BrailleToken(char, SymbolCategory.ARTICULATION, i, line))
+                i += 1
+                continue
 
             # --- general single-cell classification ---
             cat = self._classify(char)

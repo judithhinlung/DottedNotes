@@ -290,3 +290,25 @@ BAR_LINE_SEQUENCES: dict[str, str] = {
     '⠣⠶':  'forward_repeat',      # dots 1,2,6 + dots 2,3,5,6
     '⠣⠆':  'end_repeat',          # dots 1,2,6 + dots 2,3
 }
+
+# ---------------------------------------------------------------------------
+# Articulation cells
+# All articulations are 2-cell sequences whose second cell is ⠦ (dots 2,3,6),
+# except staccato (single cell ⠦) and swell (⠤⠄).
+#
+# Several first cells (⠐, ⠸, ⠨, ⠘, ⠠) are also OCTAVE_MARKS; the tokenizer
+# must check 2-cell articulation pairs before classifying isolated octave marks.
+#
+# Only articulations with LilyPond equivalents are listed here.
+# Reversed accent and arpeggios are handled in later sprints.
+# ---------------------------------------------------------------------------
+
+ARTICULATION_CELLS: dict[str, str] = {
+    '⠦':   'staccato',           # dots 2,3,6           (single cell)
+    '⠠⠦': 'staccatissimo',      # dots 6 + dots 2,3,6
+    '⠐⠦': 'mezzo_staccato',     # dots 5 + dots 2,3,6
+    '⠸⠦': 'tenuto',             # dots 4,5,6 + dots 2,3,6
+    '⠨⠦': 'accent',             # dots 4,6 + dots 2,3,6
+    '⠘⠦': 'expressive_accent',  # dots 4,5 + dots 2,3,6
+    '⠤⠄': 'swell',              # dots 3,6 + dot 3
+}

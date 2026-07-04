@@ -271,12 +271,16 @@ def test_articulation_tenuto():
     assert Articulation(ArticulationType.TENUTO).to_lilypond() == '--'
 
 
-def test_articulation_marcato():
-    assert Articulation(ArticulationType.MARCATO).to_lilypond() == '-^'
+def test_articulation_expressive_accent():
+    assert Articulation(ArticulationType.EXPRESSIVE_ACCENT).to_lilypond() == '-^'
 
 
-def test_articulation_portato():
-    assert Articulation(ArticulationType.PORTATO).to_lilypond() == '-_'
+def test_articulation_mezzo_staccato():
+    assert Articulation(ArticulationType.MEZZO_STACCATO).to_lilypond() == '-_'
+
+
+def test_articulation_swell():
+    assert Articulation(ArticulationType.SWELL).to_lilypond() == r'\espressivo'
 
 
 def test_articulation_staccatissimo():

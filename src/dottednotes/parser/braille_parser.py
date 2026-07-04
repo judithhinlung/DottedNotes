@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..bana_symbols import (
     ACCIDENTAL_CELLS,
+    ARTICULATION_CELLS,
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
     CLEF_CELLS,
@@ -15,6 +16,7 @@ from ..bana_symbols import (
     SymbolCategory,
 )
 from ..models.accidental import Accidental, AccidentalType
+from ..models.articulation import Articulation, ArticulationType
 from ..models.clef import Clef, ClefType
 from ..models.duration import Duration
 from ..models.key_signature import KeySignature
@@ -32,6 +34,16 @@ _STR_TO_ACCIDENTAL_TYPE: dict[str, AccidentalType] = {
     'natural': AccidentalType.NATURAL,
 }
 
+_STR_TO_ARTICULATION_TYPE: dict[str, ArticulationType] = {
+    'staccato':          ArticulationType.STACCATO,
+    'staccatissimo':     ArticulationType.STACCATISSIMO,
+    'mezzo_staccato':    ArticulationType.MEZZO_STACCATO,
+    'tenuto':            ArticulationType.TENUTO,
+    'accent':            ArticulationType.ACCENT,
+    'expressive_accent': ArticulationType.EXPRESSIVE_ACCENT,
+    'swell':             ArticulationType.SWELL,
+}
+
 
 @dataclass
 class _PendingNote:
@@ -41,6 +53,7 @@ class _PendingNote:
     base_duration: int   # 1, 2, 4, or 8 from NOTE_CELLS
     raw_brl: str
     accidental: Accidental | None = None
+    articulations: list[Articulation] = field(default_factory=list)
 
 
 class BrailleParser:
@@ -97,6 +110,8 @@ class BrailleParser:
                 self._handle_clef(token)
             elif token.category == SymbolCategory.ACCIDENTAL:
                 self._handle_accidental(token)
+            elif token.category == SymbolCategory.ARTICULATION:
+                self._handle_articulation(token)
             # REST, UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
@@ -131,16 +146,52 @@ class BrailleParser:
             type=_STR_TO_ACCIDENTAL_TYPE[ACCIDENTAL_CELLS[token.character]],
         )
 
+    def _handle_articulation(self, token: BrailleToken) -> None:
+        art_type = _STR_TO_ARTICULATION_TYPE[ARTICULATION_CELLS[token.character]]
+
+        if art_type in self._active_articulations:
+            # Terminator: next note gets this articulation, then carry mode ends.
+            self._pending_articulations.append(Articulation(type=art_type))
+            self._terminating_articulations.add(art_type)
+            self._last_articulation_seen = None
+        elif art_type == self._last_articulation_seen:
+            # Same sign twice with no note between → doubled sign → activate carry.
+            # The first occurrence already added to _pending_articulations so the
+            # first note of the run will still carry the articulation.
+            self._active_articulations.add(art_type)
+            self._last_articulation_seen = None
+        else:
+            # Normal single sign: applies to the next note only.
+            self._pending_articulations.append(Articulation(type=art_type))
+            self._last_articulation_seen = art_type
+
     def _buffer_note(self, token: BrailleToken) -> _PendingNote:
         note_name, base_duration = NOTE_CELLS[token.character]
         accidental = self._pending_accidental
         self._pending_accidental = None
+
+        # Combine single-note pending articulations with carried articulations.
+        # Pending types take priority; carried types fill in what isn't already present.
+        pending_types = {a.type for a in self._pending_articulations}
+        articulations = list(self._pending_articulations)
+        for art_type in self._active_articulations:
+            if art_type not in pending_types:
+                articulations.append(Articulation(type=art_type))
+
+        self._pending_articulations = []
+        # End carry for any articulations that were just terminated.
+        for art_type in self._terminating_articulations:
+            self._active_articulations.discard(art_type)
+        self._terminating_articulations = set()
+        self._last_articulation_seen = None  # note breaks doubled-sign detection
+
         return _PendingNote(
             note_name=note_name,
             octave=self._current_octave,
             base_duration=base_duration,
             raw_brl=token.character,
             accidental=accidental,
+            articulations=articulations,
         )
 
     def _handle_key_signature(self, token: BrailleToken) -> None:
@@ -199,6 +250,7 @@ class BrailleParser:
                 octave=pnote.octave,
                 duration=Duration(value=dur_value),
                 accidental=pnote.accidental,
+                articulations=pnote.articulations,
             ))
         self._validate_measure_beat_count(measure)
         return measure
@@ -318,3 +370,7 @@ class BrailleParser:
         self._time_signature_parsed: bool = False
         self._clef_parsed: bool = False
         self._pending_accidental: Accidental | None = None
+        self._pending_articulations: list[Articulation] = []
+        self._active_articulations: set[ArticulationType] = set()
+        self._terminating_articulations: set[ArticulationType] = set()
+        self._last_articulation_seen: ArticulationType | None = None

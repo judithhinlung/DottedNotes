@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory
-from dottednotes.models import Clef, ClefType, KeySignature, Score, TimeSignature
+from dottednotes.models import Articulation, ArticulationType, Clef, ClefType, KeySignature, Score, TimeSignature
 from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline
 
 
@@ -1331,3 +1331,165 @@ def test_g_major_scale_lilypond_compiles(tmp_path: Path):
     assert result.returncode == 0, (
         f"LilyPond compilation failed:\n{result.stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S4-1: Articulation tokenization and parsing
+# ---------------------------------------------------------------------------
+
+# --- Tokenizer: articulation cells ---
+
+def test_tokenizer_staccato_single_cell():
+    # ⠦ = dots 2,3,6 — staccato (single cell)
+    tokens = BrailleTokenizer().tokenize('⠦')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠦'
+
+
+def test_tokenizer_staccatissimo_two_cells():
+    # ⠠⠦ = dots 6 + dots 2,3,6 — staccatissimo
+    tokens = BrailleTokenizer().tokenize('⠠⠦')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠠⠦'
+
+
+def test_tokenizer_mezzo_staccato_two_cells():
+    # ⠐⠦ = dots 5 + dots 2,3,6 — mezzo staccato
+    # ⠐ is also octave 4 mark; the 2-cell pair must be preferred.
+    tokens = BrailleTokenizer().tokenize('⠐⠦')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠐⠦'
+
+
+def test_tokenizer_tenuto_two_cells():
+    # ⠸⠦ = dots 4,5,6 + dots 2,3,6 — tenuto
+    # ⠸ is also octave 3 mark; the 2-cell pair must be preferred.
+    tokens = BrailleTokenizer().tokenize('⠸⠦')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠸⠦'
+
+
+def test_tokenizer_accent_two_cells():
+    # ⠨⠦ = dots 4,6 + dots 2,3,6 — accent
+    # ⠨ is also octave 5 mark; the 2-cell pair must be preferred.
+    tokens = BrailleTokenizer().tokenize('⠨⠦')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠨⠦'
+
+
+def test_tokenizer_expressive_accent_two_cells():
+    # ⠘⠦ = dots 4,5 + dots 2,3,6 — expressive accent
+    # ⠘ is also octave 2 mark; the 2-cell pair must be preferred.
+    tokens = BrailleTokenizer().tokenize('⠘⠦')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠘⠦'
+
+
+def test_tokenizer_swell_two_cells():
+    # ⠤⠄ = dots 3,6 + dot 3 — swell
+    tokens = BrailleTokenizer().tokenize('⠤⠄')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠤⠄'
+
+
+def test_tokenizer_octave_mark_alone_still_works():
+    # ⠐ alone (not followed by ⠦) must remain an OCTAVE_MARK, not ARTICULATION
+    tokens = BrailleTokenizer().tokenize('⠐⠹')
+    assert tokens[0].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[1].category == SymbolCategory.NOTE
+
+
+def test_tokenizer_articulation_before_note():
+    # ⠦⠐⠹ = staccato + octave 4 + C quarter
+    tokens = BrailleTokenizer().tokenize('⠦⠐⠹')
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[1].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[2].category == SymbolCategory.NOTE
+
+
+# --- Parser: single articulation applied to one note ---
+
+def test_parser_staccato_attaches_to_note():
+    # ⠦ staccato + octave 4 + C quarter
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠦⠐⠹')
+    assert len(notes[0].articulations) == 1
+    assert notes[0].articulations[0].type == ArticulationType.STACCATO
+
+
+def test_parser_staccato_does_not_carry_forward():
+    # Single staccato applies to one note only; second note has no articulation.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠦⠐⠹⠹')
+    assert len(notes[0].articulations) == 1
+    assert len(notes[1].articulations) == 0
+
+
+def test_parser_tenuto_attaches_to_note():
+    # ⠸⠦ tenuto + octave 4 + C quarter
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠸⠦⠐⠹')
+    assert notes[0].articulations[0].type == ArticulationType.TENUTO
+
+
+def test_parser_accent_attaches_to_note():
+    # ⠨⠦ accent + octave 4 + C quarter
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠨⠦⠐⠹')
+    assert notes[0].articulations[0].type == ArticulationType.ACCENT
+
+
+def test_parser_note_with_no_articulation():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹')
+    assert notes[0].articulations == []
+
+
+# --- Parser: doubled articulation sign activates carry mode ---
+
+def test_parser_doubled_staccato_applies_to_all_following_notes():
+    # ⠦⠦ (doubled staccato) then four C quarters in 4/4 — all should be staccato.
+    notes = _parse('⠦⠦⠐⠹⠹⠹⠹')
+    assert all(len(n.articulations) == 1 for n in notes)
+    assert all(n.articulations[0].type == ArticulationType.STACCATO for n in notes)
+
+
+def test_parser_doubled_staccato_ends_on_third_sign():
+    # ⠦⠦ C C C ⠦ C C: carry on first 4 Cs (including terminator C), then off.
+    # notes[0..2]: carry, notes[3]: terminator note, notes[4]: no staccato
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠦⠦⠐⠹⠹⠹⠦⠹⠹')
+    assert notes[0].articulations[0].type == ArticulationType.STACCATO  # carry
+    assert notes[1].articulations[0].type == ArticulationType.STACCATO  # carry
+    assert notes[2].articulations[0].type == ArticulationType.STACCATO  # carry
+    assert notes[3].articulations[0].type == ArticulationType.STACCATO  # terminator note
+    assert notes[4].articulations == []                                  # carry ended
+
+
+# --- Parser: articulation renders to LilyPond ---
+
+def test_parser_staccato_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠦⠐⠹')
+    assert '-.' in notes[0].to_lilypond()
+
+
+def test_parser_tenuto_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠸⠦⠐⠹')
+    assert '--' in notes[0].to_lilypond()
