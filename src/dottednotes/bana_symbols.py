@@ -44,6 +44,7 @@ class SymbolCategory(Enum):
     OCTAVE_MARK = auto()
     KEY_SIGNATURE = auto()
     TIME_SIGNATURE = auto()
+    CLEF = auto()
     ARTICULATION = auto()
     DYNAMIC = auto()
     ORNAMENT = auto()
@@ -166,6 +167,65 @@ KEY_SIGNATURE_CELLS: dict[str, int] = {
     '⠼⠑⠣': -5,       # ⠼⠑⠣   D♭ major / B♭ minor (5 flats)
     '⠼⠋⠣': -6,       # ⠼⠋⠣   G♭ major / E♭ minor (6 flats)
     '⠼⠛⠣': -7,       # ⠼⠛⠣   C♭ major / A♭ minor (7 flats)
+}
+
+# ---------------------------------------------------------------------------
+# Number sign
+# Used as the prefix for both key-signature (4+ accidentals) and time-signature
+# cells.  Same cell as literary-braille number indicator.
+# ---------------------------------------------------------------------------
+
+NUMBER_SIGN: str = '⠼'   # dots 3,4,5,6 = U+283C
+
+# ---------------------------------------------------------------------------
+# Time signature cells
+# A BANA time signature is encoded as:
+#   NUMBER_SIGN + upper-dot numerator cell(s) + lower-dot denominator cell
+#
+# Upper-dot numerator cells (same as standard braille digits after #):
+#   1=⠁(1)  2=⠃(1,2)  3=⠉(1,4)  4=⠙(1,4,5)  5=⠑(1,5)
+#   6=⠋(1,2,4)  7=⠛(1,2,4,5)  8=⠓(1,2,5)  9=⠊(2,4)
+#
+# Lower-dot denominator cells (each upper-dot digit shifted down by 1 row):
+#   /2  = ⠆  (dots 2,3)     U+2806  — unverified
+#   /4  = ⠲  (dots 2,5,6)   U+2832  — inferred from fengyang_flower_drum.brf
+#   /8  = ⠦  (dots 2,3,6)   U+2826  — confirmed by developer
+#   /16 = ⠂⠖ (dot 2 + dots 2,3,5)   — confirmed by developer (two cells)
+#
+# There is no separate separator cell: the shift to lower dots marks the
+# transition from numerator to denominator.
+#
+# Keys are the full multi-character sequences (NUMBER_SIGN stripped) so
+# the tokenizer can do a single table lookup after consuming ⠼.
+# ---------------------------------------------------------------------------
+
+TIME_SIGNATURE_CELLS: dict[str, tuple[int, int]] = {
+    # Keys include the NUMBER_SIGN prefix (⠼) so the tokenizer can do a single
+    # 3-char lookup after encountering ⠼, matching the same pattern used for
+    # KEY_SIGNATURE_CELLS.  Verified entries noted below.
+    '⠼⠙⠲': (4, 4),   # 4/4 common time  — inferred from fengyang_flower_drum.brf
+    '⠼⠉⠲': (3, 4),   # 3/4 waltz time   — confirmed by developer
+    '⠼⠋⠦': (6, 8),   # 6/8 compound     — confirmed by developer
+    '⠼⠃⠆': (2, 2),   # 2/2 cut time     — confirmed by developer
+    '⠼⠃⠲': (2, 4),   # 2/4             — confirmed by developer
+}
+
+# ---------------------------------------------------------------------------
+# Clef cells
+# Maps Unicode braille character(s) → clef type string ('treble', 'bass', etc.)
+# Verify every cell against the BANA manual before entering it.
+# The ClefType conversion from string to enum happens in the parser (S3-4),
+# keeping this table free of any import dependency on models/clef.py.
+# ---------------------------------------------------------------------------
+
+CLEF_CELLS: dict[str, str] = {
+    # Clef sequences all start with ⠜ (dots 3,4,5) and end with ⠇ (dots 1,2,3).
+    # The middle cell(s) identify the clef type.  Tenor is a 4-cell sequence;
+    # all others are 3-cell.  The tokenizer checks longest match first (S3-4).
+    '⠜⠌⠇': 'treble',   # G clef: dots 3,4,5 + dots 3,4   + dots 1,2,3
+    '⠜⠼⠇': 'bass',     # F clef: dots 3,4,5 + dots 3,4,5,6 + dots 1,2,3
+    '⠜⠬⠇': 'alto',     # C clef (alto):  dots 3,4,5 + dots 3,4,6 + dots 1,2,3
+    '⠜⠬⠐⠇': 'tenor',   # C clef (tenor): dots 3,4,5 + dots 3,4,6 + dots 5 + dots 1,2,3
 }
 
 # ---------------------------------------------------------------------------

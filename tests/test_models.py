@@ -7,6 +7,9 @@ from dottednotes.models import (
     Articulation,
     ArticulationType,
     BrailleSymbol,
+    Clef,
+    ClefType,
+    CLEF_TO_LILYPOND,
     Duration,
     Dynamic,
     DynamicLevel,
@@ -19,6 +22,8 @@ from dottednotes.models import (
     Rest,
     Score,
     Staff,
+    TimeSignature,
+    VALID_DENOMINATORS,
 )
 
 
@@ -466,3 +471,143 @@ def test_key_signature_has_raw_brl_field():
 def test_key_signature_category_is_key_signature():
     ks = _make_ks(0)
     assert ks.category == SymbolCategory.KEY_SIGNATURE
+
+
+# ---------------------------------------------------------------------------
+# S3-2: TimeSignature class
+# ---------------------------------------------------------------------------
+
+def _make_ts(numerator: int, denominator: int) -> TimeSignature:
+    return TimeSignature(
+        dots=frozenset(),
+        category=SymbolCategory.TIME_SIGNATURE,
+        raw_brl='',
+        numerator=numerator,
+        denominator=denominator,
+    )
+
+
+def test_time_4_4_lilypond():
+    assert _make_ts(4, 4).to_lilypond() == r'\time 4/4'
+
+
+def test_time_3_4_lilypond():
+    assert _make_ts(3, 4).to_lilypond() == r'\time 3/4'
+
+
+def test_time_6_8_lilypond():
+    assert _make_ts(6, 8).to_lilypond() == r'\time 6/8'
+
+
+def test_time_2_2_lilypond():
+    assert _make_ts(2, 2).to_lilypond() == r'\time 2/2'
+
+
+def test_time_12_8_lilypond():
+    assert _make_ts(12, 8).to_lilypond() == r'\time 12/8'
+
+
+def test_beats_per_measure_4_4():
+    assert _make_ts(4, 4).beats_per_measure() == 4.0
+
+
+def test_beats_per_measure_3_4():
+    assert _make_ts(3, 4).beats_per_measure() == 3.0
+
+
+def test_beats_per_measure_6_8():
+    assert _make_ts(6, 8).beats_per_measure() == 3.0
+
+
+def test_beats_per_measure_2_2():
+    assert _make_ts(2, 2).beats_per_measure() == 4.0
+
+
+def test_beats_per_measure_12_8():
+    assert _make_ts(12, 8).beats_per_measure() == 6.0
+
+
+def test_beats_per_measure_1_4():
+    assert _make_ts(1, 4).beats_per_measure() == 1.0
+
+
+def test_time_as_tuple():
+    assert _make_ts(6, 8).as_tuple() == (6, 8)
+
+
+def test_time_invalid_denominator_raises():
+    with pytest.raises(ValueError):
+        _make_ts(4, 3)
+
+
+def test_time_invalid_denominator_5_raises():
+    with pytest.raises(ValueError):
+        _make_ts(4, 5)
+
+
+def test_time_invalid_numerator_zero_raises():
+    with pytest.raises(ValueError):
+        _make_ts(0, 4)
+
+
+def test_time_invalid_numerator_negative_raises():
+    with pytest.raises(ValueError):
+        _make_ts(-1, 4)
+
+
+def test_time_valid_denominators_all_pass():
+    from dottednotes.models import VALID_DENOMINATORS
+    for denom in VALID_DENOMINATORS:
+        _make_ts(4, denom)   # must not raise
+
+
+def test_time_signature_has_raw_brl_field():
+    ts = _make_ts(4, 4)
+    assert hasattr(ts, 'raw_brl')
+
+
+def test_time_signature_category_is_time_signature():
+    ts = _make_ts(4, 4)
+    assert ts.category == SymbolCategory.TIME_SIGNATURE
+
+
+# ---------------------------------------------------------------------------
+# S3-3: Clef class
+# ---------------------------------------------------------------------------
+
+def _make_clef(clef_type: ClefType) -> Clef:
+    return Clef(
+        dots=frozenset(),
+        category=SymbolCategory.CLEF,
+        raw_brl='',
+        clef_type=clef_type,
+    )
+
+
+def test_clef_treble():
+    assert _make_clef(ClefType.TREBLE).to_lilypond() == r'\clef treble'
+
+
+def test_clef_bass():
+    assert _make_clef(ClefType.BASS).to_lilypond() == r'\clef bass'
+
+
+def test_clef_alto():
+    assert _make_clef(ClefType.ALTO).to_lilypond() == r'\clef alto'
+
+
+def test_clef_tenor():
+    assert _make_clef(ClefType.TENOR).to_lilypond() == r'\clef tenor'
+
+
+def test_clef_to_lilypond_map_covers_all_types():
+    for clef_type in ClefType:
+        assert clef_type in CLEF_TO_LILYPOND
+
+
+def test_clef_has_raw_brl_field():
+    assert hasattr(_make_clef(ClefType.TREBLE), 'raw_brl')
+
+
+def test_clef_category_is_clef():
+    assert _make_clef(ClefType.TREBLE).category == SymbolCategory.CLEF

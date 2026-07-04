@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory
-from dottednotes.models import Score
+from dottednotes.models import Clef, ClefType, KeySignature, Score, TimeSignature
 from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline
 
 
@@ -34,13 +34,13 @@ def test_braille_parser_default_octave():
 def test_braille_parser_default_key_signature():
     parser = BrailleParser(tokens=[])
     parser._reset_state()
-    assert parser._key_signature == 0  # C major
+    assert parser._key_signature.sharps_or_flats == 0  # C major
 
 
 def test_braille_parser_default_time_signature():
     parser = BrailleParser(tokens=[])
     parser._reset_state()
-    assert parser._time_signature == (4, 4)
+    assert parser._time_signature.as_tuple() == (4, 4)
 
 
 def test_braille_parser_state_resets_between_parses():
@@ -442,17 +442,16 @@ def test_tokenizer_octave_mark():
 
 
 def test_tokenizer_accidental_flat():
-    # ⠣ = flat (dots 1,2,6)
-    tokens = BrailleTokenizer().tokenize('⠣')
-    assert len(tokens) == 1
-    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+    # ⠣ after a note (not at measure start) → ACCIDENTAL, not KEY_SIGNATURE
+    # At measure start ⠣ becomes KEY_SIGNATURE (1 flat); a preceding note clears that.
+    tokens = BrailleTokenizer().tokenize('⠹⠣')  # C quarter, then flat accidental
+    assert tokens[1].category == SymbolCategory.ACCIDENTAL
 
 
 def test_tokenizer_accidental_sharp():
-    # ⠩ = sharp (dots 1,4,6)
-    tokens = BrailleTokenizer().tokenize('⠩')
-    assert len(tokens) == 1
-    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+    # ⠩ after a note (not at measure start) → ACCIDENTAL, not KEY_SIGNATURE
+    tokens = BrailleTokenizer().tokenize('⠹⠩')  # C quarter, then sharp accidental
+    assert tokens[1].category == SymbolCategory.ACCIDENTAL
 
 
 def test_tokenizer_unknown_cell():
@@ -558,17 +557,16 @@ def test_section_double_bar_preferred_over_final_double_bar():
 
 
 def test_flat_sign_not_misread_as_bar_line():
-    # ⠣ followed by a note cell (not a bar line second cell) → ACCIDENTAL, not BAR_LINE
-    tokens = BrailleTokenizer().tokenize('⠣⠽')  # flat + C whole/16th
-    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+    # ⠣ between notes (after measure-start is cleared) → ACCIDENTAL, not BAR_LINE
+    tokens = BrailleTokenizer().tokenize('⠹⠣⠽')  # note + flat accidental + note
+    assert tokens[1].category == SymbolCategory.ACCIDENTAL
     assert all(t.category != SymbolCategory.BAR_LINE for t in tokens)
 
 
 def test_flat_at_end_of_input_is_accidental():
-    # ⠣ with no following cell → ACCIDENTAL
-    tokens = BrailleTokenizer().tokenize('⠣')
-    assert len(tokens) == 1
-    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+    # ⠣ after a note (not at measure start) → ACCIDENTAL
+    tokens = BrailleTokenizer().tokenize('⠹⠣')  # C quarter then flat
+    assert tokens[1].category == SymbolCategory.ACCIDENTAL
 
 
 def test_tokenizer_position_after_two_cell_bar_line():
@@ -804,3 +802,424 @@ def test_simple_melody_lilypond_compiles(tmp_path: Path):
     assert result.returncode == 0, (
         f"LilyPond compilation failed:\n{result.stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S3-4: Key / time / clef tokenization and parser state
+# ---------------------------------------------------------------------------
+
+# --- Tokenizer: key signature ---
+
+def test_tokenizer_key_sig_1_sharp_at_start():
+    tokens = BrailleTokenizer().tokenize('⠩')   # G major (1 sharp)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠩'
+
+
+def test_tokenizer_key_sig_2_sharps_at_start():
+    tokens = BrailleTokenizer().tokenize('⠩⠩')   # D major (2 sharps)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠩⠩'
+
+
+def test_tokenizer_key_sig_3_sharps_at_start():
+    tokens = BrailleTokenizer().tokenize('⠩⠩⠩')   # A major (3 sharps)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠩⠩⠩'
+
+
+def test_tokenizer_key_sig_4_sharps():
+    # ⠼⠙⠩ = E major (4 sharps), number-sign prefix
+    tokens = BrailleTokenizer().tokenize('⠼⠙⠩')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠼⠙⠩'
+
+
+def test_tokenizer_key_sig_1_flat_at_start():
+    tokens = BrailleTokenizer().tokenize('⠣')   # F major (1 flat), at piece start
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+
+
+def test_tokenizer_key_sig_3_flats_at_start():
+    tokens = BrailleTokenizer().tokenize('⠣⠣⠣')   # Eb major (3 flats)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠣⠣⠣'
+
+
+def test_tokenizer_key_sig_4_flats():
+    # ⠼⠙⠣ = Ab major (4 flats)
+    tokens = BrailleTokenizer().tokenize('⠼⠙⠣')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠼⠙⠣'
+
+
+# --- Tokenizer: time signature ---
+
+def test_tokenizer_time_sig_4_4():
+    # ⠼⠙⠲ = 4/4
+    tokens = BrailleTokenizer().tokenize('⠼⠙⠲')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.TIME_SIGNATURE
+    assert tokens[0].character == '⠼⠙⠲'
+
+
+def test_tokenizer_time_sig_6_8():
+    # ⠼⠋⠦ = 6/8
+    tokens = BrailleTokenizer().tokenize('⠼⠋⠦')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.TIME_SIGNATURE
+
+
+def test_tokenizer_number_sign_distinguishes_key_from_time():
+    # ⠼⠙⠩ = E major key sig, ⠼⠙⠲ = 4/4 time sig — same digits, different third cell
+    ks = BrailleTokenizer().tokenize('⠼⠙⠩')
+    ts = BrailleTokenizer().tokenize('⠼⠙⠲')
+    assert ks[0].category == SymbolCategory.KEY_SIGNATURE
+    assert ts[0].category == SymbolCategory.TIME_SIGNATURE
+
+
+# --- Tokenizer: clef ---
+
+def test_tokenizer_treble_clef():
+    tokens = BrailleTokenizer().tokenize('⠜⠌⠇')   # G clef
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.CLEF
+    assert tokens[0].character == '⠜⠌⠇'
+
+
+def test_tokenizer_bass_clef():
+    tokens = BrailleTokenizer().tokenize('⠜⠼⠇')   # F clef
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.CLEF
+
+
+def test_tokenizer_alto_clef():
+    tokens = BrailleTokenizer().tokenize('⠜⠬⠇')   # C clef (alto)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.CLEF
+    assert tokens[0].character == '⠜⠬⠇'
+
+
+def test_tokenizer_tenor_clef():
+    # Tenor clef is 4 cells: ⠜⠬⠐⠇ (dots 3,4,5 + 3,4,6 + 5 + 1,2,3)
+    tokens = BrailleTokenizer().tokenize('⠜⠬⠐⠇')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.CLEF
+    assert tokens[0].character == '⠜⠬⠐⠇'
+
+
+def test_tokenizer_tenor_not_confused_with_alto():
+    # Alto = 3 cells ⠜⠬⠇; tenor = 4 cells ⠜⠬⠐⠇ — longest match wins
+    alto = BrailleTokenizer().tokenize('⠜⠬⠇')
+    tenor = BrailleTokenizer().tokenize('⠜⠬⠐⠇')
+    assert alto[0].character == '⠜⠬⠇'
+    assert tenor[0].character == '⠜⠬⠐⠇'
+
+
+# --- Tokenizer: sharp/flat as accidental after a note ---
+
+def test_sharp_after_note_is_accidental_not_key_sig():
+    # at_measure_start is False after a note, so ⠩ → ACCIDENTAL
+    tokens = BrailleTokenizer().tokenize('⠐⠗⠩⠙')  # octave + G-half + sharp + C-8th
+    cats = [t.category for t in tokens]
+    assert SymbolCategory.ACCIDENTAL in cats
+    assert SymbolCategory.KEY_SIGNATURE not in cats
+
+
+def test_flat_after_note_is_accidental_not_key_sig():
+    tokens = BrailleTokenizer().tokenize('⠐⠗⠣⠙')  # octave + G-half + flat + C-8th
+    cats = [t.category for t in tokens]
+    assert SymbolCategory.ACCIDENTAL in cats
+    assert SymbolCategory.KEY_SIGNATURE not in cats
+
+
+# --- Parser state after parsing key/time/clef tokens ---
+
+def _make_token(char: str, category: SymbolCategory) -> BrailleToken:
+    return BrailleToken(character=char, category=category, position=0, line=1)
+
+
+def test_parser_reads_1_sharp_key_signature():
+    # Feed a G-major key sig token + a note so the staff is non-empty
+    tokens = [
+        _make_token('⠩', SymbolCategory.KEY_SIGNATURE),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    parser = BrailleParser(tokens=tokens)
+    parser.parse()
+    assert parser._key_signature_parsed
+    assert parser._key_signature.sharps_or_flats == 1
+
+
+def test_parser_reads_4_sharp_key_signature():
+    tokens = [
+        _make_token('⠼⠙⠩', SymbolCategory.KEY_SIGNATURE),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    parser = BrailleParser(tokens=tokens)
+    parser.parse()
+    assert parser._key_signature.sharps_or_flats == 4
+
+
+def test_parser_reads_time_signature_3_4():
+    tokens = [
+        _make_token('⠼⠉⠲', SymbolCategory.TIME_SIGNATURE),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    parser = BrailleParser(tokens=tokens)
+    parser.parse()
+    assert parser._time_signature_parsed
+    assert parser._time_signature.numerator == 3
+    assert parser._time_signature.denominator == 4
+
+
+def test_parser_reads_treble_clef():
+    tokens = [
+        _make_token('⠜⠌⠇', SymbolCategory.CLEF),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    parser = BrailleParser(tokens=tokens)
+    parser.parse()
+    assert parser._clef_parsed
+    assert parser._clef.clef_type == ClefType.TREBLE
+
+
+def test_parser_reads_bass_clef():
+    tokens = [
+        _make_token('⠜⠼⠇', SymbolCategory.CLEF),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    parser = BrailleParser(tokens=tokens)
+    parser.parse()
+    assert parser._clef.clef_type == ClefType.BASS
+
+
+# --- Staff header directives in to_lilypond() ---
+
+def test_staff_emits_key_directive_for_non_c_major():
+    tokens = [
+        _make_token('⠩', SymbolCategory.KEY_SIGNATURE),       # 1 sharp (G major)
+        _make_token('⠼⠙⠲', SymbolCategory.TIME_SIGNATURE),   # 4/4
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\key g \major' in ly
+    assert r'\time 4/4' in ly
+
+
+def test_staff_omits_key_directive_for_c_major():
+    # No key sig token → staff.key_signature is None → no \key line emitted
+    tokens = [
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\key' not in ly
+
+
+def test_staff_omits_time_directive_when_not_in_file():
+    tokens = [
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\time' not in ly
+
+
+def test_staff_emits_clef_directive_for_bass():
+    tokens = [
+        _make_token('⠜⠼⠇', SymbolCategory.CLEF),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\clef bass' in ly
+
+
+def test_staff_emits_treble_clef_for_explicit_treble_clef():
+    # Explicit treble clef cell in the BRF → \clef treble emitted
+    tokens = [
+        _make_token('⠜⠌⠇', SymbolCategory.CLEF),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\clef treble' in ly
+
+
+def test_staff_emits_treble_clef_heuristic_for_octave_4():
+    # No explicit clef cell; first note at octave 4 (middle C) → heuristic → treble
+    tokens = [
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),   # octave 4
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\clef treble' in ly
+
+
+def test_staff_emits_bass_clef_heuristic_for_octave_3():
+    # No explicit clef cell; first note at octave 3 → heuristic → bass
+    tokens = [
+        _make_token('⠸', SymbolCategory.OCTAVE_MARK),   # octave 3
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\clef bass' in ly
+
+
+def test_staff_emits_bass_clef_heuristic_for_octave_2():
+    tokens = [
+        _make_token('⠘', SymbolCategory.OCTAVE_MARK),   # octave 2
+        _make_token('⠹', SymbolCategory.NOTE),
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\clef bass' in ly
+
+
+# --- S3-4: ⠩/⠣ disambiguation — single sharp/flat lookahead ---
+#
+# A single ⠩ (sharp, dots 1,4,6) or ⠣ (flat, dots 1,2,6) at a measure boundary
+# is KEY_SIGNATURE only when followed by the number sign ⠼ (meaning a time
+# signature follows on the same line) or by whitespace/end-of-input (key sig
+# alone on its own line).  When followed by a note or octave mark it must be
+# treated as a sharp/flat accidental, not a key signature.
+
+def test_tokenizer_single_sharp_before_note_is_accidental():
+    # ⠩ at measure start followed immediately by a note cell → ACCIDENTAL
+    tokens = BrailleTokenizer().tokenize('⠩⠹')
+    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+    assert tokens[1].category == SymbolCategory.NOTE
+
+
+def test_tokenizer_g_major_4_4_together():
+    # dots 1,4,6 + 3,4,5,6 + 1,4,5 + 2,5,6 → G major (1 sharp) + 4/4 time
+    # ⠩ is followed by ⠼ (number sign) → classified as KEY_SIGNATURE
+    tokens = BrailleTokenizer().tokenize('⠩⠼⠙⠲')
+    assert len(tokens) == 2
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠩'
+    assert tokens[1].category == SymbolCategory.TIME_SIGNATURE
+    assert tokens[1].character == '⠼⠙⠲'
+
+
+def test_parser_g_major_4_4_together():
+    # Full integration: ⠩⠼⠙⠲ → G major (sharps_or_flats=1) + 4/4 time
+    parser = BrailleParser(tokens=BrailleTokenizer().tokenize('⠩⠼⠙⠲'))
+    parser.parse()
+    assert parser._key_signature_parsed
+    assert parser._key_signature.sharps_or_flats == 1
+    assert parser._time_signature_parsed
+    assert parser._time_signature.as_tuple() == (4, 4)
+
+
+def test_tokenizer_f_major_2_4_together():
+    # dots 1,2,6 + 3,4,5,6 + 1,2 + 2,5,6 → F major (1 flat) + 2/4 time
+    # ⠣ is followed by ⠼ (number sign) → classified as KEY_SIGNATURE
+    tokens = BrailleTokenizer().tokenize('⠣⠼⠃⠲')
+    assert len(tokens) == 2
+    assert tokens[0].category == SymbolCategory.KEY_SIGNATURE
+    assert tokens[0].character == '⠣'
+    assert tokens[1].category == SymbolCategory.TIME_SIGNATURE
+    assert tokens[1].character == '⠼⠃⠲'
+
+
+def test_parser_f_major_2_4_together():
+    # Full integration: ⠣⠼⠃⠲ → F major (sharps_or_flats=-1) + 2/4 time
+    parser = BrailleParser(tokens=BrailleTokenizer().tokenize('⠣⠼⠃⠲'))
+    parser.parse()
+    assert parser._key_signature_parsed
+    assert parser._key_signature.sharps_or_flats == -1
+    assert parser._time_signature_parsed
+    assert parser._time_signature.as_tuple() == (2, 4)
+
+
+# --- Accidental attachment to notes ---
+#
+# In BANA braille, an accidental cell immediately precedes the note it modifies.
+# dots 1,2,6 + dots 1,2,4,6 = flat (⠣) + E quarter (⠫) = E-flat quarter note.
+# The parser buffers a pending accidental and attaches it to the next NOTE seen.
+# After that note the pending accidental is cleared (it does not carry forward).
+
+def test_accidental_flat_attaches_to_following_note():
+    # ⠣⠫ (flat + E quarter) at piece start → E-flat quarter, not F-major key sig
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠣⠫')
+    assert notes[0].note_name == 'E'
+    assert notes[0].accidental is not None
+    assert notes[0].accidental.type.name == 'FLAT'
+
+
+def test_accidental_sharp_attaches_to_following_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠩⠫')   # octave 4 + sharp + E quarter → E-sharp quarter
+    assert notes[0].note_name == 'E'
+    assert notes[0].accidental.type.name == 'SHARP'
+
+
+def test_accidental_natural_attaches_to_following_note():
+    # ⠡ = natural (dots 1,6)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠡⠫')   # octave 4 + natural + E quarter
+    assert notes[0].note_name == 'E'
+    assert notes[0].accidental.type.name == 'NATURAL'
+
+
+def test_e_flat_quarter_renders_as_ees_in_lilypond():
+    # E-flat uses LilyPond's 'es' suffix: E + 'es' = 'ees'
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠣⠫')   # octave 4 + flat + E quarter
+    assert notes[0].to_lilypond().startswith('ees')
+
+
+def test_accidental_does_not_carry_forward_to_next_note():
+    # After the flat E, the following E note should carry no accidental
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠣⠫⠫')   # octave 4, flat E, plain E
+    assert notes[0].accidental is not None   # first note: E-flat
+    assert notes[1].accidental is None       # second note: plain E
+
+
+def test_note_without_preceding_accidental_has_none():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠫')   # octave 4 + plain E quarter
+    assert notes[0].accidental is None

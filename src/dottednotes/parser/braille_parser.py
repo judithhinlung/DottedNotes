@@ -4,18 +4,33 @@ import warnings
 from dataclasses import dataclass
 
 from ..bana_symbols import (
+    ACCIDENTAL_CELLS,
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
+    CLEF_CELLS,
+    KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
+    TIME_SIGNATURE_CELLS,
     SymbolCategory,
 )
+from ..models.accidental import Accidental, AccidentalType
+from ..models.clef import Clef, ClefType
 from ..models.duration import Duration
+from ..models.key_signature import KeySignature
 from ..models.measure import Measure
 from ..models.note import Note
 from ..models.score import Score
 from ..models.staff import Staff
+from ..models.time_signature import TimeSignature
 from .tokenizer import BrailleToken
+
+
+_STR_TO_ACCIDENTAL_TYPE: dict[str, AccidentalType] = {
+    'sharp':   AccidentalType.SHARP,
+    'flat':    AccidentalType.FLAT,
+    'natural': AccidentalType.NATURAL,
+}
 
 
 @dataclass
@@ -23,8 +38,9 @@ class _PendingNote:
     """A note buffered during measure accumulation, before duration resolution."""
     note_name: str
     octave: int
-    base_duration: int   # 1, 2, or 4 from NOTE_CELLS
+    base_duration: int   # 1, 2, 4, or 8 from NOTE_CELLS
     raw_brl: str
+    accidental: Accidental | None = None
 
 
 class BrailleParser:
@@ -40,6 +56,9 @@ class BrailleParser:
       base_duration 2 (half/32nd):  if treating all as half notes overflows
           the time signature → all become 32nd notes; otherwise all half.
       base_duration 4:              always quarter for now.
+
+    Key / time / clef tokens update internal state and are attached to the
+    Staff so that Staff.to_lilypond() can emit the appropriate directives.
 
     State is reset at the start of each parse() call.
     """
@@ -70,11 +89,27 @@ class BrailleParser:
                     )
                     pending = []
                     measure_number += 1
-            # REST, ACCIDENTAL, UNKNOWN — TODO in later tickets
+            elif token.category == SymbolCategory.KEY_SIGNATURE:
+                self._handle_key_signature(token)
+            elif token.category == SymbolCategory.TIME_SIGNATURE:
+                self._handle_time_signature(token)
+            elif token.category == SymbolCategory.CLEF:
+                self._handle_clef(token)
+            elif token.category == SymbolCategory.ACCIDENTAL:
+                self._handle_accidental(token)
+            # REST, UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
         if pending:
             staff.add_measure(self._finalize_measure(pending, measure_number))
+
+        # Attach parsed header state to the staff
+        if self._key_signature_parsed:
+            staff.key_signature = self._key_signature
+        if self._time_signature_parsed:
+            staff.time_signature = self._time_signature
+        if self._clef_parsed:
+            staff.clef = self._clef
 
         if staff.measures:
             score.add_staff(staff)
@@ -88,14 +123,60 @@ class BrailleParser:
     def _handle_octave_mark(self, token: BrailleToken) -> None:
         self._current_octave = OCTAVE_MARKS[token.character]
 
+    def _handle_accidental(self, token: BrailleToken) -> None:
+        self._pending_accidental = Accidental(
+            dots=frozenset(),
+            category=SymbolCategory.ACCIDENTAL,
+            raw_brl=token.character,
+            type=_STR_TO_ACCIDENTAL_TYPE[ACCIDENTAL_CELLS[token.character]],
+        )
+
     def _buffer_note(self, token: BrailleToken) -> _PendingNote:
         note_name, base_duration = NOTE_CELLS[token.character]
+        accidental = self._pending_accidental
+        self._pending_accidental = None
         return _PendingNote(
             note_name=note_name,
             octave=self._current_octave,
             base_duration=base_duration,
             raw_brl=token.character,
+            accidental=accidental,
         )
+
+    def _handle_key_signature(self, token: BrailleToken) -> None:
+        self._key_signature = KeySignature(
+            dots=frozenset(),
+            category=SymbolCategory.KEY_SIGNATURE,
+            raw_brl=token.character,
+            sharps_or_flats=KEY_SIGNATURE_CELLS[token.character],
+        )
+        self._key_signature_parsed = True
+
+    def _handle_time_signature(self, token: BrailleToken) -> None:
+        numerator, denominator = TIME_SIGNATURE_CELLS[token.character]
+        self._time_signature = TimeSignature(
+            dots=frozenset(),
+            category=SymbolCategory.TIME_SIGNATURE,
+            raw_brl=token.character,
+            numerator=numerator,
+            denominator=denominator,
+        )
+        self._time_signature_parsed = True
+
+    def _handle_clef(self, token: BrailleToken) -> None:
+        _str_to_clef_type: dict[str, ClefType] = {
+            'treble': ClefType.TREBLE,
+            'bass':   ClefType.BASS,
+            'alto':   ClefType.ALTO,
+            'tenor':  ClefType.TENOR,
+        }
+        self._clef = Clef(
+            dots=frozenset(),
+            category=SymbolCategory.CLEF,
+            raw_brl=token.character,
+            clef_type=_str_to_clef_type[CLEF_CELLS[token.character]],
+        )
+        self._clef_parsed = True
 
     # ------------------------------------------------------------------
     # Measure finalization and duration resolution
@@ -108,11 +189,7 @@ class BrailleParser:
         bar_line_type: str = 'measure_separator',
     ) -> Measure:
         resolved = self._resolve_measure_durations(pending)
-        measure = Measure(
-            number=number,
-            time_signature=self._time_signature,
-            bar_line_type=bar_line_type,
-        )
+        measure = Measure(number=number, bar_line_type=bar_line_type)
         for pnote, dur_value in zip(pending, resolved):
             measure.add_note(Note(
                 dots=frozenset(),
@@ -121,6 +198,7 @@ class BrailleParser:
                 note_name=pnote.note_name,
                 octave=pnote.octave,
                 duration=Duration(value=dur_value),
+                accidental=pnote.accidental,
             ))
         self._validate_measure_beat_count(measure)
         return measure
@@ -159,7 +237,7 @@ class BrailleParser:
         Half/32nd (base_duration 2): count_2 * 2 > beats → all 32nd.
         Quarter (base_duration 4): always quarter.
         """
-        beats = float(self._time_signature[0])
+        beats = self._time_signature.beats_per_measure()
         count_2 = sum(1 for n in pending if n.base_duration == 2)
         resolve_2 = 32 if count_2 * 2.0 > beats else 2
 
@@ -172,7 +250,6 @@ class BrailleParser:
             if n.base_duration == 1:
                 if state == "individual":
                     resolved[i] = 16
-                    # state stays "individual"
                 elif next_bd == 8:
                     resolved[i] = 16
                     state = "run"
@@ -186,7 +263,6 @@ class BrailleParser:
             elif n.base_duration == 8:
                 if state == "run":
                     resolved[i] = 16
-                    # state stays "run"
                 else:
                     resolved[i] = 8
                     state = "normal"
@@ -203,7 +279,7 @@ class BrailleParser:
 
     def _validate_measure_beat_count(self, measure: Measure) -> None:
         """Warn (plain text) if resolved beat count doesn't match the time signature."""
-        beats_expected = float(self._time_signature[0])
+        beats_expected = self._time_signature.beats_per_measure()
         beats_actual = sum(n.duration.duration_in_beats() for n in measure.notes)
         if beats_actual != beats_expected:
             warnings.warn(
@@ -219,6 +295,26 @@ class BrailleParser:
 
     def _reset_state(self) -> None:
         self._current_octave: int = 4
-        self._key_signature: int = 0
-        self._time_signature: tuple[int, int] = (4, 4)
-        self._measure_number: int = 1
+        self._key_signature: KeySignature = KeySignature(
+            dots=frozenset(),
+            category=SymbolCategory.KEY_SIGNATURE,
+            raw_brl='',
+            sharps_or_flats=0,
+        )
+        self._time_signature: TimeSignature = TimeSignature(
+            dots=frozenset(),
+            category=SymbolCategory.TIME_SIGNATURE,
+            raw_brl='',
+            numerator=4,
+            denominator=4,
+        )
+        self._clef: Clef = Clef(
+            dots=frozenset(),
+            category=SymbolCategory.CLEF,
+            raw_brl='',
+            clef_type=ClefType.TREBLE,
+        )
+        self._key_signature_parsed: bool = False
+        self._time_signature_parsed: bool = False
+        self._clef_parsed: bool = False
+        self._pending_accidental: Accidental | None = None

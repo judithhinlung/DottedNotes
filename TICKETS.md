@@ -1407,7 +1407,7 @@ by the `Note` class.
 
 ---
 
-### [ ] S3-2: Implement TimeSignature class
+### [x] S3-2: Implement TimeSignature class
 
 **Why:** The parser already hard-codes `(4, 4)` for the time signature.
 A real `TimeSignature` class lets the parser read the actual time signature from
@@ -1483,13 +1483,13 @@ def test_time_invalid_denominator_raises():
 ```
 
 **Definition of Done:**
-- [ ] `TimeSignature` class exists in `models/time_signature.py`
-- [ ] `beats_per_measure()` returns the correct float for all tested meters
-- [ ] `to_lilypond()` returns the correct `\time n/d` string
-- [ ] `NUMBER_SIGN` and `TIME_SIGNATURE_SEPARATOR` constants are in `bana_symbols.py`
+- [x] `TimeSignature` class exists in `models/time_signature.py`
+- [x] `beats_per_measure()` returns the correct float for all tested meters
+- [x] `to_lilypond()` returns the correct `\time n/d` string
+- [x] `NUMBER_SIGN` and `TIME_SIGNATURE_SEPARATOR` constants are in `bana_symbols.py`
       and verified against the BANA manual
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** `beats_per_measure()` replaces the `self._time_signature[0]` raw
 number currently used in `BrailleParser._resolve_measure_durations()`.
@@ -1500,7 +1500,7 @@ For 6/8 time the beat unit is the dotted quarter (= 3 eighth notes), but
 
 ---
 
-### [ ] S3-3: Implement Clef class
+### [x] S3-3: Implement Clef class
 
 **Why:** The LilyPond renderer needs to emit `\clef treble` or `\clef bass` at the
 start of each staff.  Treble is the implicit default in LilyPond, so without a
@@ -1555,11 +1555,11 @@ def test_clef_bass():
 ```
 
 **Definition of Done:**
-- [ ] `Clef` class with `ClefType` enum exists in `models/clef.py`
-- [ ] `to_lilypond()` returns correct `\clef <type>` for all implemented clef types
-- [ ] `CLEF_CELLS` in `bana_symbols.py` is populated and verified against the BANA manual
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] `Clef` class with `ClefType` enum exists in `models/clef.py`
+- [x] `to_lilypond()` returns correct `\clef <type>` for all implemented clef types
+- [x] `CLEF_CELLS` in `bana_symbols.py` is populated and verified against the BANA manual
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** Clef changes mid-staff are rare in the pieces you are likely to
 parse first.  Do not add mid-staff clef-change logic yet; a plain `\clef` at the
@@ -1567,7 +1567,7 @@ top of the staff is sufficient for Sprint 3.
 
 ---
 
-### [ ] S3-4: Add key and time signature parsing to BrailleParser
+### [x] S3-4: Add key and time signature parsing to BrailleParser
 
 **Why:** The parser currently ignores key signature and time signature cells.
 All the logic from S3-1 through S3-3 is useless unless the parser reads the
@@ -1669,17 +1669,17 @@ def test_parser_reads_time_signature():
 ```
 
 **Definition of Done:**
-- [ ] Tokenizer classifies key signature, time signature, and clef cells correctly
-- [ ] Tokenizer handles the number indicator context so digit cells are not
+- [x] Tokenizer classifies key signature, time signature, and clef cells correctly
+- [x] Tokenizer handles the number indicator context so digit cells are not
       misread as note cells
-- [ ] Parser updates `_key_signature`, `_time_signature`, and `_clef` state on
+- [x] Parser updates `_key_signature`, `_time_signature`, and `_clef` state on
       each recognized token
-- [ ] `Staff` stores key, time, and clef after parsing
-- [ ] `Staff.to_lilypond()` prepends the appropriate `\key`, `\time`, `\clef`
+- [x] `Staff` stores key, time, and clef after parsing
+- [x] `Staff.to_lilypond()` prepends the appropriate `\key`, `\time`, `\clef`
       directives before the first measure
-- [ ] `_resolve_measure_durations()` uses `TimeSignature.beats_per_measure()`
-- [ ] All new unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] `_resolve_measure_durations()` uses `TimeSignature.beats_per_measure()`
+- [x] All new unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** The hardest part of this ticket is the tokenizer context switch for
 time signatures.  The number indicator (⠼) followed by digit cells is the only
