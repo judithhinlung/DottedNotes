@@ -1692,7 +1692,7 @@ when every token is unambiguously categorized.
 
 ---
 
-### [ ] S3-5: Integration test — parse a non-C-major piece
+### [x] S3-5: Integration test — parse a non-C-major piece
 
 **Why:** Every piece of code written in S3-1 through S3-4 must be exercised
 end-to-end before Sprint 3 can be called done.  A G major piece exercises
@@ -1754,13 +1754,13 @@ def test_g_major_scale_renders_to_lilypond():
    `test_simple_melody_lilypond_compiles`).
 
 **Definition of Done:**
-- [ ] `tests/fixtures/g_major_scale.brf` exists and is verified correct braille
-- [ ] `tests/fixtures/g_major_scale.ly` exists as a reference
-- [ ] Integration test passes: correct staves, measures, and first note
-- [ ] Render test passes: `\key g \major`, `\time 4/4`, and `fis` all appear
+- [x] `tests/fixtures/g_major_scale.brf` exists and is verified correct braille
+- [x] `tests/fixtures/g_major_scale.ly` exists as a reference
+- [x] Integration test passes: correct staves, measures, and first note
+- [x] Render test passes: `\key g \major`, `\time 4/4`, and `fis` all appear
       in the LilyPond output
-- [ ] If lilypond binary is present, the output compiles without errors
-- [ ] `pytest tests/` passes with no regressions
+- [x] If lilypond binary is present, the output compiles without errors
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** The F# in G major will be written in the .brf file as an
 explicit accidental before the F note cell (since the parser does not yet carry

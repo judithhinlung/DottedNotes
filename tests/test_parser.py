@@ -1223,3 +1223,111 @@ def test_note_without_preceding_accidental_has_none():
         warnings.simplefilter("ignore")
         notes = _parse('⠐⠫')   # octave 4 + plain E quarter
     assert notes[0].accidental is None
+
+
+# ---------------------------------------------------------------------------
+# S3-5: Integration test — parse a non-C-major piece (G major scale)
+# ---------------------------------------------------------------------------
+#
+# g_major_scale.brf: 2 measures, 4/4, G major (1 sharp), all quarter notes.
+# Line 1 (header):  leading blank cells + ⠩ (G major key sig) + ⠼⠙⠲ (4/4)
+# Line 2 (music):   ⠐⠳⠪⠺⠹ ⠀ ⠱⠫⠩⠻⠳ ⠣⠅
+#   Measure 1: oct4, G-qtr, A-qtr, B-qtr, C-qtr
+#   Measure 2: D-qtr, E-qtr, F#-qtr (explicit sharp accidental), G-qtr, final bar
+
+
+def test_parse_g_major_scale():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    assert len(score.staves) == 1
+    staff = score.staves[0]
+
+    assert staff.key_signature.sharps_or_flats == 1
+
+    assert staff.time_signature.numerator == 4
+    assert staff.time_signature.denominator == 4
+
+    assert len(staff.measures) == 2
+    assert len(staff.measures[0].notes) == 4
+    assert len(staff.measures[1].notes) == 4
+
+    first_note = staff.measures[0].notes[0]
+    assert first_note.note_name == 'G'
+    assert first_note.octave == 4
+    assert first_note.duration.value == 4
+
+
+def test_parse_g_major_scale_all_notes():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+    staff = score.staves[0]
+
+    m1_names = [n.note_name for n in staff.measures[0].notes]
+    m2_names = [n.note_name for n in staff.measures[1].notes]
+    assert m1_names == ['G', 'A', 'B', 'C']
+    assert m2_names == ['D', 'E', 'F', 'G']
+
+    fsharp = staff.measures[1].notes[2]
+    assert fsharp.note_name == 'F'
+    assert fsharp.accidental is not None
+    assert fsharp.accidental.type.name == 'SHARP'
+
+
+def test_parse_g_major_scale_final_bar():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+    assert score.staves[0].measures[-1].bar_line_type == 'final_double_bar'
+
+
+def test_parse_g_major_scale_no_beat_count_warnings():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_g_major_scale_renders_to_lilypond():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly = score.to_lilypond()
+
+    assert isinstance(ly, str)
+    assert len(ly) > 0
+    assert r'\version' in ly
+    assert r'\key g \major' in ly
+    assert r'\time 4/4' in ly
+    assert r'\clef treble' in ly
+    assert 'fis' in ly
+
+
+def test_g_major_scale_lilypond_compiles(tmp_path: Path):
+    """If the lilypond binary is installed, the rendered output must compile cleanly."""
+    import shutil
+    import subprocess
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'g_major_scale.brf')
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+    ly_output = score.to_lilypond()
+
+    if not shutil.which('lilypond'):
+        pytest.skip('lilypond binary not found; skipping compile test')
+
+    ly_file = tmp_path / 'g_major_scale.ly'
+    ly_file.write_text(ly_output, encoding='utf-8')
+    result = subprocess.run(
+        ['lilypond', '--silent', '-o', str(tmp_path / 'g_major_scale'), str(ly_file)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"LilyPond compilation failed:\n{result.stderr}"
+    )
