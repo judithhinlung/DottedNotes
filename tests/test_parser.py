@@ -1720,3 +1720,153 @@ def test_parser_dynamic_with_end_word_sign_before_note():
         warnings.simplefilter("ignore")
         notes = _parse(_DYN_P + _END_WORD_SIGN + '⠐⠹')
     assert notes[0].dynamics[0].level == DynamicLevel.P
+
+
+# ---------------------------------------------------------------------------
+# S4-3: Ties and slurs
+# ---------------------------------------------------------------------------
+
+# Verified BANA tie and slur cells:
+_TIE          = '⠈⠉'  # dots 4 + dots 1,4 — placed after tied note
+_SLUR         = '⠉'    # dots 1,4 — between notes (simple) or doubled for carry
+_PHRASE_OPEN  = '⠰⠃'  # dots 5,6 + dots 1,2 — before first phrased note
+_PHRASE_CLOSE = '⠘⠆'  # dots 4,5 + dots 2,3 — after last phrased note
+
+
+# --- Tokenizer: tie / slur cell recognition ---
+
+def test_tokenizer_tie_is_slur_category():
+    tokens = BrailleTokenizer().tokenize('⠐⠹' + _TIE + '⠹')
+    slur_tokens = [t for t in tokens if t.category == SymbolCategory.SLUR]
+    assert len(slur_tokens) == 1
+    assert slur_tokens[0].character == _TIE
+
+
+def test_tokenizer_simple_slur_is_slur_category():
+    tokens = BrailleTokenizer().tokenize('⠐⠹' + _SLUR + '⠹')
+    slur_tokens = [t for t in tokens if t.category == SymbolCategory.SLUR]
+    assert len(slur_tokens) == 1
+    assert slur_tokens[0].character == _SLUR
+
+
+def test_tokenizer_slur_bracket_open_is_slur_category():
+    tokens = BrailleTokenizer().tokenize(_PHRASE_OPEN + '⠐⠹')
+    slur_tokens = [t for t in tokens if t.category == SymbolCategory.SLUR]
+    assert len(slur_tokens) == 1
+    assert slur_tokens[0].character == _PHRASE_OPEN
+
+
+def test_tokenizer_slur_bracket_close_is_slur_category():
+    tokens = BrailleTokenizer().tokenize('⠐⠹' + _PHRASE_CLOSE)
+    slur_tokens = [t for t in tokens if t.category == SymbolCategory.SLUR]
+    assert len(slur_tokens) == 1
+    assert slur_tokens[0].character == _PHRASE_CLOSE
+
+
+def test_tokenizer_tie_not_classified_as_octave_mark():
+    # ⠈ (dots 4) is the octave 1 mark; ⠈⠉ must produce a SLUR token, not an OCTAVE_MARK.
+    tokens = BrailleTokenizer().tokenize('⠐⠹' + _TIE + '⠹')
+    octave_tokens = [t for t in tokens if t.category == SymbolCategory.OCTAVE_MARK]
+    assert all(t.character == '⠐' for t in octave_tokens)  # only the initial octave 4 mark
+
+
+def test_tokenizer_slur_bracket_open_not_classified_as_octave_six():
+    # ⠰ (dots 5,6) is the octave 6 mark; ⠰⠃ must produce a SLUR token, not an OCTAVE_MARK.
+    tokens = BrailleTokenizer().tokenize(_PHRASE_OPEN + '⠐⠹')
+    octave_tokens = [t for t in tokens if t.category == SymbolCategory.OCTAVE_MARK]
+    assert all(t.character == '⠐' for t in octave_tokens)  # only the octave 4 mark
+
+
+def test_tokenizer_slur_bracket_close_not_classified_as_octave_two():
+    # ⠘ (dots 4,5) is octave 2 and also starts expressive_accent ⠘⠦;
+    # ⠘⠆ must be SLUR, not octave mark or articulation.
+    tokens = BrailleTokenizer().tokenize('⠐⠹' + _PHRASE_CLOSE)
+    octave_tokens = [t for t in tokens if t.category == SymbolCategory.OCTAVE_MARK]
+    assert all(t.character == '⠐' for t in octave_tokens)
+
+
+def test_tokenizer_slur_bracket_close_vs_expressive_accent():
+    # ⠘⠦ (expressive accent) and ⠘⠆ (phrase slur close) share the ⠘ prefix;
+    # make sure both are classified by their 2-cell pair, not by ⠘ alone.
+    tokens_art = BrailleTokenizer().tokenize('⠐⠹⠘⠦⠹')
+    tokens_slur = BrailleTokenizer().tokenize('⠐⠹' + _PHRASE_CLOSE)
+    art_cats = [t.category for t in tokens_art if t.character in ('⠘⠦', '⠘⠆')]
+    slur_cats = [t.category for t in tokens_slur if t.character in ('⠘⠦', '⠘⠆')]
+    assert SymbolCategory.ARTICULATION in art_cats
+    assert SymbolCategory.SLUR in slur_cats
+
+
+# --- Parser: tie ---
+
+def test_parser_tie_attaches_to_first_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹' + _TIE + '⠹')
+    assert notes[0].tie is True
+    assert notes[1].tie is False
+
+
+
+def test_parser_tie_renders_tilde_in_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹' + _TIE + '⠹')
+    assert '~' in notes[0].to_lilypond()
+    assert '~' not in notes[1].to_lilypond()
+
+
+# --- Parser: simple (two-note) slur ---
+
+def test_parser_simple_slur_first_and_second_notes():
+    notes = _parse('⠐⠹' + _SLUR + '⠹⠹')
+    assert notes[0].slur_start is True
+    assert notes[1].slur_end is True
+
+
+def test_parser_simple_slur_third_note_has_no_marks():
+    notes = _parse('⠐⠹' + _SLUR + '⠹⠹')
+    assert notes[2].slur_start is False
+    assert notes[2].slur_end is False
+
+
+def test_parser_simple_slur_renders_parens_in_lilypond():
+    notes = _parse('⠐⠹' + _SLUR + '⠹⠹')
+    assert '(' in notes[0].to_lilypond()
+    assert ')' in notes[1].to_lilypond()
+
+
+# --- Parser: doubled (long) slur ---
+
+def test_parser_doubled_slur():
+    # NOTE SLUR SLUR NOTE NOTE NOTE SLUR NOTE
+    # First note starts slur, middle notes have no marks, last note ends slur.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠙' + _SLUR + _SLUR + '⠙⠙⠙' + _SLUR + '⠙')
+    assert notes[0].slur_start is True
+    assert notes[1].slur_start is False
+    assert notes[1].slur_end is False
+    assert notes[2].slur_start is False
+    assert notes[3].slur_end is False
+    assert notes[4].slur_end is True
+
+
+# --- Parser: phrasing (bracket) slur ---
+
+def test_parser_slur_bracket():
+    # ⠰⠃ ⠐⠻ ⠋ ⠑ ⠋ ⠛ ⠘⠆ — F quarter + 4 eighth notes in bracket slur
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_PHRASE_OPEN + '⠐⠻⠋⠑⠋⠛' + _PHRASE_CLOSE)
+    assert notes[0].slur_bracket_open is True
+    assert notes[1].slur_bracket_open is False
+    assert notes[1].slur_bracket_close is False
+    assert notes[4].slur_bracket_close is True
+
+
+def test_parser_slur_bracket_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_PHRASE_OPEN + '⠐⠻⠋⠑⠋⠛' + _PHRASE_CLOSE)
+    assert r'\(' in notes[0].to_lilypond()
+    assert r'\)' in notes[4].to_lilypond()

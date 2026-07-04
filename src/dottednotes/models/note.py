@@ -34,6 +34,11 @@ class Note(BrailleSymbol):
     dynamics: list[Dynamic] = field(default_factory=list)
     articulations: list = field(default_factory=list)
     ornaments: list = field(default_factory=list)
+    tie: bool = False
+    slur_start: bool = False
+    slur_end: bool = False
+    slur_bracket_open: bool = False
+    slur_bracket_close: bool = False
 
     def __post_init__(self):
         if self.note_name not in NOTE_NAME_TO_LILYPOND:
@@ -54,9 +59,16 @@ class Note(BrailleSymbol):
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
         octave_str = self._octave_marks()
         duration_str = self.duration.to_lilypond()
+        tie_str = '~' if self.tie else ''
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
-        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{dynamic_str}"
+        slur_str = (
+            ('\\(' if self.slur_bracket_open else '') +
+            ('(' if self.slur_start else '') +
+            (')' if self.slur_end else '') +
+            ('\\)' if self.slur_bracket_close else '')
+        )
+        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{tie_str}{dynamic_str}{slur_str}"
 
     def _midi_pitch(self) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
@@ -97,9 +109,16 @@ class Note(BrailleSymbol):
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
         duration_str = self.duration.to_lilypond()
+        tie_str = '~' if self.tie else ''
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
-        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{dynamic_str}", target_midi
+        slur_str = (
+            ('\\(' if self.slur_bracket_open else '') +
+            ('(' if self.slur_start else '') +
+            (')' if self.slur_end else '') +
+            ('\\)' if self.slur_bracket_close else '')
+        )
+        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{tie_str}{dynamic_str}{slur_str}", target_midi
 
 
 @dataclass

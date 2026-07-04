@@ -204,6 +204,68 @@ def test_note_with_crescendo_end():
     assert note.to_lilypond() == r"g'4\!"
 
 
+# ---------------------------------------------------------------------------
+# S4-3: Note tie / slur / phrase-slur fields and LilyPond rendering
+# ---------------------------------------------------------------------------
+
+def test_note_with_tie():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='',
+        note_name='C', octave=4, duration=Duration(value=4), tie=True,
+    )
+    assert note.to_lilypond() == "c'4~"
+
+
+def test_note_with_slur_start():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='',
+        note_name='C', octave=4, duration=Duration(value=4), slur_start=True,
+    )
+    assert note.to_lilypond() == "c'4("
+
+
+def test_note_with_slur_end():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='',
+        note_name='G', octave=4, duration=Duration(value=4), slur_end=True,
+    )
+    assert note.to_lilypond() == "g'4)"
+
+
+def test_note_with_slur_bracket_open_mark():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='',
+        note_name='F', octave=4, duration=Duration(value=4), slur_bracket_open=True,
+    )
+    assert note.to_lilypond() == r"f'4\("
+
+
+def test_note_with_slur_bracket_close():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='',
+        note_name='F', octave=4, duration=Duration(value=8), slur_bracket_close=True,
+    )
+    assert note.to_lilypond() == r"f'8\)"
+
+
+def test_note_articulation_before_tie():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='',
+        note_name='C', octave=4, duration=Duration(value=4),
+        articulations=[Articulation(type=ArticulationType.STACCATO)],
+        tie=True,
+    )
+    assert note.to_lilypond() == "c'4-.~"
+
+
+def test_note_no_slur_marks_by_default():
+    note = _make_note('C', 4, 4)
+    ly = note.to_lilypond()
+    assert '~' not in ly
+    assert '(' not in ly
+    assert ')' not in ly
+
+
 def test_invalid_note_name_raises():
     import pytest
     with pytest.raises(ValueError):

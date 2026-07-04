@@ -13,6 +13,7 @@ from ..bana_symbols import (
     KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
+    SLUR_CELLS,
     TIME_SIGNATURE_CELLS,
     SymbolCategory,
 )
@@ -75,6 +76,11 @@ class _PendingNote:
     accidental: Accidental | None = None
     dynamics: list[Dynamic] = field(default_factory=list)
     articulations: list[Articulation] = field(default_factory=list)
+    tie: bool = False
+    slur_start: bool = False
+    slur_end: bool = False
+    slur_bracket_open: bool = False
+    slur_bracket_close: bool = False
 
 
 class BrailleParser:
@@ -111,6 +117,12 @@ class BrailleParser:
             if token.category == SymbolCategory.OCTAVE_MARK:
                 self._handle_octave_mark(token)
             elif token.category == SymbolCategory.NOTE:
+                # Simple slur: single ⠉ between previous note and this one
+                if self._last_token_was_slur and not self._slur_carry_active:
+                    if pending:
+                        pending[-1].slur_start = True
+                    self._pending_slur_end = True
+                    self._last_token_was_slur = False
                 pending.append(self._buffer_note(token))
             elif token.category == SymbolCategory.BAR_LINE:
                 if pending:
@@ -142,6 +154,8 @@ class BrailleParser:
                         pending[-1].dynamics.append(dynamic)
                 else:
                     self._pending_dynamics.append(dynamic)
+            elif token.category == SymbolCategory.SLUR:
+                self._handle_slur(token, pending)
             # REST, UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
@@ -195,6 +209,36 @@ class BrailleParser:
             self._pending_articulations.append(Articulation(type=art_type))
             self._last_articulation_seen = art_type
 
+    def _handle_slur(self, token: BrailleToken, pending: list[_PendingNote]) -> None:
+        slur_type = SLUR_CELLS[token.character]
+
+        if slur_type == 'tie':
+            if pending:
+                pending[-1].tie = True
+
+        elif slur_type == 'slur':
+            if self._slur_carry_active:
+                # Terminator: the next note ends the slurred passage.
+                self._pending_slur_end = True
+                self._slur_carry_active = False
+                self._last_token_was_slur = False
+            elif self._last_token_was_slur:
+                # Doubled sign detected: activate carry, mark the preceding note.
+                if pending:
+                    pending[-1].slur_start = True
+                self._slur_carry_active = True
+                self._last_token_was_slur = False
+            else:
+                # First single slur sign — wait to see if it's doubled or simple.
+                self._last_token_was_slur = True
+
+        elif slur_type == 'slur_bracket_open':
+            self._pending_slur_bracket_open = True
+
+        elif slur_type == 'slur_bracket_close':
+            if pending:
+                pending[-1].slur_bracket_close = True
+
     def _buffer_note(self, token: BrailleToken) -> _PendingNote:
         note_name, base_duration = NOTE_CELLS[token.character]
         accidental = self._pending_accidental
@@ -219,6 +263,12 @@ class BrailleParser:
         self._terminating_articulations = set()
         self._last_articulation_seen = None  # note breaks doubled-sign detection
 
+        # Capture slur/tie state for this note, then clear the pending flags.
+        slur_end = self._pending_slur_end
+        slur_bracket_open = self._pending_slur_bracket_open
+        self._pending_slur_end = False
+        self._pending_slur_bracket_open = False
+
         return _PendingNote(
             note_name=note_name,
             octave=self._current_octave,
@@ -227,6 +277,8 @@ class BrailleParser:
             accidental=accidental,
             dynamics=dynamics,
             articulations=articulations,
+            slur_end=slur_end,
+            slur_bracket_open=slur_bracket_open,
         )
 
     def _handle_key_signature(self, token: BrailleToken) -> None:
@@ -287,6 +339,11 @@ class BrailleParser:
                 accidental=pnote.accidental,
                 dynamics=pnote.dynamics,
                 articulations=pnote.articulations,
+                tie=pnote.tie,
+                slur_start=pnote.slur_start,
+                slur_end=pnote.slur_end,
+                slur_bracket_open=pnote.slur_bracket_open,
+                slur_bracket_close=pnote.slur_bracket_close,
             ))
         self._validate_measure_beat_count(measure)
         return measure
@@ -411,3 +468,7 @@ class BrailleParser:
         self._active_articulations: set[ArticulationType] = set()
         self._terminating_articulations: set[ArticulationType] = set()
         self._last_articulation_seen: ArticulationType | None = None
+        self._last_token_was_slur: bool = False
+        self._slur_carry_active: bool = False
+        self._pending_slur_end: bool = False
+        self._pending_slur_bracket_open: bool = False

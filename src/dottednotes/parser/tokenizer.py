@@ -12,6 +12,7 @@ from dottednotes.bana_symbols import (
     NOTE_CELLS,
     OCTAVE_MARKS,
     REST_CELLS,
+    SLUR_CELLS,
     TIME_SIGNATURE_CELLS,
     SymbolCategory,
 )
@@ -210,18 +211,25 @@ class BrailleTokenizer:
                         continue
                 # ⠩ not classified as key sig → sharp accidental
 
-            # --- articulation: 2-cell pair (longest match first) or single cell ---
-            # Several 2-cell pairs start with cells that are also OCTAVE_MARKS
-            # (⠠, ⠐, ⠸, ⠨, ⠘). Checking the pair before _classify() resolves
-            # the ambiguity: the second cell ⠦ (dots 2,3,6) never follows an
-            # octave mark legitimately, so this check is always unambiguous.
+            # --- articulation / slur / tie: 2-cell pair first, then single cell ---
+            # Several 2-cell pairs begin with cells that are also OCTAVE_MARKS
+            # (⠠ ⠐ ⠸ ⠨ ⠘ for articulations; ⠈ ⠰ ⠘ for slur/tie pairs).
+            # Checking the pair before _classify() resolves the ambiguity.
             two = text[i:i + 2]
             if two in ARTICULATION_CELLS:
                 tokens.append(BrailleToken(two, SymbolCategory.ARTICULATION, i, line))
                 i += 2
                 continue
+            if two in SLUR_CELLS:
+                tokens.append(BrailleToken(two, SymbolCategory.SLUR, i, line))
+                i += 2
+                continue
             if char in ARTICULATION_CELLS:
                 tokens.append(BrailleToken(char, SymbolCategory.ARTICULATION, i, line))
+                i += 1
+                continue
+            if char in SLUR_CELLS:
+                tokens.append(BrailleToken(char, SymbolCategory.SLUR, i, line))
                 i += 1
                 continue
 

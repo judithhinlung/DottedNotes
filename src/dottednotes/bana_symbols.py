@@ -47,6 +47,7 @@ class SymbolCategory(Enum):
     CLEF = auto()
     ARTICULATION = auto()
     DYNAMIC = auto()
+    SLUR = auto()
     ORNAMENT = auto()
     BAR_LINE = auto()
     REPEAT = auto()
@@ -347,6 +348,20 @@ DYNAMIC_CELLS: dict[str, str] = {
     '⠜⠙':   'decrescendo_start', # word sign + d (dots 1,4,5)
     '⠜⠒':   'crescendo_end',     # word sign + lower c (dots 2,5) — follows last note
     '⠜⠲':   'decrescendo_end',   # word sign + lower d (dots 2,5,6) — follows last note
+}
+
+# ---------------------------------------------------------------------------
+# Slur and tie cells
+# Ties and slurs use single braille cells or 2-cell sequences.
+# Several first cells (⠈, ⠰, ⠘) are also OCTAVE_MARKS; the tokenizer checks
+# 2-cell slur pairs before falling through to single-cell octave classification.
+# ---------------------------------------------------------------------------
+
+SLUR_CELLS: dict[str, str] = {
+    '⠈⠉': 'tie',               # dots 4 + dots 1,4 — placed after tied note
+    '⠉':  'slur',              # dots 1,4 — between notes (simple) or doubled for carry
+    '⠰⠃': 'slur_bracket_open', # dots 5,6 + dots 1,2 — before first bracketed note
+    '⠘⠆': 'slur_bracket_close', # dots 4,5 + dots 2,3 — after last bracketed note
 }
 
 # ---------------------------------------------------------------------------

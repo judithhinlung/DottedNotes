@@ -1927,7 +1927,7 @@ The tokenizer consumes ⠄ when present and does not emit it as a token.
 
 ---
 
-### [ ] S4-3: Implement slur and tie parsing
+### [x] S4-3: Implement slur and tie parsing
 
 **Why:** Ties connect two same-pitch notes into a single sustained sound.
 Slurs group notes into phrases.  Without them a legato melody becomes
@@ -1986,13 +1986,13 @@ detached and phrasing information is lost entirely.
    ```
 
 **Definition of Done:**
-- [ ] `TIE_CELL`, `SLUR_BEGIN_CELL`, `SLUR_END_CELL` in `bana_symbols.py`
+- [x] `TIE_CELL`, `SLUR_BEGIN_CELL`, `SLUR_END_CELL` in `bana_symbols.py`
       verified against BANA section 13
-- [ ] `Note` has `tied`, `slur_begin`, `slur_end` fields
-- [ ] `Note.to_lilypond()` emits `~`, `(`, `)` correctly
-- [ ] A note that is both tied and slur-begin renders correctly (`c4(~`)
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] `Note` has `tied`, `slur_begin`, `slur_end` fields
+- [x] `Note.to_lilypond()` emits `~`, `(`, `)` correctly
+- [x] A note that is both tied and slur-begin renders correctly (`c4(~`)
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** Ties always connect two notes of the same pitch; slurs can
 cross any interval.  The parser does not need to validate pitch equality for
