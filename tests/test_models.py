@@ -166,6 +166,44 @@ def test_note_with_staccato():
     assert note.to_lilypond() == "d'4-."
 
 
+def test_note_with_dynamic_p():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠹',
+        note_name='C', octave=4, duration=Duration(value=4),
+        dynamics=[Dynamic(DynamicLevel.P)],
+    )
+    assert note.to_lilypond() == r"c'4\p"
+
+
+def test_note_articulation_before_dynamic():
+    # In LilyPond, articulations are written before dynamics.
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠹',
+        note_name='C', octave=4, duration=Duration(value=4),
+        dynamics=[Dynamic(DynamicLevel.F)],
+        articulations=[Articulation(ArticulationType.STACCATO)],
+    )
+    assert note.to_lilypond() == r"c'4-.\f"
+
+
+def test_note_with_crescendo_start():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠹',
+        note_name='G', octave=4, duration=Duration(value=4),
+        dynamics=[Dynamic(DynamicLevel.CRESCENDO_START)],
+    )
+    assert note.to_lilypond() == r"g'4\<"
+
+
+def test_note_with_crescendo_end():
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠹',
+        note_name='G', octave=4, duration=Duration(value=4),
+        dynamics=[Dynamic(DynamicLevel.CRESCENDO_END)],
+    )
+    assert note.to_lilypond() == r"g'4\!"
+
+
 def test_invalid_note_name_raises():
     import pytest
     with pytest.raises(ValueError):

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory
-from dottednotes.models import Articulation, ArticulationType, Clef, ClefType, KeySignature, Score, TimeSignature
+from dottednotes.models import Articulation, ArticulationType, Clef, ClefType, Dynamic, DynamicLevel, KeySignature, Score, TimeSignature
 from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline
 
 
@@ -1493,3 +1493,230 @@ def test_parser_tenuto_renders_to_lilypond():
         warnings.simplefilter("ignore")
         notes = _parse('⠸⠦⠐⠹')
     assert '--' in notes[0].to_lilypond()
+
+
+# ---------------------------------------------------------------------------
+# S4-2: Dynamic tokenization and parsing
+# ---------------------------------------------------------------------------
+
+# Verified BANA dynamic sequences (word sign ⠜ + dynamic letters):
+_DYN_P   = '⠜⠏'     # p   — word sign + p (dots 1,2,3,4)
+_DYN_PP  = '⠜⠏⠏'   # pp  — word sign + p + p
+_DYN_PPP = '⠜⠏⠏⠏' # ppp — word sign + p + p + p
+_DYN_F   = '⠜⠋'     # f   — word sign + f (dots 1,2,4)
+_DYN_FF  = '⠜⠋⠋'   # ff  — word sign + f + f
+_DYN_FFF = '⠜⠋⠋⠋' # fff — word sign + f + f + f
+_DYN_MP  = '⠜⠍⠏'   # mp  — word sign + m + p
+_DYN_MF  = '⠜⠍⠋'   # mf  — word sign + m + f
+_DYN_SF  = '⠜⠎⠋'   # sf  — word sign + s + f
+_DYN_SFZ = '⠜⠎⠋⠵' # sfz — word sign + s + f + z
+_DYN_FP  = '⠜⠋⠏'   # fp  — word sign + f + p
+_DYN_CRESC_START  = '⠜⠉'  # crescendo start  — word sign + c (dots 1,4)
+_DYN_DECRESC_START = '⠜⠙' # decrescendo start — word sign + d (dots 1,4,5)
+_DYN_CRESC_END    = '⠜⠒'  # crescendo end    — word sign + lower c (dots 2,5)
+_DYN_DECRESC_END  = '⠜⠲'  # decrescendo end  — word sign + lower d (dots 2,5,6)
+_END_WORD_SIGN = '⠄'        # dot 3 — terminator before a note starting with dots 1,2,3
+
+
+# --- Tokenizer: dynamic cell recognition ---
+
+def test_tokenizer_dynamic_p():
+    tokens = BrailleTokenizer().tokenize(_DYN_P)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_P
+
+
+def test_tokenizer_dynamic_pp():
+    tokens = BrailleTokenizer().tokenize(_DYN_PP)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_PP
+
+
+def test_tokenizer_dynamic_ppp():
+    tokens = BrailleTokenizer().tokenize(_DYN_PPP)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_PPP
+
+
+def test_tokenizer_dynamic_f():
+    tokens = BrailleTokenizer().tokenize(_DYN_F)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+
+
+def test_tokenizer_dynamic_ff():
+    tokens = BrailleTokenizer().tokenize(_DYN_FF)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_FF
+
+
+def test_tokenizer_dynamic_fff():
+    tokens = BrailleTokenizer().tokenize(_DYN_FFF)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_FFF
+
+
+def test_tokenizer_dynamic_mp():
+    tokens = BrailleTokenizer().tokenize(_DYN_MP)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_MP
+
+
+def test_tokenizer_dynamic_mf():
+    tokens = BrailleTokenizer().tokenize(_DYN_MF)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+
+
+def test_tokenizer_dynamic_sfz():
+    tokens = BrailleTokenizer().tokenize(_DYN_SFZ)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_SFZ
+
+
+def test_tokenizer_dynamic_crescendo_start():
+    tokens = BrailleTokenizer().tokenize(_DYN_CRESC_START)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_CRESC_START
+
+
+def test_tokenizer_dynamic_decrescendo_start():
+    tokens = BrailleTokenizer().tokenize(_DYN_DECRESC_START)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_DECRESC_START
+
+
+def test_tokenizer_dynamic_crescendo_end():
+    tokens = BrailleTokenizer().tokenize(_DYN_CRESC_END)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_CRESC_END
+
+
+def test_tokenizer_dynamic_decrescendo_end():
+    tokens = BrailleTokenizer().tokenize(_DYN_DECRESC_END)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_DECRESC_END
+
+
+def test_tokenizer_dynamic_with_end_word_sign():
+    # ⠜⠏⠄ — piano followed by end word sign; the ⠄ is consumed, result is one DYNAMIC token
+    tokens = BrailleTokenizer().tokenize(_DYN_P + _END_WORD_SIGN)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_P
+
+
+def test_tokenizer_dynamic_end_word_sign_before_note():
+    # ⠜⠏⠄⠐⠹ — piano + end word sign + octave 4 + C quarter
+    tokens = BrailleTokenizer().tokenize(_DYN_P + _END_WORD_SIGN + '⠐⠹')
+    cats = [t.category for t in tokens]
+    assert cats == [SymbolCategory.DYNAMIC, SymbolCategory.OCTAVE_MARK, SymbolCategory.NOTE]
+
+
+def test_tokenizer_dynamic_ppp_preferred_over_pp():
+    # Longest match: ⠜⠏⠏⠏ must be a single ppp token, not pp + stray ⠏
+    tokens = BrailleTokenizer().tokenize(_DYN_PPP)
+    assert len(tokens) == 1
+    assert tokens[0].character == _DYN_PPP
+
+
+def test_tokenizer_dynamic_sfz_preferred_over_sf():
+    # Longest match: ⠜⠎⠋⠵ must be sfz, not sf + stray ⠵
+    tokens = BrailleTokenizer().tokenize(_DYN_SFZ)
+    assert len(tokens) == 1
+    assert tokens[0].character == _DYN_SFZ
+
+
+def test_tokenizer_clef_not_confused_with_dynamic():
+    # ⠜⠌⠇ must still be CLEF, not DYNAMIC
+    tokens = BrailleTokenizer().tokenize('⠜⠌⠇')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.CLEF
+
+
+# --- Parser: dynamic attachment to notes ---
+
+def test_parser_dynamic_p_attaches_to_note():
+    # ⠜⠏ (piano) + octave 4 + C quarter
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_DYN_P + '⠐⠹')
+    assert len(notes[0].dynamics) == 1
+    assert notes[0].dynamics[0].level == DynamicLevel.P
+
+
+def test_parser_dynamic_p_does_not_carry_forward():
+    # Piano applies to the first note only; second note has no dynamic.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_DYN_P + '⠐⠹⠹')
+    assert len(notes[0].dynamics) == 1
+    assert notes[1].dynamics == []
+
+
+def test_parser_dynamic_f_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_DYN_F + '⠐⠹')
+    assert notes[0].dynamics[0].level == DynamicLevel.F
+
+
+def test_parser_crescendo_start_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_DYN_CRESC_START + '⠐⠹')
+    assert notes[0].dynamics[0].level == DynamicLevel.CRESCENDO_START
+
+
+def test_parser_crescendo_end_attaches_to_preceding_note():
+    # Token stream: C quarter, C quarter, crescendo_end, C quarter
+    # The crescendo_end must attach to the SECOND C, not the third.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹⠹' + _DYN_CRESC_END + '⠹')
+    assert notes[1].dynamics[0].level == DynamicLevel.CRESCENDO_END
+    assert notes[0].dynamics == []
+    assert notes[2].dynamics == []
+
+
+def test_parser_note_with_no_dynamic():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹')
+    assert notes[0].dynamics == []
+
+
+# --- Parser: dynamic renders to LilyPond ---
+
+def test_parser_dynamic_p_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_DYN_P + '⠐⠹')
+    assert r'\p' in notes[0].to_lilypond()
+
+
+def test_parser_crescendo_renders_to_lilypond():
+    # Crescendo start on first note, end on second, nothing on third.
+    notes = _parse(_DYN_CRESC_START + '⠐⠹⠹' + _DYN_CRESC_END + '⠹⠹')
+    assert r'\<' in notes[0].to_lilypond()
+    assert r'\!' in notes[1].to_lilypond()
+    assert notes[2].dynamics == []
+
+
+def test_parser_dynamic_with_end_word_sign_before_note():
+    # ⠜⠏⠄⠐⠹ — end word sign consumed; C quarter must still receive the dynamic.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_DYN_P + _END_WORD_SIGN + '⠐⠹')
+    assert notes[0].dynamics[0].level == DynamicLevel.P

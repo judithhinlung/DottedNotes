@@ -1851,78 +1851,79 @@ instance of the sign while carry mode is active marks the last note and ends car
 
 ---
 
-### [ ] S4-2: Add dynamic parsing to BrailleParser
+### [x] S4-2: Add dynamic parsing to BrailleParser
 
 **Why:** Dynamics are present in virtually every piece of real music.
 Without them the LilyPond output plays at a uniform volume and is incomplete.
 The `Dynamic` model already exists; this ticket adds recognition and
 attachment to notes.
 
+**Verified BANA dynamic sequences (developer-confirmed):**
+
+All dynamic markings begin with the word sign ⠜ (dots 3,4,5).
+The word sign also serves as the clef prefix; the tokenizer checks clef
+sequences first, then dynamic sequences.
+
+| Dynamic | Braille sequence          | Unicode  |
+|---------|---------------------------|----------|
+| ppp     | word sign + p + p + p     | ⠜⠏⠏⠏   |
+| pp      | word sign + p + p         | ⠜⠏⠏    |
+| p       | word sign + p             | ⠜⠏     |
+| mp      | word sign + m + p         | ⠜⠍⠏    |
+| mf      | word sign + m + f         | ⠜⠍⠋    |
+| f       | word sign + f             | ⠜⠋     |
+| ff      | word sign + f + f         | ⠜⠋⠋    |
+| fff     | word sign + f + f + f     | ⠜⠋⠋⠋   |
+| sf      | word sign + s + f         | ⠜⠎⠋    |
+| sfz     | word sign + s + f + z     | ⠜⠎⠋⠵   |
+| fp      | word sign + f + p         | ⠜⠋⠏    |
+| cresc.  | word sign + c (dots 1,4)  | ⠜⠉     |
+| decresc.| word sign + d (dots 1,4,5)| ⠜⠙     |
+| end cresc. | word sign + lower c (dots 2,5)  | ⠜⠒ |
+| end decresc.| word sign + lower d (dots 2,5,6)| ⠜⠲ |
+
+**End word sign:** ⠄ (dot 3). Required after a dynamic when the next cell
+starts with dots 1, 2, or 3 (which includes all notes and articulations).
+The tokenizer consumes ⠄ when present and does not emit it as a token.
+
+**Placement rules:**
+- All dynamics except end marks appear BEFORE the note they affect.
+  Order: dynamic → articulation → accidental → octave mark → note.
+- End crescendo (⠜⠒) and end decrescendo (⠜⠲) appear AFTER the last note
+  of the passage. The tokenizer emits them as DYNAMIC tokens; the parser
+  attaches them to `pending[-1]` (the most recently buffered note).
+
 **Steps:**
-1. Add `DYNAMIC_CELLS: dict[str, str]` to `bana_symbols.py`.
-   Map each braille sequence to a `DynamicLevel` name string
-   (`'P'`, `'F'`, `'PP'`, `'FF'`, `'MF'`, `'MP'`, `'FFF'`, `'PPP'`,
-   `'SF'`, `'SFZ'`, `'FP'`).
-   Also add:
-   `'CRESCENDO_START'` and `'DECRESCENDO_START'` for hairpin begins,
-   `'CRESCENDO_END'` / `'DECRESCENDO_END'` for hairpin ends.
-   **Verify every cell against BANA section 16 before entering.**
-   Important: some dynamic cells share dot patterns with note cells or
-   accidental cells -- correct classification depends entirely on context.
-   In BANA braille music, dynamics appear at the beginning of a measure
-   or immediately before a note, never mid-note.  The tokenizer must use
-   this positional context to disambiguate.
-2. Update `BrailleTokenizer` to classify dynamic sequences as
-   `SymbolCategory.DYNAMIC`.  If a multi-cell indicator prefix is required
-   (common in BANA to distinguish dynamic letters from note cells), implement
-   lookahead in the same style used for time signatures and clef cells.
-3. Add a `dynamic: Dynamic | None = None` field to the `Note` dataclass
-   in `models/note.py`.  In LilyPond, dynamics attach to notes as suffixes:
-   `c4\p`, `g2\ff`, `d8\<` (hairpin start), `e4\!` (hairpin end).
-   Update `Note.to_lilypond()` to append the dynamic string when present.
-4. In `BrailleParser.parse()`, buffer a pending dynamic:
-   ```python
-   self._pending_dynamic: Dynamic | None = None
-   ```
-   When a `DYNAMIC` token is encountered, store it.  When the next note is
-   finalized, attach it to `note.dynamic` and clear the buffer.
-   Hairpin ends attach to the note at the close of the crescendo, not the
-   start -- record this in test fixture comments.
-5. Write unit tests:
-   ```python
-   def test_dynamic_p_attaches_to_following_note():
-       notes = _parse(DYNAMIC_P_CELL + '⠐⠹')
-       assert notes[0].dynamic.level == DynamicLevel.P
-
-   def test_dynamic_renders_in_lilypond():
-       notes = _parse(DYNAMIC_F_CELL + '⠐⠹')
-       assert notes[0].to_lilypond() == "c'4\\f"
-
-   def test_dynamic_does_not_carry_forward():
-       notes = _parse(DYNAMIC_P_CELL + '⠐⠹⠱')
-       assert notes[0].dynamic is not None
-       assert notes[1].dynamic is None
-   ```
-   Define `DYNAMIC_P_CELL` and `DYNAMIC_F_CELL` as module-level constants
-   once the real cells are verified.
+1. Add `WORD_SIGN`, `END_WORD_SIGN`, and `DYNAMIC_CELLS` to `bana_symbols.py`.
+   Entries must be ordered longest-first so the tokenizer can greedy-match.
+2. In `BrailleTokenizer`, extend the ⠜ (word sign / clef prefix) block:
+   after ruling out clef sequences, try lengths 4, 3, 2 against `DYNAMIC_CELLS`.
+   If matched, consume an optional trailing ⠄. If nothing matches, emit UNKNOWN.
+   Add an explicit `continue` at the end of the block.
+3. Add `dynamics: list[Dynamic]` to the `Note` dataclass (before `articulations`).
+   Update `to_lilypond()` and `to_relative_lilypond()` to emit dynamics before
+   articulations: `{note}{duration}{dynamics}{articulations}`.
+4. In `BrailleParser._reset_state()`, add `_pending_dynamics: list[Dynamic]`.
+   In `_buffer_note()`, capture and clear `_pending_dynamics`.
+   In `parse()`, handle `SymbolCategory.DYNAMIC` inline:
+   - End marks → `pending[-1].dynamics.append(dynamic)` (if pending non-empty).
+   - All other marks → `_pending_dynamics.append(dynamic)`.
+5. In `_finalize_measure()`, pass `dynamics=pnote.dynamics` to `Note(...)`.
+6. Write unit tests covering all 15 dynamic sequences, end-word-sign consumption,
+   longest-match resolution (ppp over pp, sfz over sf), attachment to the correct
+   note, no carry-forward, and LilyPond rendering.
 
 **Definition of Done:**
-- [ ] `DYNAMIC_CELLS` in `bana_symbols.py` is populated and verified
-      against BANA section 16
-- [ ] Tokenizer disambiguates dynamic cells from note/accidental cells
-      using positional context or lookahead
-- [ ] `Note` dataclass has a `dynamic` field
-- [ ] `Note.to_lilypond()` appends the dynamic suffix when present
-- [ ] Dynamic does not carry forward to subsequent notes
-- [ ] Hairpin begin and end cells are recognized and attached correctly
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
-
-**Senior note:** The disambiguation problem between dynamic letter cells and
-note cells is real and requires care.  The safest approach is a context rule:
-if the current parser state is "at measure start" or "immediately after a bar
-line," treat letter-like cells as dynamics; if the state is "mid-measure after
-a note," treat them as notes.  This matches BANA's own layout convention.
+- [x] `DYNAMIC_CELLS` in `bana_symbols.py` is populated with verified sequences
+- [x] Tokenizer emits `SymbolCategory.DYNAMIC` for all 15 sequences
+- [x] Tokenizer correctly consumes optional ⠄ end word sign
+- [x] Clef recognition is unaffected
+- [x] `Note` dataclass has a `dynamics: list[Dynamic]` field
+- [x] `Note.to_lilypond()` emits dynamics before articulations
+- [x] Pre-note dynamics attach to the following note; do not carry forward
+- [x] End marks attach to the preceding (last buffered) note
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 ---
 

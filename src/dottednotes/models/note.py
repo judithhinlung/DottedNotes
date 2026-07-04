@@ -4,6 +4,7 @@ from typing import Optional
 from .accidental import Accidental
 from .base import BrailleSymbol
 from .duration import Duration
+from .dynamic import Dynamic
 
 NOTE_NAME_TO_LILYPOND = {
     'C': 'c', 'D': 'd', 'E': 'e', 'F': 'f',
@@ -30,6 +31,7 @@ class Note(BrailleSymbol):
     octave: int             # absolute octave (middle C = octave 4)
     duration: Duration
     accidental: Optional[Accidental] = None
+    dynamics: list[Dynamic] = field(default_factory=list)
     articulations: list = field(default_factory=list)
     ornaments: list = field(default_factory=list)
 
@@ -53,7 +55,8 @@ class Note(BrailleSymbol):
         octave_str = self._octave_marks()
         duration_str = self.duration.to_lilypond()
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
-        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}"
+        dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
+        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{dynamic_str}"
 
     def _midi_pitch(self) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
@@ -95,7 +98,8 @@ class Note(BrailleSymbol):
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
         duration_str = self.duration.to_lilypond()
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
-        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}", target_midi
+        dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
+        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{dynamic_str}", target_midi
 
 
 @dataclass

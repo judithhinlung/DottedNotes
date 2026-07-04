@@ -303,6 +303,54 @@ BAR_LINE_SEQUENCES: dict[str, str] = {
 # Reversed accent and arpeggios are handled in later sprints.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Word sign and end word sign
+# The word sign (⠜, dots 3,4,5) is the prefix for all dynamic markings.
+# It is also the clef prefix; the tokenizer checks clef sequences first.
+# The end word sign (⠄, dot 3) terminates a dynamic sequence when the
+# following cell would otherwise be ambiguous (i.e. starts with dots 1, 2, or 3).
+# ---------------------------------------------------------------------------
+
+WORD_SIGN: str = '⠜'    # dots 3,4,5 = U+281C
+END_WORD_SIGN: str = '⠄' # dot 3     = U+2804
+
+# ---------------------------------------------------------------------------
+# Dynamic cells
+# All dynamic markings are multi-cell sequences beginning with the word sign.
+# Dynamic letters use standard braille letter values:
+#   p = dots 1,2,3,4 (⠏)   f = dots 1,2,4 (⠋)   m = dots 1,3,4 (⠍)
+#   s = dots 2,3,4   (⠎)   z = dots 1,3,5,6 (⠵)
+#   c = dots 1,4     (⠉)   d = dots 1,4,5   (⠙)
+# Hairpin end letters use the "lower" shift (dots shifted down 3 positions):
+#   lower c = dots 2,5 (⠒)   lower d = dots 2,5,6 (⠲)
+#
+# Keys are ordered longest-first so the tokenizer can use a greedy search.
+# Longer sequences must be checked before their shorter prefixes.
+# ---------------------------------------------------------------------------
+
+DYNAMIC_CELLS: dict[str, str] = {
+    # 4-cell sequences (word sign + 3 letters)
+    '⠜⠏⠏⠏': 'ppp',               # word sign + p + p + p
+    '⠜⠋⠋⠋': 'fff',               # word sign + f + f + f
+    '⠜⠎⠋⠵': 'sfz',               # word sign + s + f + z
+    # 3-cell sequences (word sign + 2 letters)
+    '⠜⠏⠏':  'pp',                # word sign + p + p
+    '⠜⠍⠏':  'mp',                # word sign + m + p
+    '⠜⠍⠋':  'mf',                # word sign + m + f
+    '⠜⠋⠋':  'ff',                # word sign + f + f
+    '⠜⠎⠋':  'sf',                # word sign + s + f
+    '⠜⠋⠏':  'fp',                # word sign + f + p
+    # 2-cell sequences (word sign + 1 letter)
+    '⠜⠏':   'p',                 # word sign + p
+    '⠜⠋':   'f',                 # word sign + f
+    '⠜⠉':   'crescendo_start',   # word sign + c (dots 1,4)
+    '⠜⠙':   'decrescendo_start', # word sign + d (dots 1,4,5)
+    '⠜⠒':   'crescendo_end',     # word sign + lower c (dots 2,5) — follows last note
+    '⠜⠲':   'decrescendo_end',   # word sign + lower d (dots 2,5,6) — follows last note
+}
+
+# ---------------------------------------------------------------------------
+# Articulation cells
 ARTICULATION_CELLS: dict[str, str] = {
     '⠦':   'staccato',           # dots 2,3,6           (single cell)
     '⠠⠦': 'staccatissimo',      # dots 6 + dots 2,3,6

@@ -6,6 +6,8 @@ from dottednotes.bana_symbols import (
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
     CLEF_CELLS,
+    DYNAMIC_CELLS,
+    END_WORD_SIGN,
     KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
@@ -90,7 +92,7 @@ class BrailleTokenizer:
                 i += 1
                 continue
 
-            # --- clef prefix ⠜: 3- or 4-cell sequence (longest match first) ---
+            # --- word sign ⠜: clef (3–4 cells) or dynamic (2–4 cells + optional ⠄) ---
             if char == self._CLEF_PREFIX:
                 four = text[i:i + 4]
                 three = text[i:i + 3]
@@ -102,7 +104,23 @@ class BrailleTokenizer:
                     tokens.append(BrailleToken(three, SymbolCategory.CLEF, i, line))
                     i += 3
                     continue
-                # Unrecognized clef sequence — fall through to UNKNOWN
+                # Not a clef — check dynamic sequences (longest match first).
+                # After matching, consume an optional end word sign (⠄, dot 3)
+                # which the composer writes when the next cell starts with dots 1,2,3.
+                matched_dynamic = False
+                for length in (4, 3, 2):
+                    seq = text[i:i + length]
+                    if seq in DYNAMIC_CELLS:
+                        tokens.append(BrailleToken(seq, SymbolCategory.DYNAMIC, i, line))
+                        i += length
+                        if i < len(text) and text[i] == END_WORD_SIGN:
+                            i += 1
+                        matched_dynamic = True
+                        break
+                if not matched_dynamic:
+                    tokens.append(BrailleToken(char, SymbolCategory.UNKNOWN, i, line))
+                    i += 1
+                continue
 
             # --- number sign ⠼: key signature (4–7 acc.) or time signature ---
             elif char == self._NUMBER_SIGN:

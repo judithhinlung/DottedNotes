@@ -9,6 +9,7 @@ from ..bana_symbols import (
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
     CLEF_CELLS,
+    DYNAMIC_CELLS,
     KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
@@ -19,6 +20,7 @@ from ..models.accidental import Accidental, AccidentalType
 from ..models.articulation import Articulation, ArticulationType
 from ..models.clef import Clef, ClefType
 from ..models.duration import Duration
+from ..models.dynamic import Dynamic, DynamicLevel
 from ..models.key_signature import KeySignature
 from ..models.measure import Measure
 from ..models.note import Note
@@ -32,6 +34,24 @@ _STR_TO_ACCIDENTAL_TYPE: dict[str, AccidentalType] = {
     'sharp':   AccidentalType.SHARP,
     'flat':    AccidentalType.FLAT,
     'natural': AccidentalType.NATURAL,
+}
+
+_STR_TO_DYNAMIC_LEVEL: dict[str, DynamicLevel] = {
+    'ppp':               DynamicLevel.PPP,
+    'pp':                DynamicLevel.PP,
+    'p':                 DynamicLevel.P,
+    'mp':                DynamicLevel.MP,
+    'mf':                DynamicLevel.MF,
+    'f':                 DynamicLevel.F,
+    'ff':                DynamicLevel.FF,
+    'fff':               DynamicLevel.FFF,
+    'sf':                DynamicLevel.SF,
+    'sfz':               DynamicLevel.SFZ,
+    'fp':                DynamicLevel.FP,
+    'crescendo_start':   DynamicLevel.CRESCENDO_START,
+    'decrescendo_start': DynamicLevel.DECRESCENDO_START,
+    'crescendo_end':     DynamicLevel.CRESCENDO_END,
+    'decrescendo_end':   DynamicLevel.DECRESCENDO_END,
 }
 
 _STR_TO_ARTICULATION_TYPE: dict[str, ArticulationType] = {
@@ -53,6 +73,7 @@ class _PendingNote:
     base_duration: int   # 1, 2, 4, or 8 from NOTE_CELLS
     raw_brl: str
     accidental: Accidental | None = None
+    dynamics: list[Dynamic] = field(default_factory=list)
     articulations: list[Articulation] = field(default_factory=list)
 
 
@@ -112,6 +133,15 @@ class BrailleParser:
                 self._handle_accidental(token)
             elif token.category == SymbolCategory.ARTICULATION:
                 self._handle_articulation(token)
+            elif token.category == SymbolCategory.DYNAMIC:
+                dyn_level = _STR_TO_DYNAMIC_LEVEL[DYNAMIC_CELLS[token.character]]
+                dynamic = Dynamic(level=dyn_level)
+                if dyn_level in (DynamicLevel.CRESCENDO_END, DynamicLevel.DECRESCENDO_END):
+                    # End marks follow the last note of the passage; attach there.
+                    if pending:
+                        pending[-1].dynamics.append(dynamic)
+                else:
+                    self._pending_dynamics.append(dynamic)
             # REST, UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
@@ -170,6 +200,10 @@ class BrailleParser:
         accidental = self._pending_accidental
         self._pending_accidental = None
 
+        # Capture and clear pre-note dynamics.
+        dynamics = list(self._pending_dynamics)
+        self._pending_dynamics = []
+
         # Combine single-note pending articulations with carried articulations.
         # Pending types take priority; carried types fill in what isn't already present.
         pending_types = {a.type for a in self._pending_articulations}
@@ -191,6 +225,7 @@ class BrailleParser:
             base_duration=base_duration,
             raw_brl=token.character,
             accidental=accidental,
+            dynamics=dynamics,
             articulations=articulations,
         )
 
@@ -250,6 +285,7 @@ class BrailleParser:
                 octave=pnote.octave,
                 duration=Duration(value=dur_value),
                 accidental=pnote.accidental,
+                dynamics=pnote.dynamics,
                 articulations=pnote.articulations,
             ))
         self._validate_measure_beat_count(measure)
@@ -370,6 +406,7 @@ class BrailleParser:
         self._time_signature_parsed: bool = False
         self._clef_parsed: bool = False
         self._pending_accidental: Accidental | None = None
+        self._pending_dynamics: list[Dynamic] = []
         self._pending_articulations: list[Articulation] = []
         self._active_articulations: set[ArticulationType] = set()
         self._terminating_articulations: set[ArticulationType] = set()
