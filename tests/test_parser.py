@@ -92,11 +92,15 @@ def test_octave_mark_changes_midstream():
 def test_all_octave_marks():
     # One note per octave mark, verify each is tracked correctly
     # ⠈=oct1, ⠘=oct2, ⠸=oct3, ⠐=oct4, ⠨=oct5, ⠰=oct6, ⠠=oct7
-    # Use C quarter (⠹) after each mark
+    # ⠠ (dots 6) acts as a literary capital indicator only in the piece header
+    # (before the first key sig / time sig / note).  Once musical content appears,
+    # ⠠ is the octave-7 mark as normal.
     cases = [('⠈', 1), ('⠘', 2), ('⠸', 3), ('⠐', 4), ('⠨', 5), ('⠰', 6), ('⠠', 7)]
     for mark, expected_octave in cases:
-        notes = _parse(mark + '⠹')
-        assert notes[0].octave == expected_octave, (
+        # Precede each mark with a note in the SAME measure to ensure header_active
+        # is False before the mark is seen, so ⠠ is treated as the octave-7 mark.
+        notes = _parse('⠐⠹' + mark + '⠹')
+        assert notes[1].octave == expected_octave, (
             f"Octave mark {mark!r} should give octave {expected_octave}"
         )
 
@@ -1684,7 +1688,7 @@ def test_parser_crescendo_end_attaches_to_preceding_note():
     # The crescendo_end must attach to the SECOND C, not the third.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        notes = _parse('⠐⠹⠹' + _DYN_CRESC_END + '⠹')
+        notes = _parse('⠐⠹⠹' + _DYN_CRESC_END + _END_WORD_SIGN + '⠹')
     assert notes[1].dynamics[0].level == DynamicLevel.CRESCENDO_END
     assert notes[0].dynamics == []
     assert notes[2].dynamics == []
@@ -1708,7 +1712,7 @@ def test_parser_dynamic_p_renders_to_lilypond():
 
 def test_parser_crescendo_renders_to_lilypond():
     # Crescendo start on first note, end on second, nothing on third.
-    notes = _parse(_DYN_CRESC_START + '⠐⠹⠹' + _DYN_CRESC_END + '⠹⠹')
+    notes = _parse(_DYN_CRESC_START + '⠐⠹⠹' + _DYN_CRESC_END + _END_WORD_SIGN + '⠹⠹')
     assert r'\<' in notes[0].to_lilypond()
     assert r'\!' in notes[1].to_lilypond()
     assert notes[2].dynamics == []
@@ -2245,3 +2249,208 @@ def test_parser_carry_mode_renders_single_grace_block():
     ly = notes[0].to_lilypond()
     assert ly.startswith(r'\grace')
     assert ly.count(r'\grace') == 1
+
+
+# ---------------------------------------------------------------------------
+# S4-5: Word sign / text marking parsing
+# ---------------------------------------------------------------------------
+
+# Braille strings for common musical terms (word sign ⠜ + literary letters).
+# Generated from ASCII_TO_DOTS reverse mapping.
+_WORD_SIGN            = '⠜'
+_BANA_ALLEGRO         = '⠜⠁⠇⠇⠑⠛⠗⠕'  # word sign + a-l-l-e-g-r-o
+_BANA_DOLCE           = '⠜⠙⠕⠇⠉⠑'     # word sign + d-o-l-c-e
+_BANA_CON_MOTO        = '⠜⠉⠕⠝⠀⠍⠕⠞⠕' # word sign + c-o-n-space-m-o-t-o
+_BANA_ANDANTE         = '⠜⠁⠝⠙⠁⠝⠞⠑'  # word sign + a-n-d-a-n-t-e
+_C_QUARTER_OCT4       = '⠐⠹'          # octave 4 + C quarter
+
+
+# --- Tokenizer: word sign token recognition ---
+
+def test_tokenizer_word_sign_allegro_produces_word_sign_token():
+    tokens = BrailleTokenizer().tokenize(_BANA_ALLEGRO + _C_QUARTER_OCT4)
+    assert tokens[0].category == SymbolCategory.WORD_SIGN
+
+
+def test_tokenizer_word_sign_allegro_decodes_text():
+    tokens = BrailleTokenizer().tokenize(_BANA_ALLEGRO + _C_QUARTER_OCT4)
+    assert tokens[0].character == 'allegro'
+
+
+def test_tokenizer_word_sign_dolce_decodes_text():
+    tokens = BrailleTokenizer().tokenize(_BANA_DOLCE + _C_QUARTER_OCT4)
+    assert tokens[0].category == SymbolCategory.WORD_SIGN
+    assert tokens[0].character == 'dolce'
+
+
+def test_tokenizer_word_sign_multi_word_con_moto():
+    tokens = BrailleTokenizer().tokenize(_BANA_CON_MOTO + _C_QUARTER_OCT4)
+    assert tokens[0].category == SymbolCategory.WORD_SIGN
+    assert tokens[0].character == 'con moto'
+
+
+def test_tokenizer_word_sign_stops_at_octave_mark():
+    """Octave mark after the text is left for the note parser, not consumed."""
+    tokens = BrailleTokenizer().tokenize(_BANA_ALLEGRO + _C_QUARTER_OCT4)
+    # tokens: WORD_SIGN, OCTAVE_MARK, NOTE
+    assert tokens[1].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[2].category == SymbolCategory.NOTE
+
+
+def test_tokenizer_word_sign_end_word_sign_consumed():
+    """⠄ is consumed and not emitted as a separate token."""
+    tokens = BrailleTokenizer().tokenize(_BANA_DOLCE + _END_WORD_SIGN + _C_QUARTER_OCT4)
+    categories = [t.category for t in tokens]
+    assert SymbolCategory.UNKNOWN not in categories
+    assert tokens[0].character == 'dolce'
+
+
+def test_tokenizer_dynamic_not_confused_with_word_sign():
+    """Dynamic abbreviations are still classified as DYNAMIC, not WORD_SIGN."""
+    tokens = BrailleTokenizer().tokenize(_DYN_P + _END_WORD_SIGN + _C_QUARTER_OCT4)
+    assert tokens[0].category == SymbolCategory.DYNAMIC
+    assert tokens[0].character == _DYN_P
+
+
+# --- Parser: word sign → TextMarking classification ---
+
+def _parse_score(text: str):
+    """Tokenize and parse braille text; return the full Score."""
+    from dottednotes.parser import BrailleParser, BrailleTokenizer
+    tokens = BrailleTokenizer().tokenize(text)
+    return BrailleParser(tokens=tokens).parse()
+
+
+def test_parser_allegro_classified_as_tempo():
+    from dottednotes.models import TextMarkingType
+    score = _parse_score(_BANA_ALLEGRO + _C_QUARTER_OCT4)
+    staff = score.staves[0]
+    assert staff.tempo is not None
+    assert staff.tempo.type == TextMarkingType.TEMPO
+    assert staff.tempo.text == 'allegro'
+
+
+def test_parser_dolce_classified_as_expression():
+    from dottednotes.models import TextMarkingType
+    score = _parse_score(_BANA_DOLCE + _C_QUARTER_OCT4)
+    staff = score.staves[0]
+    assert staff.tempo is not None
+    assert staff.tempo.type == TextMarkingType.EXPRESSION
+    assert staff.tempo.text == 'dolce'
+
+
+def test_parser_con_moto_classified_as_expression():
+    from dottednotes.models import TextMarkingType
+    score = _parse_score(_BANA_CON_MOTO + _C_QUARTER_OCT4)
+    staff = score.staves[0]
+    assert staff.tempo is not None
+    assert staff.tempo.text == 'con moto'
+
+
+def test_parser_andante_classified_as_tempo():
+    from dottednotes.models import TextMarkingType
+    score = _parse_score(_BANA_ANDANTE + _C_QUARTER_OCT4)
+    assert score.staves[0].tempo.type == TextMarkingType.TEMPO
+
+
+def test_parser_word_sign_mid_piece_goes_to_measure_text_markings():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = _parse_score(_C_QUARTER_OCT4 + '⠣⠅' + _BANA_DOLCE + _C_QUARTER_OCT4)
+    assert len(score.staves[0].measures) >= 1
+    last_measure = score.staves[0].measures[-1]
+    assert len(last_measure.text_markings) == 1
+    assert last_measure.text_markings[0].text == 'dolce'
+
+
+# --- LilyPond rendering ---
+
+def test_word_sign_tempo_renders_tempo_directive():
+    score = _parse_score(_BANA_ALLEGRO + _C_QUARTER_OCT4)
+    ly = score.to_lilypond()
+    assert r'\tempo "allegro"' in ly
+
+
+def test_word_sign_expression_renders_mark_directive():
+    score = _parse_score(_BANA_DOLCE + _C_QUARTER_OCT4)
+    ly = score.to_lilypond()
+    assert r'\mark \markup { "dolce" }' in ly
+
+
+def test_word_sign_tempo_comes_before_notes_in_lilypond():
+    score = _parse_score(_BANA_ALLEGRO + _C_QUARTER_OCT4)
+    ly = score.to_lilypond()
+    tempo_pos = ly.index(r'\tempo')
+    first_note_pos = ly.index("c4")
+    assert tempo_pos < first_note_pos
+
+
+# --- Capital letter indicator (⠠) — header tempo markings ---
+# "Allegro moderato" encoded as capital indicator + literary braille + period:
+#   ⠠ = capital indicator
+#   ⠁⠇⠇⠑⠛⠗⠕ = a-l-l-e-g-r-o
+#   ⠀ = space
+#   ⠍⠕⠙⠑⠗⠁⠞⠕ = m-o-d-e-r-a-t-o
+#   ⠲ = literary period (terminator)
+_CAPITAL_ALLEGRO_MODERATO = '⠠⠁⠇⠇⠑⠛⠗⠕⠀⠍⠕⠙⠑⠗⠁⠞⠕⠲'
+_CAPITAL_ANDANTE          = '⠠⠁⠝⠙⠁⠝⠞⠑⠲'   # capital + a-n-d-a-n-t-e + period
+_END_WORD_SIGN            = '⠄'              # dot 3
+
+
+def test_capital_indicator_produces_word_sign_token():
+    tokens = BrailleTokenizer().tokenize(_CAPITAL_ALLEGRO_MODERATO)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.WORD_SIGN
+
+
+def test_capital_indicator_decodes_capitalized_first_letter():
+    tokens = BrailleTokenizer().tokenize(_CAPITAL_ALLEGRO_MODERATO)
+    assert tokens[0].character == 'Allegro moderato'
+
+
+def test_capital_indicator_andante_decoded():
+    tokens = BrailleTokenizer().tokenize(_CAPITAL_ANDANTE)
+    assert tokens[0].category == SymbolCategory.WORD_SIGN
+    assert tokens[0].character == 'Andante'
+
+
+def test_capital_indicator_period_consumed_not_emitted():
+    """The literary period terminates the text and is not included in the token."""
+    tokens = BrailleTokenizer().tokenize(_CAPITAL_ALLEGRO_MODERATO)
+    assert '.' not in tokens[0].character
+
+
+def test_capital_indicator_followed_by_key_sig_leaves_key_sig_token():
+    """After the text the key signature is tokenized normally."""
+    _G_MAJOR = '⠩'
+    tokens = BrailleTokenizer().tokenize(_CAPITAL_ALLEGRO_MODERATO + _G_MAJOR)
+    assert tokens[0].category == SymbolCategory.WORD_SIGN
+    assert tokens[1].category == SymbolCategory.KEY_SIGNATURE
+
+
+def test_capital_indicator_staccatissimo_not_affected():
+    """⠠⠦ (staccatissimo) must still tokenize as ARTICULATION, not as capital indicator."""
+    _STACCATISSIMO = '⠠⠦'
+    tokens = BrailleTokenizer().tokenize(_STACCATISSIMO + _C_QUARTER_OCT4)
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+
+
+def test_capital_indicator_tempo_classified_as_tempo():
+    from dottednotes.models import TextMarkingType
+    score = _parse_score(_CAPITAL_ALLEGRO_MODERATO + _C_QUARTER_OCT4)
+    staff = score.staves[0]
+    assert staff.tempo is not None
+    assert staff.tempo.type == TextMarkingType.TEMPO
+    assert staff.tempo.text == 'Allegro moderato'
+
+
+def test_capital_indicator_tempo_renders_in_lilypond():
+    score = _parse_score(_CAPITAL_ALLEGRO_MODERATO + _C_QUARTER_OCT4)
+    assert r'\tempo "Allegro moderato"' in score.to_lilypond()
+
+
+def test_capital_indicator_tempo_before_first_note_in_lilypond():
+    score = _parse_score(_CAPITAL_ALLEGRO_MODERATO + _C_QUARTER_OCT4)
+    ly = score.to_lilypond()
+    assert ly.index(r'\tempo') < ly.index('c4')

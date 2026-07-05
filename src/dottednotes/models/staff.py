@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .measure import Measure
+from .text_marking import TextMarking
 
 if TYPE_CHECKING:
     from .clef import Clef, ClefType
@@ -20,6 +21,7 @@ class Staff:
     key_signature: KeySignature | None = None
     time_signature: TimeSignature | None = None
     clef: Clef | None = None
+    tempo: TextMarking | None = None
 
     def add_measure(self, measure: Measure) -> None:
         self.measures.append(measure)
@@ -37,6 +39,8 @@ class Staff:
           3. No notes → no \\clef directive emitted.
         """
         header: list[str] = []
+        if self.tempo is not None:
+            header.append('    ' + self.tempo.to_lilypond())
         if self.key_signature is not None and self.key_signature.sharps_or_flats != 0:
             header.append('    ' + self.key_signature.to_lilypond())
         if self.time_signature is not None:

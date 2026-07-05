@@ -54,6 +54,7 @@ class SymbolCategory(Enum):
     INTERVAL = auto()
     CHORD_INDICATOR = auto()
     IN_ACCORD = auto()
+    WORD_SIGN = auto()
     UNKNOWN = auto()
 
 
@@ -426,3 +427,22 @@ ORNAMENT_CELLS: dict[str, str] = {
 # LONG grace note (no slash) rendered via \appoggiatura, not \acciaccatura.
 GRACE_NOTE_INDICATOR: str = '⠢'      # dots 2,6  (U+2822) — short grace (with slash)
 ACCIACCATURA_INDICATOR: str = '⠐⠢'  # dots 5 + dots 2,6  — long grace (no slash)
+
+# ---------------------------------------------------------------------------
+# Literary braille header markers
+# In BANA braille music, header text markings (tempo, expression) that appear
+# before the key/time signatures use standard literary braille with a capital
+# letter indicator.  The capital indicator (⠠, dots 6) signals that the cell
+# immediately following it should be read as an uppercase letter; all subsequent
+# cells are read as lowercase literary braille until the literary period (⠲)
+# terminates the marking.
+#
+# Note: ⠠ (dots 6) also appears as the braille music octave-7 mark in
+# OCTAVE_MARKS.  The tokenizer resolves the ambiguity by treating ⠠ as a
+# capital indicator whenever it is NOT followed by ⠦ (the staccatissimo
+# second cell).  Octave 7 is beyond the range of almost all real music and
+# is effectively unused in practice.
+# ---------------------------------------------------------------------------
+
+CAPITAL_INDICATOR: str = '⠠'   # dots 6 (U+2820) — literary capital letter indicator
+LITERARY_PERIOD: str = '⠲'     # dots 2,5,6 (U+2832) — literary period, terminates header text

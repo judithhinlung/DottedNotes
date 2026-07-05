@@ -10,6 +10,7 @@ from .note import Note, Rest
 from .ornament import GraceNote, Ornament, OrnamentType, ORNAMENT_TO_LILYPOND
 from .score import Score
 from .staff import Staff
+from .text_marking import TextMarking, TextMarkingType, TEMPO_TERMS
 from .time_signature import TimeSignature, VALID_DENOMINATORS
 
 __all__ = [
@@ -35,6 +36,9 @@ __all__ = [
     "ORNAMENT_TO_LILYPOND",
     "Score",
     "Staff",
+    "TEMPO_TERMS",
+    "TextMarking",
+    "TextMarkingType",
     "TimeSignature",
     "VALID_DENOMINATORS",
 ]

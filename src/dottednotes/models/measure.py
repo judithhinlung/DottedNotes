@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from .note import Note
+from .text_marking import TextMarking
 
 _BAR_LINE_TO_LY: dict[str, str] = {
     'measure_separator': '|',
@@ -20,6 +21,7 @@ class Measure:
     key_signature: int = 0
     clef: str = "treble"
     bar_line_type: str = 'measure_separator'
+    text_markings: list[TextMarking] = field(default_factory=list)
 
     def add_note(self, note: Note) -> None:
         self.notes.append(note)
@@ -29,8 +31,11 @@ class Measure:
 
         Each note is rendered relative to the previous note's absolute MIDI pitch.
         Rests pass the MIDI pitch through unchanged.
+        Text markings (expression directions) are prepended before the notes.
         """
         parts: list[str] = []
+        for marking in self.text_markings:
+            parts.append(marking.to_lilypond())
         cur_midi = prev_midi
         for item in self.notes:
             if hasattr(item, 'to_relative_lilypond'):

@@ -31,6 +31,7 @@ from ..models.note import Note
 from ..models.ornament import GraceNote, Ornament, OrnamentType
 from ..models.score import Score
 from ..models.staff import Staff
+from ..models.text_marking import TEMPO_TERMS, TextMarking, TextMarkingType
 from ..models.time_signature import TimeSignature
 from .tokenizer import BrailleToken
 
@@ -186,6 +187,8 @@ class BrailleParser:
                     self._pending_dynamics.append(dynamic)
             elif token.category == SymbolCategory.SLUR:
                 self._handle_slur(token, pending)
+            elif token.category == SymbolCategory.WORD_SIGN:
+                self._handle_word_sign(token, pending, staff)
             # REST, UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
@@ -212,6 +215,8 @@ class BrailleParser:
             staff.time_signature = self._time_signature
         if self._clef_parsed:
             staff.clef = self._clef
+        if self._pending_tempo is not None:
+            staff.tempo = self._pending_tempo
 
         if staff.measures:
             score.add_staff(staff)
@@ -438,6 +443,26 @@ class BrailleParser:
         )
         self._time_signature_parsed = True
 
+    def _handle_word_sign(
+        self,
+        token: BrailleToken,
+        pending: list[_PendingNote],
+        staff: Staff,
+    ) -> None:
+        text = token.character  # already decoded to a plain string by the tokenizer
+        marking_type = (
+            TextMarkingType.TEMPO
+            if text.lower() in TEMPO_TERMS
+            else TextMarkingType.EXPRESSION
+        )
+        marking = TextMarking(text=text, type=marking_type)
+        if not pending and not staff.measures:
+            # Before the first note and first measure: this is a header tempo/direction.
+            self._pending_tempo = marking
+        else:
+            # Mid-piece: attach to the current (not-yet-finalized) measure.
+            self._pending_text_markings.append(marking)
+
     def _handle_clef(self, token: BrailleToken) -> None:
         _str_to_clef_type: dict[str, ClefType] = {
             'treble': ClefType.TREBLE,
@@ -464,7 +489,9 @@ class BrailleParser:
         bar_line_type: str = 'measure_separator',
     ) -> Measure:
         resolved = self._resolve_measure_durations(pending)
-        measure = Measure(number=number, bar_line_type=bar_line_type)
+        text_markings = list(self._pending_text_markings)
+        self._pending_text_markings = []
+        measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings)
         for pnote, dur_value in zip(pending, resolved):
             measure.add_note(Note(
                 dots=frozenset(),
@@ -619,3 +646,5 @@ class BrailleParser:
         self._slur_carry_active: bool = False
         self._pending_slur_end: bool = False
         self._pending_slur_bracket_open: bool = False
+        self._pending_tempo: TextMarking | None = None
+        self._pending_text_markings: list[TextMarking] = []

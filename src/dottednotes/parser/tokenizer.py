@@ -6,11 +6,13 @@ from dottednotes.bana_symbols import (
     ARTICULATION_CELLS,
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
+    CAPITAL_INDICATOR,
     CLEF_CELLS,
     DYNAMIC_CELLS,
     END_WORD_SIGN,
     GRACE_NOTE_INDICATOR,
     KEY_SIGNATURE_CELLS,
+    LITERARY_PERIOD,
     NOTE_CELLS,
     OCTAVE_MARKS,
     ORNAMENT_CELLS,
@@ -19,6 +21,7 @@ from dottednotes.bana_symbols import (
     TIME_SIGNATURE_CELLS,
     SymbolCategory,
 )
+from dottednotes.parser.input_pipeline import decode_literary_braille
 
 
 @dataclass
@@ -59,9 +62,12 @@ class BrailleTokenizer:
         3-char lookup in TIME_SIGNATURE_CELLS → TIME_SIGNATURE
         Otherwise → UNKNOWN.
 
-    ⠜ (dots 3,4,5) — clef prefix:
+    ⠜ (dots 3,4,5) — word sign / clef prefix:
+        4-char lookup in CLEF_CELLS → CLEF
         3-char lookup in CLEF_CELLS → CLEF
-        Otherwise → UNKNOWN.
+        Otherwise → greedy collect until END_WORD_SIGN (⠄) or octave mark:
+          buffer in DYNAMIC_CELLS → DYNAMIC
+          otherwise → decode as literary braille → WORD_SIGN
 
     Measure-start tracking
     ----------------------
@@ -83,6 +89,10 @@ class BrailleTokenizer:
         line = 1
         i = 0
         at_measure_start = True   # True at start-of-piece and after bar lines
+        # True until the first key sig / time sig / clef / note / rest / bar line
+        # is emitted.  CAPITAL_INDICATOR (⠠) is only valid as a literary capital
+        # in the piece header; after that point ⠠ reverts to the octave-7 mark.
+        header_active = True
 
         while i < len(text):
             char = text[i]
@@ -96,34 +106,55 @@ class BrailleTokenizer:
                 i += 1
                 continue
 
-            # --- word sign ⠜: clef (3–4 cells) or dynamic (2–4 cells + optional ⠄) ---
+            # --- word sign ⠜: clef (3–4 cells), dynamic, or literary text ---
+            #
+            # Clef sequences use fixed-width lookahead (tenor clef contains ⠐ which
+            # has no dots 1/2/3 and would break greedy collection).  Everything else
+            # uses a greedy collect-then-classify strategy:
+            #
+            #   1. Collect cells until END_WORD_SIGN (⠄, dot 3) or an octave mark.
+            #      The BANA rule that "a note following a word-sign expression must be
+            #      preceded by an octave mark" makes octave marks a reliable terminator.
+            #      END_WORD_SIGN is consumed; the octave mark is left for the note parser.
+            #   2. Classify the collected buffer:
+            #      a. Match in DYNAMIC_CELLS → DYNAMIC token (all standard abbreviations).
+            #      b. No match → decode cells as literary braille → WORD_SIGN token.
+            #
+            # This naturally handles multi-word expressions (e.g. "con moto"): the blank
+            # cell between words is not an octave mark and not dot 3, so it is collected
+            # and decoded as a space character.
             if char == self._CLEF_PREFIX:
                 four = text[i:i + 4]
                 three = text[i:i + 3]
                 if four in CLEF_CELLS:
                     tokens.append(BrailleToken(four, SymbolCategory.CLEF, i, line))
                     i += 4
+                    header_active = False
                     continue
                 if three in CLEF_CELLS:
                     tokens.append(BrailleToken(three, SymbolCategory.CLEF, i, line))
                     i += 3
+                    header_active = False
                     continue
-                # Not a clef — check dynamic sequences (longest match first).
-                # After matching, consume an optional end word sign (⠄, dot 3)
-                # which the composer writes when the next cell starts with dots 1,2,3.
-                matched_dynamic = False
-                for length in (4, 3, 2):
-                    seq = text[i:i + length]
-                    if seq in DYNAMIC_CELLS:
-                        tokens.append(BrailleToken(seq, SymbolCategory.DYNAMIC, i, line))
-                        i += length
-                        if i < len(text) and text[i] == END_WORD_SIGN:
-                            i += 1
-                        matched_dynamic = True
+                # Not a clef — collect greedily until end word sign or octave mark.
+                start_pos = i
+                buf = char
+                i += 1
+                while i < len(text):
+                    c = text[i]
+                    if c == END_WORD_SIGN:
+                        i += 1  # consume end word sign, exclude from buffer
                         break
-                if not matched_dynamic:
-                    tokens.append(BrailleToken(char, SymbolCategory.UNKNOWN, i, line))
+                    if c in OCTAVE_MARKS:
+                        break  # leave octave mark for note parsing
+                    buf += c
                     i += 1
+                # Classify the collected buffer.
+                if buf in DYNAMIC_CELLS:
+                    tokens.append(BrailleToken(buf, SymbolCategory.DYNAMIC, start_pos, line))
+                else:
+                    decoded = decode_literary_braille(buf[1:])  # strip ⠜ prefix
+                    tokens.append(BrailleToken(decoded, SymbolCategory.WORD_SIGN, start_pos, line))
                 continue
 
             # --- number sign ⠼: key signature (4–7 acc.) or time signature ---
@@ -133,11 +164,13 @@ class BrailleTokenizer:
                     tokens.append(BrailleToken(
                         three, SymbolCategory.KEY_SIGNATURE, i, line))
                     i += 3
+                    header_active = False
                     continue
                 if three in TIME_SIGNATURE_CELLS:
                     tokens.append(BrailleToken(
                         three, SymbolCategory.TIME_SIGNATURE, i, line))
                     i += 3
+                    header_active = False
                     continue
                 # Unrecognized number-sign sequence
                 tokens.append(BrailleToken(char, SymbolCategory.UNKNOWN, i, line))
@@ -154,12 +187,14 @@ class BrailleTokenizer:
                         three, SymbolCategory.BAR_LINE, i, line))
                     i += 3
                     at_measure_start = True
+                    header_active = False
                     continue
                 if two in BAR_LINE_SEQUENCES:
                     tokens.append(BrailleToken(
                         two, SymbolCategory.BAR_LINE, i, line))
                     i += 2
                     at_measure_start = True
+                    header_active = False
                     continue
                 # At a measure boundary: check for flat key signatures
                 if at_measure_start:
@@ -167,11 +202,13 @@ class BrailleTokenizer:
                         tokens.append(BrailleToken(
                             three, SymbolCategory.KEY_SIGNATURE, i, line))
                         i += 3
+                        header_active = False
                         continue
                     if two in KEY_SIGNATURE_CELLS:
                         tokens.append(BrailleToken(
                             two, SymbolCategory.KEY_SIGNATURE, i, line))
                         i += 2
+                        header_active = False
                         continue
                     if char in KEY_SIGNATURE_CELLS:
                         # Single flat: KEY_SIGNATURE only when followed by the number
@@ -182,6 +219,7 @@ class BrailleTokenizer:
                             tokens.append(BrailleToken(
                                 char, SymbolCategory.KEY_SIGNATURE, i, line))
                             i += 1
+                            header_active = False
                             continue
                 # Not a bar line or key sig → flat accidental
                 tokens.append(BrailleToken(char, SymbolCategory.ACCIDENTAL, i, line))
@@ -196,11 +234,13 @@ class BrailleTokenizer:
                     tokens.append(BrailleToken(
                         three, SymbolCategory.KEY_SIGNATURE, i, line))
                     i += 3
+                    header_active = False
                     continue
                 if two in KEY_SIGNATURE_CELLS:
                     tokens.append(BrailleToken(
                         two, SymbolCategory.KEY_SIGNATURE, i, line))
                     i += 2
+                    header_active = False
                     continue
                 if char in KEY_SIGNATURE_CELLS:
                     # Single sharp: KEY_SIGNATURE only when followed by the number
@@ -211,6 +251,7 @@ class BrailleTokenizer:
                         tokens.append(BrailleToken(
                             char, SymbolCategory.KEY_SIGNATURE, i, line))
                         i += 1
+                        header_active = False
                         continue
                 # ⠩ not classified as key sig → sharp accidental
 
@@ -258,13 +299,52 @@ class BrailleTokenizer:
                 i += 1
                 continue
 
+            # --- capital letter indicator ⠠: literary text in piece header ---
+            # ⠠⠦ (staccatissimo) was already consumed by the 2-cell articulation check
+            # above.  In the piece header (before the first key sig / time sig / note),
+            # any remaining ⠠ is a capital letter indicator starting a literary-braille
+            # text marking (e.g. "Allegro moderato.").  Collect cells until the literary
+            # period ⠲ (dots 2,5,6) or end of line; decode each cell as a letter and
+            # capitalise the first letter after each ⠠ capital indicator.
+            # Once header_active is False (musical content has started), ⠠ falls through
+            # to _classify() and is treated as the octave-7 mark.
+            if char == CAPITAL_INDICATOR and header_active:
+                start_pos = i
+                i += 1  # consume the capital indicator
+                text_chars: list[str] = []
+                capitalize_next = True  # the indicator just consumed → next letter uppercase
+                while i < len(text):
+                    c = text[i]
+                    if c == LITERARY_PERIOD:
+                        i += 1  # consume and discard the period terminator
+                        break
+                    if c in ('\n', '\r'):
+                        break   # end of line terminates without consuming
+                    if c == CAPITAL_INDICATOR:
+                        capitalize_next = True
+                        i += 1
+                        continue
+                    letter = decode_literary_braille(c)
+                    if capitalize_next and letter.isalpha():
+                        letter = letter.upper()
+                        capitalize_next = False
+                    text_chars.append(letter)
+                    i += 1
+                decoded_text = ''.join(text_chars).strip()
+                tokens.append(BrailleToken(decoded_text, SymbolCategory.WORD_SIGN, start_pos, line))
+                continue
+
             # --- general single-cell classification ---
             cat = self._classify(char)
             tokens.append(BrailleToken(char, cat, i, line))
             if cat in (SymbolCategory.NOTE, SymbolCategory.OCTAVE_MARK):
                 at_measure_start = False
+                header_active = False
             elif cat == SymbolCategory.BAR_LINE:
                 at_measure_start = True
+                header_active = False
+            elif cat == SymbolCategory.REST:
+                header_active = False
             i += 1
 
         return tokens
