@@ -375,3 +375,54 @@ ARTICULATION_CELLS: dict[str, str] = {
     '⠘⠦': 'expressive_accent',  # dots 4,5 + dots 2,3,6
     '⠤⠄': 'swell',              # dots 3,6 + dot 3
 }
+
+# ---------------------------------------------------------------------------
+# Ornament cells
+# Verified by developer against BANA Braille Music Technical Manual, Section 15.
+#
+# PLACEMENT: most ornament signs precede the note they modify.
+# BANA order (left to right): ornament → accidental → octave mark → note cell.
+# Exception: glissando (⠈⠁, two cells: dot 4 then dot 1) follows the first note.
+# The parser attaches it to the preceding note, not the following one.
+#
+# TRILL ON INTERVALS: when a trill modifies an interval sign (Sprint 5b),
+# the trill sign is placed before the interval sign. TODO: implement in S5b.
+#
+# INFLECTED ORNAMENTS: trills and mordents with accidentals (indicating the
+# auxiliary note's pitch) use complex LilyPond \pitchedTrill / \markup output.
+# TODO: implement in a future sprint.
+#
+# Keys are ordered longest-first within each grouping so the tokenizer can
+# use a single greedy 3→2→1 cell check.
+# ---------------------------------------------------------------------------
+
+ORNAMENT_CELLS: dict[str, str] = {
+    # --- 3-cell sequences (check before their 2-cell prefixes) ---
+    '⠐⠖⠇': 'lower_mordent',           # dots 5, 2,3,5, 1,2,3  → \mordent
+    '⠰⠖⠇': 'extended_lower_mordent',  # dots 5,6, 2,3,5, 1,2,3 → \downmordent
+    # --- 2-cell sequences ---
+    '⠐⠖': 'upper_mordent',            # dots 5, 2,3,5  → \prall
+    '⠰⠖': 'extended_upper_mordent',   # dots 5,6, 2,3,5 → \upmordent
+    '⠲⠇': 'inverted_turn',            # dots 2,5,6, 1,2,3 → \reverseturn
+    '⠈⠁': 'glissando',                # dot 4, dot 1 — FOLLOWS first note → \glissando
+    # --- 1-cell sequences ---
+    '⠖': 'trill',                     # dots 2,3,5 → \trill (or span marks for series)
+    '⠲': 'turn',                      # dots 2,5,6 → \turn
+}
+
+# Grace note / appoggiatura indicator cells.
+# Kept separate from ORNAMENT_CELLS because they initiate a two-step parse:
+# indicator → consume the following note cell as the grace note, then attach
+# to the next real note.
+#
+# Short appoggiatura (with slash through stem):
+#   Sign: dots 2,6 (⠢ = U+2822)
+#   LilyPond: \grace { note }
+# Long appoggiatura (without slash through stem):
+#   Sign: dots 5, 2,6 (two cells: ⠐⠢ = U+2810 + U+2822)
+#   LilyPond: \appoggiatura { note }
+#
+# Note: ACCIACCATURA_INDICATOR is named from the ticket spec; it maps to the
+# LONG grace note (no slash) rendered via \appoggiatura, not \acciaccatura.
+GRACE_NOTE_INDICATOR: str = '⠢'      # dots 2,6  (U+2822) — short grace (with slash)
+ACCIACCATURA_INDICATOR: str = '⠐⠢'  # dots 5 + dots 2,6  — long grace (no slash)

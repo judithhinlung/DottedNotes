@@ -13,12 +13,14 @@ from dottednotes.models import (
     Duration,
     Dynamic,
     DynamicLevel,
+    GraceNote,
     KEY_TO_LILYPOND,
     KeySignature,
     Measure,
     Note,
     Ornament,
     OrnamentType,
+    ORNAMENT_TO_LILYPOND,
     Rest,
     Score,
     Staff,
@@ -107,7 +109,8 @@ def test_duration_in_beats_double_dotted():
     assert Duration(value=4, dots=2).duration_in_beats() == 1.75
 
 
-def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None):
+def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None,
+               ornaments=None):
     return Note(
         dots=frozenset(),
         category=SymbolCategory.NOTE,
@@ -117,6 +120,7 @@ def _make_note(note_name, octave, duration_value, dots=0, accidental=None, artic
         duration=Duration(value=duration_value, dots=dots),
         accidental=accidental,
         articulations=articulations or [],
+        ornaments=ornaments or [],
     )
 
 
@@ -715,3 +719,190 @@ def test_clef_has_raw_brl_field():
 
 def test_clef_category_is_clef():
     assert _make_clef(ClefType.TREBLE).category == SymbolCategory.CLEF
+
+
+# ---------------------------------------------------------------------------
+# Ornament model tests
+# ---------------------------------------------------------------------------
+
+def test_ornament_to_lilypond_trill():
+    assert Ornament(type=OrnamentType.TRILL).to_lilypond() == r'\trill'
+
+
+def test_ornament_to_lilypond_trill_span_start():
+    assert Ornament(type=OrnamentType.TRILL_SPAN_START).to_lilypond() == r'\startTrillSpan'
+
+
+def test_ornament_to_lilypond_trill_span_end():
+    assert Ornament(type=OrnamentType.TRILL_SPAN_END).to_lilypond() == r'\stopTrillSpan'
+
+
+def test_ornament_to_lilypond_mordent():
+    assert Ornament(type=OrnamentType.MORDENT).to_lilypond() == r'\mordent'
+
+
+def test_ornament_to_lilypond_upper_mordent():
+    assert Ornament(type=OrnamentType.UPPER_MORDENT).to_lilypond() == r'\prall'
+
+
+def test_ornament_to_lilypond_extended_mordent():
+    assert Ornament(type=OrnamentType.EXTENDED_MORDENT).to_lilypond() == r'\downmordent'
+
+
+def test_ornament_to_lilypond_extended_upper_mordent():
+    assert Ornament(type=OrnamentType.EXTENDED_UPPER_MORDENT).to_lilypond() == r'\upmordent'
+
+
+def test_ornament_to_lilypond_turn():
+    assert Ornament(type=OrnamentType.TURN).to_lilypond() == r'\turn'
+
+
+def test_ornament_to_lilypond_inverted_turn():
+    assert Ornament(type=OrnamentType.INVERTED_TURN).to_lilypond() == r'\reverseturn'
+
+
+def test_ornament_to_lilypond_glissando():
+    assert Ornament(type=OrnamentType.GLISSANDO).to_lilypond() == r'\glissando'
+
+
+def test_ornament_to_lilypond_tremolo():
+    assert Ornament(type=OrnamentType.TREMOLO).to_lilypond() == ':32'
+
+
+def test_ornament_to_lilypond_map_covers_all_types():
+    for orn_type in OrnamentType:
+        assert orn_type in ORNAMENT_TO_LILYPOND
+
+
+def _make_grace_note(note_name='E', octave=4, long_appoggiatura=False):
+    note = Note(
+        dots=frozenset(),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠀',
+        note_name=note_name,
+        octave=octave,
+        duration=Duration(value=8),
+    )
+    return GraceNote(notes=[note], long_appoggiatura=long_appoggiatura)
+
+
+def test_grace_note_short_to_lilypond():
+    gn = _make_grace_note('E', 4, long_appoggiatura=False)
+    result = gn.to_lilypond()
+    assert result.startswith(r'\grace')
+    assert "e'" in result
+    assert r'\appoggiatura' not in result
+
+
+def test_grace_note_long_to_lilypond():
+    gn = _make_grace_note('E', 4, long_appoggiatura=True)
+    result = gn.to_lilypond()
+    assert result.startswith(r'\appoggiatura')
+    assert "e'" in result
+    assert result.count(r'\grace') == 0
+
+
+def test_note_with_ornament_trill():
+    note = _make_note('G', 4, 4, ornaments=[Ornament(type=OrnamentType.TRILL)])
+    assert note.to_lilypond() == r"g'4\trill"
+
+
+def test_note_with_ornament_turn():
+    note = _make_note('A', 5, 8, ornaments=[Ornament(type=OrnamentType.TURN)])
+    assert note.to_lilypond() == r"a''8\turn"
+
+
+def test_note_articulations_precede_ornaments():
+    art = Articulation(ArticulationType.STACCATO)
+    note = _make_note('C', 4, 4,
+                      ornaments=[Ornament(type=OrnamentType.TRILL)],
+                      articulations=[art])
+    ly = note.to_lilypond()
+    staccato_pos = ly.index('-.')
+    trill_pos = ly.index(r'\trill')
+    assert staccato_pos < trill_pos
+
+
+def test_note_multiple_ornaments():
+    note = _make_note('D', 4, 4, ornaments=[
+        Ornament(type=OrnamentType.TRILL_SPAN_START),
+        Ornament(type=OrnamentType.TURN),
+    ])
+    ly = note.to_lilypond()
+    assert r'\startTrillSpan' in ly
+    assert r'\turn' in ly
+
+
+def test_note_with_grace_note_prepended():
+    note = Note(
+        dots=frozenset(),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠀',
+        note_name='C',
+        octave=4,
+        duration=Duration(value=4),
+        grace_note=_make_grace_note('B', 3, long_appoggiatura=False),
+    )
+    ly = note.to_lilypond()
+    assert ly.startswith(r'\grace')
+    assert "c'" in ly
+
+
+def test_note_grace_note_before_main_note():
+    note = Note(
+        dots=frozenset(),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠀',
+        note_name='C',
+        octave=4,
+        duration=Duration(value=4),
+        grace_note=_make_grace_note('B', 3, long_appoggiatura=False),
+    )
+    ly = note.to_lilypond()
+    grace_pos = ly.index(r'\grace')
+    main_pos = ly.index("c'")
+    assert grace_pos < main_pos
+
+
+def test_note_with_long_grace_note():
+    note = Note(
+        dots=frozenset(),
+        category=SymbolCategory.NOTE,
+        raw_brl='⠀',
+        note_name='D',
+        octave=5,
+        duration=Duration(value=2),
+        grace_note=_make_grace_note('C', 5, long_appoggiatura=True),
+    )
+    ly = note.to_lilypond()
+    assert ly.startswith(r'\appoggiatura')
+    assert "d''" in ly
+
+
+def test_note_with_multiple_grace_notes():
+    gn1 = Note(dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠀',
+               note_name='C', octave=4, duration=Duration(value=8))
+    gn2 = Note(dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠀',
+               note_name='D', octave=4, duration=Duration(value=8))
+    gn3 = Note(dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠀',
+               note_name='E', octave=4, duration=Duration(value=8))
+    note = Note(
+        dots=frozenset(), category=SymbolCategory.NOTE, raw_brl='⠀',
+        note_name='F', octave=4, duration=Duration(value=4),
+        grace_note=GraceNote(notes=[gn1, gn2, gn3]),
+    )
+    ly = note.to_lilypond()
+    assert ly.startswith(r'\grace')
+    assert "c'" in ly
+    assert "d'" in ly
+    assert "e'" in ly
+    assert "f'" in ly
+    grace_end = ly.index('}')
+    main_pos = ly.index("f'")
+    assert grace_end < main_pos
+
+
+def test_note_no_grace_note_no_prefix():
+    note = _make_note('F', 4, 4)
+    assert not note.to_lilypond().startswith(r'\grace')
+    assert not note.to_lilypond().startswith(r'\appoggiatura')

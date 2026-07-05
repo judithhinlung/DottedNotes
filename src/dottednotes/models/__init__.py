@@ -7,7 +7,7 @@ from .dynamic import Dynamic, DynamicLevel
 from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
 from .note import Note, Rest
-from .ornament import Ornament, OrnamentType
+from .ornament import GraceNote, Ornament, OrnamentType, ORNAMENT_TO_LILYPOND
 from .score import Score
 from .staff import Staff
 from .time_signature import TimeSignature, VALID_DENOMINATORS
@@ -29,8 +29,10 @@ __all__ = [
     "Measure",
     "Note",
     "Rest",
+    "GraceNote",
     "Ornament",
     "OrnamentType",
+    "ORNAMENT_TO_LILYPOND",
     "Score",
     "Staff",
     "TimeSignature",

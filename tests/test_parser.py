@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory
-from dottednotes.models import Articulation, ArticulationType, Clef, ClefType, Dynamic, DynamicLevel, KeySignature, Score, TimeSignature
+from dottednotes.models import Articulation, ArticulationType, Clef, ClefType, Dynamic, DynamicLevel, KeySignature, Ornament, OrnamentType, Score, TimeSignature
 from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline
 
 
@@ -1870,3 +1870,378 @@ def test_parser_slur_bracket_renders_to_lilypond():
         notes = _parse(_PHRASE_OPEN + '⠐⠻⠋⠑⠋⠛' + _PHRASE_CLOSE)
     assert r'\(' in notes[0].to_lilypond()
     assert r'\)' in notes[4].to_lilypond()
+
+
+# ---------------------------------------------------------------------------
+# S4-4: Ornaments
+# ---------------------------------------------------------------------------
+
+# BANA ornament cells (verified with developer):
+_TRILL           = '⠖'    # dots 2,3,5 — trill (also used doubled for carry mode)
+_TURN            = '⠲'    # dots 2,5,6 — turn
+_INV_TURN        = '⠲⠇'  # dots 2,5,6 + dots 1,2,3 — inverted turn
+_UPPER_MORDENT   = '⠐⠖'  # dots 5 + dots 2,3,5 — upper mordent (prall)
+_LOWER_MORDENT   = '⠐⠖⠇' # dots 5 + dots 2,3,5 + dots 1,2,3 — lower mordent
+_GLISSANDO       = '⠈⠁'  # dot 4 cell + dot 1 cell — follows first note
+_GRACE_SHORT     = '⠢'    # dots 2,6 — short grace note indicator (with slash → \grace)
+_GRACE_LONG      = '⠐⠢'  # dots 5 + dots 2,6 — long grace note indicator (no slash → \appoggiatura)
+
+# Octave 4 mark + note cells used in ornament tests:
+_OCT4            = '⠐'    # dots 5 — octave 4 (middle C range)
+_C4              = '⠐⠹'  # octave 4 + C quarter
+_E4              = '⠫'    # E quarter (same octave, no mark needed after ⠐)
+
+
+# --- Tokenizer: ornament cell classification ---
+
+def test_tokenizer_trill_is_ornament_category():
+    tokens = BrailleTokenizer().tokenize(_TRILL + _C4)
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _TRILL
+
+
+def test_tokenizer_turn_is_ornament_category():
+    tokens = BrailleTokenizer().tokenize(_TURN + _C4)
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _TURN
+
+
+def test_tokenizer_inverted_turn_is_two_cell_ornament():
+    tokens = BrailleTokenizer().tokenize(_INV_TURN + _C4)
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _INV_TURN
+
+
+def test_tokenizer_upper_mordent_is_two_cell_ornament():
+    # ⠐⠖ must be emitted as one 2-cell ORNAMENT token, not split into octave mark + trill.
+    tokens = BrailleTokenizer().tokenize(_UPPER_MORDENT + _C4)
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _UPPER_MORDENT
+
+
+def test_tokenizer_lower_mordent_is_three_cell_ornament():
+    tokens = BrailleTokenizer().tokenize(_LOWER_MORDENT + _C4)
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _LOWER_MORDENT
+
+
+def test_tokenizer_upper_mordent_not_split_as_octave_mark():
+    tokens = BrailleTokenizer().tokenize(_UPPER_MORDENT + _C4)
+    cats = [t.category for t in tokens]
+    # ⠐ must not appear as an isolated OCTAVE_MARK when it starts the mordent
+    octave_marks = [t for t in tokens if t.category == SymbolCategory.OCTAVE_MARK]
+    # Only the ⠐ inside _C4 should be an octave mark
+    assert len(octave_marks) == 1
+
+
+def test_tokenizer_short_grace_indicator_is_ornament():
+    tokens = BrailleTokenizer().tokenize(_GRACE_SHORT + _OCT4 + _E4 + _C4)
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _GRACE_SHORT
+
+
+def test_tokenizer_long_grace_indicator_is_two_cell_ornament():
+    # ⠐⠢ must be one 2-cell ORNAMENT token, not split as octave mark + short grace.
+    tokens = BrailleTokenizer().tokenize(_GRACE_LONG + _OCT4 + _E4 + _C4)
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _GRACE_LONG
+
+
+# --- Parser: ornaments attach to the following note ---
+
+def test_parser_trill_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_TRILL + _C4)
+    assert len(notes[0].ornaments) == 1
+    assert notes[0].ornaments[0].type == OrnamentType.TRILL
+
+
+def test_parser_turn_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_TURN + _C4)
+    assert notes[0].ornaments[0].type == OrnamentType.TURN
+
+
+def test_parser_inverted_turn_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_INV_TURN + _C4)
+    assert notes[0].ornaments[0].type == OrnamentType.INVERTED_TURN
+
+
+def test_parser_upper_mordent_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_UPPER_MORDENT + _C4)
+    assert notes[0].ornaments[0].type == OrnamentType.UPPER_MORDENT
+
+
+def test_parser_lower_mordent_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_LOWER_MORDENT + _C4)
+    assert notes[0].ornaments[0].type == OrnamentType.MORDENT
+
+
+def test_parser_note_without_ornament_has_empty_list():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_C4)
+    assert notes[0].ornaments == []
+
+
+# --- Parser: ornaments render correctly to LilyPond ---
+
+def test_parser_trill_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_TRILL + _C4)
+    assert r'\trill' in notes[0].to_lilypond()
+
+
+def test_parser_turn_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_TURN + _C4)
+    assert r'\turn' in notes[0].to_lilypond()
+
+
+def test_parser_inverted_turn_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_INV_TURN + _C4)
+    assert r'\reverseturn' in notes[0].to_lilypond()
+
+
+def test_parser_upper_mordent_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_UPPER_MORDENT + _C4)
+    assert r'\prall' in notes[0].to_lilypond()
+
+
+def test_parser_lower_mordent_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_LOWER_MORDENT + _C4)
+    assert r'\mordent' in notes[0].to_lilypond()
+
+
+# --- Tokenizer: glissando cell recognition ---
+
+def test_tokenizer_glissando_is_two_cell_ornament():
+    # ⠈⠁ is two separate cells (dot 4, dot 1), not the single slur cell ⠉ (dots 1,4).
+    tokens = BrailleTokenizer().tokenize(_C4 + _GLISSANDO + '⠱')
+    orn = [t for t in tokens if t.category == SymbolCategory.ORNAMENT]
+    assert len(orn) == 1
+    assert orn[0].character == _GLISSANDO
+
+
+def test_tokenizer_glissando_not_confused_with_slur():
+    # ⠈⠁ (glissando) and ⠉ (slur/tie) are different byte sequences.
+    tokens_gliss = BrailleTokenizer().tokenize(_C4 + _GLISSANDO + '⠱')
+    tokens_slur  = BrailleTokenizer().tokenize('⠐⠹⠉⠹')
+    gliss_orn = [t for t in tokens_gliss if t.category == SymbolCategory.ORNAMENT]
+    slur_toks = [t for t in tokens_slur if t.category == SymbolCategory.SLUR]
+    assert len(gliss_orn) == 1
+    assert len(slur_toks) == 1
+
+
+def test_tokenizer_glissando_not_classified_as_slur():
+    tokens = BrailleTokenizer().tokenize(_C4 + _GLISSANDO + '⠱')
+    slur_toks = [t for t in tokens if t.category == SymbolCategory.SLUR]
+    assert slur_toks == []
+
+
+# --- Parser: glissando attaches to the preceding note ---
+
+def test_parser_glissando_attaches_to_preceding_note():
+    # Sequence: C4 quarter, glissando, D4 quarter
+    # Glissando follows first note, so notes[0] carries it.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_C4 + _GLISSANDO + '⠱')
+    assert len(notes[0].ornaments) == 1
+    assert notes[0].ornaments[0].type == OrnamentType.GLISSANDO
+
+
+def test_parser_glissando_not_on_second_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_C4 + _GLISSANDO + '⠱')
+    assert notes[1].ornaments == []
+
+
+def test_parser_glissando_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_C4 + _GLISSANDO + '⠱')
+    assert r'\glissando' in notes[0].to_lilypond()
+
+
+def test_parser_glissando_not_in_second_note_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_C4 + _GLISSANDO + '⠱')
+    assert r'\glissando' not in notes[1].to_lilypond()
+
+
+# --- Parser: trill carry mode ---
+
+def test_parser_doubled_trill_sign_gives_span_start():
+    # Two consecutive trill signs before any note → TRILL_SPAN_START on first note.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_TRILL + _TRILL + _C4 + '⠹')
+    assert notes[0].ornaments[0].type == OrnamentType.TRILL_SPAN_START
+
+
+def test_parser_trill_span_start_renders_startTrillSpan():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_TRILL + _TRILL + _C4 + '⠹')
+    assert r'\startTrillSpan' in notes[0].to_lilypond()
+
+
+def test_parser_trill_carry_end():
+    # Doubled trill before first note activates carry; single trill before last note terminates.
+    # Sequence: ⠖⠖ C4 ⠖ D(same octave)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_TRILL + _TRILL + _C4 + _TRILL + '⠱')
+    assert notes[1].ornaments[0].type == OrnamentType.TRILL_SPAN_END
+    assert r'\stopTrillSpan' in notes[1].to_lilypond()
+
+
+# --- Parser: grace notes ---
+
+def test_parser_short_grace_note():
+    # ⠢ E4 C4 → C4 has a short grace note (E4); grace cell is not a separate measure note.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_GRACE_SHORT + _OCT4 + _E4 + _C4)
+    assert len(notes) == 1
+    assert notes[0].grace_note is not None
+    assert notes[0].grace_note.long_appoggiatura is False
+    assert notes[0].grace_note.notes[0].note_name == 'E'
+    assert r'\grace' in notes[0].to_lilypond()
+
+
+def test_parser_long_grace_note():
+    # ⠐⠢ E4 C4 → C4 has a long grace note (appoggiatura)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_GRACE_LONG + _OCT4 + _E4 + _C4)
+    assert notes[0].grace_note is not None
+    assert notes[0].grace_note.long_appoggiatura is True
+    assert r'\appoggiatura' in notes[0].to_lilypond()
+
+
+def test_parser_note_without_grace_has_none():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_C4)
+    assert notes[0].grace_note is None
+
+
+# --- Parser: multiple grace notes (≤3, each with its own indicator) ---
+# Braille: ⠢⠐⠙ ⠢⠑ ⠢⠋ ⠐⠻ → \grace { c8 d8 e8 } f'4
+# After the first octave mark, the remaining grace notes inherit octave 4.
+_THREE_GRACE = _GRACE_SHORT + _OCT4 + '⠙' + _GRACE_SHORT + '⠑' + _GRACE_SHORT + '⠋' + _OCT4 + '⠻'
+
+
+def test_parser_three_grace_notes_all_in_one_block():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_THREE_GRACE)
+    assert notes[0].grace_note is not None
+    assert len(notes[0].grace_note.notes) == 3
+
+
+def test_parser_three_grace_note_names():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_THREE_GRACE)
+    names = [n.note_name for n in notes[0].grace_note.notes]
+    assert names == ['C', 'D', 'E']
+
+
+def test_parser_three_grace_notes_only_one_measure_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_THREE_GRACE)
+    assert len(notes) == 1
+
+
+def test_parser_three_grace_notes_renders_single_grace_block():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_THREE_GRACE)
+    ly = notes[0].to_lilypond()
+    assert ly.startswith(r'\grace')
+    assert ly.count(r'\grace') == 1  # one block, not three
+
+
+def test_parser_three_grace_notes_lilypond_contains_all_pitches():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_THREE_GRACE)
+    ly = notes[0].to_lilypond()
+    assert 'c' in ly
+    assert 'd' in ly
+    assert 'e' in ly
+    assert 'f' in ly
+
+
+# --- Parser: 4+ grace notes with carry mode (doubled indicator) ---
+# Braille: ⠢⠢⠐⠙ ⠑ ⠋ ⠛ ⠢⠓ ⠐⠻ → \grace { c8 d8 e8 f8 g8 } f'4
+# ⠛ = F eighth, ⠓ = G eighth
+_FIVE_GRACE = (
+    _GRACE_SHORT + _GRACE_SHORT + _OCT4 + '⠙'  # doubled indicator + C
+    + '⠑'                                        # middle: D
+    + '⠋'                                        # middle: E
+    + '⠛'                                        # middle: F
+    + _GRACE_SHORT + '⠓'                         # terminating indicator + G
+    + _OCT4 + '⠻'                               # main note: F quarter
+)
+
+
+def test_parser_carry_mode_five_grace_notes():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_FIVE_GRACE)
+    assert notes[0].grace_note is not None
+    assert len(notes[0].grace_note.notes) == 5
+
+
+def test_parser_carry_mode_grace_note_names():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_FIVE_GRACE)
+    names = [n.note_name for n in notes[0].grace_note.notes]
+    assert names == ['C', 'D', 'E', 'F', 'G']
+
+
+def test_parser_carry_mode_only_one_measure_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_FIVE_GRACE)
+    assert len(notes) == 1
+
+
+def test_parser_carry_mode_renders_single_grace_block():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_FIVE_GRACE)
+    ly = notes[0].to_lilypond()
+    assert ly.startswith(r'\grace')
+    assert ly.count(r'\grace') == 1

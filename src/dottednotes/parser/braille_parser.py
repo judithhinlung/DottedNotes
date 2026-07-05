@@ -5,14 +5,17 @@ from dataclasses import dataclass, field
 
 from ..bana_symbols import (
     ACCIDENTAL_CELLS,
+    ACCIACCATURA_INDICATOR,
     ARTICULATION_CELLS,
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
     CLEF_CELLS,
     DYNAMIC_CELLS,
+    GRACE_NOTE_INDICATOR,
     KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
+    ORNAMENT_CELLS,
     SLUR_CELLS,
     TIME_SIGNATURE_CELLS,
     SymbolCategory,
@@ -25,6 +28,7 @@ from ..models.dynamic import Dynamic, DynamicLevel
 from ..models.key_signature import KeySignature
 from ..models.measure import Measure
 from ..models.note import Note
+from ..models.ornament import GraceNote, Ornament, OrnamentType
 from ..models.score import Score
 from ..models.staff import Staff
 from ..models.time_signature import TimeSignature
@@ -65,6 +69,17 @@ _STR_TO_ARTICULATION_TYPE: dict[str, ArticulationType] = {
     'swell':             ArticulationType.SWELL,
 }
 
+_STR_TO_ORNAMENT_TYPE: dict[str, OrnamentType] = {
+    'trill':                   OrnamentType.TRILL,
+    'turn':                    OrnamentType.TURN,
+    'inverted_turn':           OrnamentType.INVERTED_TURN,
+    'upper_mordent':           OrnamentType.UPPER_MORDENT,
+    'extended_upper_mordent':  OrnamentType.EXTENDED_UPPER_MORDENT,
+    'lower_mordent':           OrnamentType.MORDENT,
+    'extended_lower_mordent':  OrnamentType.EXTENDED_MORDENT,
+    'glissando':               OrnamentType.GLISSANDO,
+}
+
 
 @dataclass
 class _PendingNote:
@@ -76,6 +91,8 @@ class _PendingNote:
     accidental: Accidental | None = None
     dynamics: list[Dynamic] = field(default_factory=list)
     articulations: list[Articulation] = field(default_factory=list)
+    ornaments: list[Ornament] = field(default_factory=list)
+    grace_note: GraceNote | None = None
     tie: bool = False
     slur_start: bool = False
     slur_end: bool = False
@@ -116,14 +133,27 @@ class BrailleParser:
         for token in self._tokens:
             if token.category == SymbolCategory.OCTAVE_MARK:
                 self._handle_octave_mark(token)
+            elif token.category == SymbolCategory.ORNAMENT:
+                self._handle_ornament(token, pending)
             elif token.category == SymbolCategory.NOTE:
-                # Simple slur: single ⠉ between previous note and this one
-                if self._last_token_was_slur and not self._slur_carry_active:
-                    if pending:
-                        pending[-1].slur_start = True
-                    self._pending_slur_end = True
-                    self._last_token_was_slur = False
-                pending.append(self._buffer_note(token))
+                if self._pending_grace_note_indicator:
+                    # This note cell is a grace note (single indicator or carry start/end).
+                    self._pending_grace_notes.append(self._build_grace_note_cell(token))
+                    self._pending_grace_note_indicator = False
+                    if self._grace_carry_ending:
+                        self._grace_carry_active = False
+                        self._grace_carry_ending = False
+                elif self._grace_carry_active:
+                    # Middle grace note in carry mode — no indicator needed.
+                    self._pending_grace_notes.append(self._build_grace_note_cell(token))
+                else:
+                    # Simple slur: single ⠉ between previous note and this one
+                    if self._last_token_was_slur and not self._slur_carry_active:
+                        if pending:
+                            pending[-1].slur_start = True
+                        self._pending_slur_end = True
+                        self._last_token_was_slur = False
+                    pending.append(self._buffer_note(token))
             elif token.category == SymbolCategory.BAR_LINE:
                 if pending:
                     bar_type = (
@@ -161,6 +191,19 @@ class BrailleParser:
         # Finalize the last measure (no trailing blank cell required)
         if pending:
             staff.add_measure(self._finalize_measure(pending, measure_number))
+
+        # Warn about orphaned grace note state at end of input
+        if self._pending_grace_note_indicator:
+            warnings.warn(
+                "Grace note indicator at end of input with no following note cell.",
+                stacklevel=2,
+            )
+        if self._pending_grace_notes:
+            warnings.warn(
+                f"{len(self._pending_grace_notes)} grace note(s) at end of input "
+                "with no following main note.",
+                stacklevel=2,
+            )
 
         # Attach parsed header state to the staff
         if self._key_signature_parsed:
@@ -239,6 +282,82 @@ class BrailleParser:
             if pending:
                 pending[-1].slur_bracket_close = True
 
+    def _handle_ornament(self, token: BrailleToken, pending: list[_PendingNote]) -> None:
+        char = token.character
+        if char == GRACE_NOTE_INDICATOR:
+            if self._grace_carry_active:
+                # Terminating single sign: next note is the last grace note.
+                self._grace_carry_ending = True
+                self._pending_grace_note_indicator = True
+            elif self._pending_grace_note_indicator:
+                # Doubled sign (two indicators in a row, no note between): enter carry mode.
+                self._grace_carry_active = True
+                # _pending_grace_note_indicator stays True; next note is first grace note.
+            else:
+                self._pending_grace_note_indicator = True
+                self._pending_grace_note_is_long = False
+        elif char == ACCIACCATURA_INDICATOR:
+            if self._grace_carry_active:
+                self._grace_carry_ending = True
+                self._pending_grace_note_indicator = True
+            elif self._pending_grace_note_indicator:
+                self._grace_carry_active = True
+            else:
+                self._pending_grace_note_indicator = True
+                self._pending_grace_note_is_long = True
+        elif char in ORNAMENT_CELLS:
+            orn_name = ORNAMENT_CELLS[char]
+            if orn_name == 'trill':
+                self._handle_trill()
+            elif orn_name == 'glissando':
+                # Glissando follows the note it modifies (not precedes it).
+                if pending:
+                    pending[-1].ornaments.append(Ornament(type=OrnamentType.GLISSANDO))
+                else:
+                    warnings.warn(
+                        f"Glissando sign at position {token.position} "
+                        "has no preceding note to attach to."
+                    )
+            else:
+                self._pending_ornaments.append(
+                    Ornament(type=_STR_TO_ORNAMENT_TYPE[orn_name])
+                )
+                self._last_ornament_was_trill = False
+
+    def _handle_trill(self) -> None:
+        if self._trill_carry_active:
+            # Terminating sign: this note is the last of the trill series.
+            self._pending_ornaments.append(Ornament(type=OrnamentType.TRILL_SPAN_END))
+            self._trill_carry_active = False
+            self._last_ornament_was_trill = False
+        elif self._last_ornament_was_trill:
+            # Doubled sign (same sign twice with no note between):
+            # upgrade the already-pending TRILL to TRILL_SPAN_START, activate carry.
+            for idx, o in enumerate(self._pending_ornaments):
+                if o.type == OrnamentType.TRILL:
+                    self._pending_ornaments[idx] = Ornament(type=OrnamentType.TRILL_SPAN_START)
+            self._trill_carry_active = True
+            self._last_ornament_was_trill = False
+        else:
+            # Simple single trill sign.
+            self._pending_ornaments.append(Ornament(type=OrnamentType.TRILL))
+            self._last_ornament_was_trill = True
+
+    def _build_grace_note_cell(self, token: BrailleToken) -> Note:
+        """Consume a note token as a single grace note pitch (always duration 8)."""
+        note_name, _ = NOTE_CELLS[token.character]
+        accidental = self._pending_accidental
+        self._pending_accidental = None
+        return Note(
+            dots=frozenset(),
+            category=SymbolCategory.NOTE,
+            raw_brl=token.character,
+            note_name=note_name,
+            octave=self._current_octave,
+            duration=Duration(value=8),
+            accidental=accidental,
+        )
+
     def _buffer_note(self, token: BrailleToken) -> _PendingNote:
         note_name, base_duration = NOTE_CELLS[token.character]
         accidental = self._pending_accidental
@@ -263,6 +382,22 @@ class BrailleParser:
         self._terminating_articulations = set()
         self._last_articulation_seen = None  # note breaks doubled-sign detection
 
+        # Capture and clear pending ornaments.
+        ornaments = list(self._pending_ornaments)
+        self._pending_ornaments = []
+        # A note resets doubled-sign detection for trills, but preserves trill carry state.
+        self._last_ornament_was_trill = False
+
+        # Build GraceNote from any accumulated grace note cells.
+        grace_note: GraceNote | None = None
+        if self._pending_grace_notes:
+            grace_note = GraceNote(
+                notes=list(self._pending_grace_notes),
+                long_appoggiatura=self._pending_grace_note_is_long,
+            )
+            self._pending_grace_notes = []
+            self._pending_grace_note_is_long = False
+
         # Capture slur/tie state for this note, then clear the pending flags.
         slur_end = self._pending_slur_end
         slur_bracket_open = self._pending_slur_bracket_open
@@ -277,6 +412,8 @@ class BrailleParser:
             accidental=accidental,
             dynamics=dynamics,
             articulations=articulations,
+            ornaments=ornaments,
+            grace_note=grace_note,
             slur_end=slur_end,
             slur_bracket_open=slur_bracket_open,
         )
@@ -339,6 +476,8 @@ class BrailleParser:
                 accidental=pnote.accidental,
                 dynamics=pnote.dynamics,
                 articulations=pnote.articulations,
+                ornaments=pnote.ornaments,
+                grace_note=pnote.grace_note,
                 tie=pnote.tie,
                 slur_start=pnote.slur_start,
                 slur_end=pnote.slur_end,
@@ -468,6 +607,14 @@ class BrailleParser:
         self._active_articulations: set[ArticulationType] = set()
         self._terminating_articulations: set[ArticulationType] = set()
         self._last_articulation_seen: ArticulationType | None = None
+        self._pending_ornaments: list[Ornament] = []
+        self._trill_carry_active: bool = False
+        self._last_ornament_was_trill: bool = False
+        self._pending_grace_note_indicator: bool = False
+        self._pending_grace_note_is_long: bool = False
+        self._pending_grace_notes: list[Note] = []
+        self._grace_carry_active: bool = False
+        self._grace_carry_ending: bool = False
         self._last_token_was_slur: bool = False
         self._slur_carry_active: bool = False
         self._pending_slur_end: bool = False

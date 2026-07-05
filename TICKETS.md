@@ -2001,7 +2001,7 @@ ties; a tie token after a grace note should attach to the main note.
 
 ---
 
-### [ ] S4-4: Implement Ornament model and add ornament parsing
+### [x] S4-4: Implement Ornament model and add ornament parsing
 
 **Why:** Trills, mordents, and grace notes appear constantly in Baroque and
 Classical repertoire, and grace notes are common in folk music.  Without
@@ -2097,18 +2097,18 @@ repertoire.
    ```
 
 **Definition of Done:**
-- [ ] `Ornament` class with `OrnamentType` enum exists in `models/ornament.py`
-- [ ] `GraceNote` dataclass exists and wraps a `Note`
-- [ ] `Note` has `grace_note: GraceNote | None` field
-- [ ] `Note.to_lilypond()` prepends grace note block when present
-- [ ] `Note.to_lilypond()` appends standard ornament strings (e.g. `\trill`)
-- [ ] `ORNAMENT_CELLS`, `GRACE_NOTE_INDICATOR`, `ACCIACCATURA_INDICATOR`
+- [x] `Ornament` class with `OrnamentType` enum exists in `models/ornament.py`
+- [x] `GraceNote` dataclass exists and wraps a `Note`
+- [x] `Note` has `grace_note: GraceNote | None` field
+- [x] `Note.to_lilypond()` prepends grace note block when present
+- [x] `Note.to_lilypond()` appends standard ornament strings (e.g. `\trill`)
+- [x] `ORNAMENT_CELLS`, `GRACE_NOTE_INDICATOR`, `ACCIACCATURA_INDICATOR`
       in `bana_symbols.py` verified against BANA section 15
-- [ ] Tokenizer classifies ornament cells as `SymbolCategory.ORNAMENT`
-- [ ] Parser attaches ornaments and grace notes to the correct notes
-- [ ] Grace notes are excluded from `_validate_measure_beat_count()`
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] Tokenizer classifies ornament cells as `SymbolCategory.ORNAMENT`
+- [x] Parser attaches ornaments and grace notes to the correct notes
+- [x] Grace notes are excluded from `_validate_measure_beat_count()`
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** Grace notes do not count toward the measure beat total --
 skip them in `_validate_measure_beat_count()`.  A grace note without a
@@ -2348,6 +2348,17 @@ Estimated time: 4–5 days.
 *Detailed steps to be written when Sprint 6 is complete.*
 
 ---
+**Sprint 7b: LilyPond Formatting Library**
+- [ ] S7b-1: Download and analyze 50 representative Mutopia scores programmatically — extract common header patterns, paper settings, staff spacing values, and rehearsal mark styles
+- [ ] S7b-2: Implement `LilyPondFormatter` class with evidence-based defaults derived from Mutopia analysis
+- [ ] S7b-3: Implement instrumentation detection and template selection
+- [ ] S7b-4: Curate 4 formatting templates (solo piano, art song, chamber, orchestral) based on high-quality Mutopia examples
+- [ ] S7b-5: Implement page layout defaults (paper size A4/Letter, margins, system spacing) for each template
+- [ ] S7b-6: Implement `\header` block generation with title, composer, copyright, and Mutopia-style tagline
+- [ ] S7b-7: Integration test: generate a formatted score and verify it compiles to a professional-looking PDF
+- [ ] S7b-8: Document all formatting rules in `docs/lilypond_conventions.md` with source citations
+
+---
 
 # Sprint 8: Accessibility and Polish
 
@@ -2375,6 +2386,15 @@ Estimated time: 1.5–2 weeks.
 *Detailed steps to be written when Sprint 8 is complete.*
 
 ---
+**Sprint 9c: BANA Formatting Rule Library**
+- [ ] S9c-1: Compile complete list of BANA mandatory formatting rules from the Technical Manual
+- [ ] S9c-2: Compile complete list of BANA optional shorthand conventions
+- [ ] S9c-3: Implement each rule as a discrete, testable method on `BANAValidator`
+- [ ] S9c-4: Document every rule in `docs/bana_reference.md` with manual citation and example
+- [ ] S9c-5: Build a rule registry so rules can be enabled/disabled individually — useful for different BANA editions (UK vs US braille music conventions differ slightly)
+
+
+---
 
 # Sprint 10: MusicXML Bridge
 
@@ -2387,3 +2407,31 @@ Estimated time: 1–1.5 weeks.
 ### [ ] S10-5: Integration test: import BRF, export as MusicXML for MuseScore
 
 *Detailed steps to be written when Sprint 9 is complete.*
+**Sprint 9b: BANA Validator (between Sprint 9 and Sprint 10)**
+- [ ] S9b-1: Implement `BANAValidator` class with rule registry
+- [ ] S9b-2: Implement articulation series shorthand rule (your specific case)
+- [ ] S9b-3: Implement octave mark validation and auto-insertion
+- [ ] S9b-4: Implement line length checking and automatic line breaking
+- [ ] S9b-5: Implement `Correction` dataclass and `ValidationResult`
+- [ ] S9b-6: Add `--report` flag to CLI that outputs plain text correction list
+- [ ] S9b-7: Add validation step to web UI with corrections displayed after upload
+- [ ] S9b-8: Integration test: input your Fengyang score with known rule violations, verify corrections match expected BANA output
+- [ ] S9b-9: Document all implemented BANA rules in `docs/bana_reference.md`
+- [ ] S9b-10: Implement `BrailleRenderer` class with `compression_level` parameter
+- [ ] S9b-11: Implement measure repeat detection using `musical_equals()`
+- [ ] S9b-12: Implement section repeat detection using sliding window comparison
+- [ ] S9b-13: Implement articulation series shorthand detection at voice level
+- [ ] S9b-14: Integration test: expanded Internal Model → compressed braille → verify against hand-formatted BANA output
+- [ ] S9b-15: Add `musical_equals()` to Note, Rest, Chord, and Measure classes
+- [ ] S9b-16: Implement `compression_level` parameter with full, minimal, and none modes
+
+
+**Sprint 11: Web Interface (2–3 weeks after Sprint 7)**
+- [ ] S11-1: Add FastAPI to project dependencies and create `web.py`
+- [ ] S11-2: Implement file upload endpoint with DottedNotes conversion
+- [ ] S11-3: Implement LilyPond subprocess call with timeout and error handling
+- [ ] S11-4: Create accessible HTML frontend with ARIA live regions
+- [ ] S11-5: Write Dockerfile with LilyPond pre-installed
+- [ ] S11-6: Deploy to Render or Fly.io and verify end-to-end
+- [ ] S11-7: Test entire UI with VoiceOver before launch
+- [ ] S11-8: Share with braille music community for feedback

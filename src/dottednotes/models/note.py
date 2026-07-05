@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -5,6 +7,7 @@ from .accidental import Accidental
 from .base import BrailleSymbol
 from .duration import Duration
 from .dynamic import Dynamic
+from .ornament import GraceNote, Ornament
 
 NOTE_NAME_TO_LILYPOND = {
     'C': 'c', 'D': 'd', 'E': 'e', 'F': 'f',
@@ -33,7 +36,8 @@ class Note(BrailleSymbol):
     accidental: Optional[Accidental] = None
     dynamics: list[Dynamic] = field(default_factory=list)
     articulations: list = field(default_factory=list)
-    ornaments: list = field(default_factory=list)
+    ornaments: list[Ornament] = field(default_factory=list)
+    grace_note: Optional[GraceNote] = None
     tie: bool = False
     slur_start: bool = False
     slur_end: bool = False
@@ -54,13 +58,19 @@ class Note(BrailleSymbol):
         return ''
 
     def to_lilypond(self) -> str:
-        """Return LilyPond note string e.g. 'c4', 'bes'2.', 'fis8'"""
+        """Return LilyPond note string, e.g. 'c4', 'bes'2.', 'fis8'.
+
+        Output order: grace_note_block note_name accidental octave duration
+                      articulations ornaments tie dynamics slur
+        """
+        grace_str = (self.grace_note.to_lilypond() + ' ') if self.grace_note else ''
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
         octave_str = self._octave_marks()
         duration_str = self.duration.to_lilypond()
-        tie_str = '~' if self.tie else ''
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
+        ornament_str = ''.join(o.to_lilypond() for o in self.ornaments)
+        tie_str = '~' if self.tie else ''
         dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
         slur_str = (
             ('\\(' if self.slur_bracket_open else '') +
@@ -68,7 +78,8 @@ class Note(BrailleSymbol):
             (')' if self.slur_end else '') +
             ('\\)' if self.slur_bracket_close else '')
         )
-        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{tie_str}{dynamic_str}{slur_str}"
+        return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}"
+                f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}")
 
     def _midi_pitch(self) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
@@ -80,11 +91,25 @@ class Note(BrailleSymbol):
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
 
+        Grace notes participate in the relative pitch chain: the grace note
+        is rendered relative to prev_midi, and the main note is rendered
+        relative to the grace note's pitch.
+
         Computes the octave marks needed so that the note's absolute pitch is
         preserved relative to prev_midi, following LilyPond's nearest-neighbor rule:
         choose the occurrence of the pitch class within a tritone of prev_midi,
         then add ' or , marks to reach the actual target octave.
         """
+        # Handle grace notes: each renders relative to the previous, chained in order.
+        grace_str = ''
+        if self.grace_note:
+            parts = []
+            for gn in self.grace_note.notes:
+                note_str, prev_midi = gn.to_relative_lilypond(prev_midi)
+                parts.append(note_str)
+            prefix = r'\appoggiatura' if self.grace_note.long_appoggiatura else r'\grace'
+            grace_str = f'{prefix} {{ {" ".join(parts)} }} '
+
         semitone = _NOTE_SEMITONES[self.note_name]
         if self.accidental:
             semitone += _ACCIDENTAL_MIDI_OFFSETS.get(self.accidental.type.name, 0)
@@ -109,8 +134,9 @@ class Note(BrailleSymbol):
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
         duration_str = self.duration.to_lilypond()
-        tie_str = '~' if self.tie else ''
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
+        ornament_str = ''.join(o.to_lilypond() for o in self.ornaments)
+        tie_str = '~' if self.tie else ''
         dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
         slur_str = (
             ('\\(' if self.slur_bracket_open else '') +
@@ -118,7 +144,9 @@ class Note(BrailleSymbol):
             (')' if self.slur_end else '') +
             ('\\)' if self.slur_bracket_close else '')
         )
-        return f"{ly_name}{accidental_str}{octave_str}{duration_str}{articulation_str}{tie_str}{dynamic_str}{slur_str}", target_midi
+        result = (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}"
+                  f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}")
+        return result, target_midi
 
 
 @dataclass

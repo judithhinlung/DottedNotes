@@ -2,15 +2,18 @@ from dataclasses import dataclass
 
 from dottednotes.bana_symbols import (
     ACCIDENTAL_CELLS,
+    ACCIACCATURA_INDICATOR,
     ARTICULATION_CELLS,
     BAR_LINE_CELLS,
     BAR_LINE_SEQUENCES,
     CLEF_CELLS,
     DYNAMIC_CELLS,
     END_WORD_SIGN,
+    GRACE_NOTE_INDICATOR,
     KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
+    ORNAMENT_CELLS,
     REST_CELLS,
     SLUR_CELLS,
     TIME_SIGNATURE_CELLS,
@@ -211,18 +214,40 @@ class BrailleTokenizer:
                         continue
                 # ⠩ not classified as key sig → sharp accidental
 
-            # --- articulation / slur / tie: 2-cell pair first, then single cell ---
-            # Several 2-cell pairs begin with cells that are also OCTAVE_MARKS
-            # (⠠ ⠐ ⠸ ⠨ ⠘ for articulations; ⠈ ⠰ ⠘ for slur/tie pairs).
-            # Checking the pair before _classify() resolves the ambiguity.
+            # --- ornaments / articulations / slur-tie: longest match first ---
+            # Several ornament, articulation, and slur pairs begin with cells
+            # that are also OCTAVE_MARKS (⠐, ⠰, ⠸, ⠨, ⠘, ⠠, ⠈).
+            # Ornament 3-cell sequences must be checked before their 2-cell prefixes,
+            # and all ornament multi-cell forms must be checked before articulations
+            # and octave marks so that e.g. ⠐⠖⠇ (lower mordent) takes priority
+            # over ⠐ (octave 4) and ⠐⠦ (mezzo staccato).
+            three = text[i:i + 3]
             two = text[i:i + 2]
+
+            # Ornament 3-cell sequences
+            if three in ORNAMENT_CELLS:
+                tokens.append(BrailleToken(three, SymbolCategory.ORNAMENT, i, line))
+                i += 3
+                continue
+            # Ornament 2-cell sequences (including long appoggiatura ⠐⠢)
+            if two in ORNAMENT_CELLS or two == ACCIACCATURA_INDICATOR:
+                tokens.append(BrailleToken(two, SymbolCategory.ORNAMENT, i, line))
+                i += 2
+                continue
+            # Articulation 2-cell sequences
             if two in ARTICULATION_CELLS:
                 tokens.append(BrailleToken(two, SymbolCategory.ARTICULATION, i, line))
                 i += 2
                 continue
+            # Slur/tie 2-cell sequences
             if two in SLUR_CELLS:
                 tokens.append(BrailleToken(two, SymbolCategory.SLUR, i, line))
                 i += 2
+                continue
+            # Ornament 1-cell sequences (short appoggiatura ⠢, trill ⠖, turn ⠲)
+            if char in ORNAMENT_CELLS or char == GRACE_NOTE_INDICATOR:
+                tokens.append(BrailleToken(char, SymbolCategory.ORNAMENT, i, line))
+                i += 1
                 continue
             if char in ARTICULATION_CELLS:
                 tokens.append(BrailleToken(char, SymbolCategory.ARTICULATION, i, line))
