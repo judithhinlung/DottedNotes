@@ -2120,7 +2120,7 @@ it as a `_PendingNote` in the measure.
 
 ---
 
-### [ ] S4-5: Implement word sign / text marking parsing
+### [x] S4-5: Implement word sign / text marking parsing
 
 **Why:** Tempo markings and expression directions (Allegro, dolce, con moto)
 appear at the start of pieces and throughout a score.  They are encoded in
@@ -2211,18 +2211,18 @@ contains no tempo information -- important for both human performers and MIDI.
    ```
 
 **Definition of Done:**
-- [ ] `TextMarking` class with `TextMarkingType` enum exists in
+- [x] `TextMarking` class with `TextMarkingType` enum exists in
       `models/text_marking.py`
-- [ ] `WORD_SIGN` cell verified against BANA manual and added to
+- [x] `WORD_SIGN` cell verified against BANA manual and added to
       `bana_symbols.py`
-- [ ] Tokenizer state machine correctly enters and exits WORD_MODE
-- [ ] `Measure` has `text_markings: list[TextMarking]` field
-- [ ] `Staff` has `tempo: TextMarking | None` field
-- [ ] Common Italian tempo terms are classified as `TextMarkingType.TEMPO`
-- [ ] `Staff.to_lilypond()` emits `\tempo` before the first measure
-- [ ] `Measure.to_lilypond()` prepends expression markings
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] Tokenizer state machine correctly enters and exits WORD_MODE
+- [x] `Measure` has `text_markings: list[TextMarking]` field
+- [x] `Staff` has `tempo: TextMarking | None` field
+- [x] Common Italian tempo terms are classified as `TextMarkingType.TEMPO`
+- [x] `Staff.to_lilypond()` emits `\tempo` before the first measure
+- [x] `Measure.to_lilypond()` prepends expression markings
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 **Senior note:** The WORD_MODE state switch is the key implementation
 challenge.  The same dot patterns that represent notes in music context
