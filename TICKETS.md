@@ -2773,7 +2773,7 @@ sequence of notes), terminating any one carry clears all active carries at once.
 
 ---
 
-### [ ] S5-2: Implement in-accord parsing
+### [x] S5-2: Implement in-accord parsing
 
 **Why:** When a measure contains two or more independent rhythmic lines that
 cannot be expressed as interval chords (different rhythms, different rests,
@@ -2922,15 +2922,15 @@ can raise a `NotImplementedError` or a `warnings.warn` with a "not yet
 supported" message.
 
 **Definition of Done:**
-- [ ] `IN_ACCORD_CELLS` in `bana_symbols.py` contains all three verified sign sequences
-- [ ] Tokenizer emits `SymbolCategory.IN_ACCORD` for all three signs without false-positives on `⠣⠜` / `⠐⠂` / `⠨⠅` in isolation
-- [ ] `InAccord` class exists in `models/in_accord.py` with `to_relative_lilypond()`
-- [ ] `InAccord.to_relative_lilypond()` produces `<< { voice1 } \\ { voice2 } >>` with correct relative-mode pitches
-- [ ] Parser correctly splits a full-measure in-accord measure into two (or more) voice parts
-- [ ] BANA 11.2: accidentals do not carry across the in-accord sign boundary
-- [ ] `Measure.notes` accepts `InAccord` items; `Measure.to_lilypond()` renders them correctly
-- [ ] All unit tests pass
-- [ ] `pytest tests/` passes with no regressions
+- [x] `IN_ACCORD_CELLS` in `bana_symbols.py` contains all three verified sign sequences
+- [x] Tokenizer emits `SymbolCategory.IN_ACCORD` for all three signs without false-positives on `⠣⠜` / `⠐⠂` / `⠨⠅` in isolation
+- [x] `InAccord` class exists in `models/in_accord.py` with `to_relative_lilypond()`
+- [x] `InAccord.to_relative_lilypond()` produces `<< { voice1 } \\ { voice2 } >>` with correct relative-mode pitches
+- [x] Parser correctly splits a full-measure in-accord measure into two (or more) voice parts
+- [x] BANA 11.2: accidentals do not carry across the in-accord sign boundary
+- [x] `Measure.notes` accepts `InAccord` items; `Measure.to_lilypond()` renders them correctly
+- [x] All unit tests pass
+- [x] `pytest tests/` passes with no regressions
 
 ---
 
