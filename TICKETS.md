@@ -2934,11 +2934,87 @@ supported" message.
 
 ---
 
-### [ ] S5-3: Implement Voice class and multi-voice measure parsing
-### [ ] S5-4: Implement Staff class with voice assembly
+### [x] S5-3: Implement part-measure in-accord parsing (BANA 11.1.2)
+
+**Why:** Full-measure in-accord (S5-2) handles the case where both voices
+span the entire measure. Part-measure in-accord handles the more common
+case where only part of a measure has multiple voices — for example, two
+voices on beats 1–2 and a single melody on beats 3–4. Without this, any
+.brf file that uses `⠐⠂` or `⠨⠅` produces a warning and incorrect output.
+
+**BANA rules:**
+- `⠐⠂` (part-measure in-accord sign, dot 5 + dot 2): joins two voices
+  covering the same beats within one temporal section.
+- `⠨⠅` (measure-division sign, dots 4,6 + dots 1,3): splits the measure
+  into temporal sections. The sections concatenate to fill the measure.
+- BANA 11.2: accidentals do not carry across either sign (same rule as
+  full-measure in-accord).
+- Out of scope: nested in-accords (`⠐⠂` within a `⠣⠜` measure) — deferred
+  to a later sprint.
+
+**Example structure** (4/4 time, first half two-voice, second half
+single voice):
+
+```
+[half_C] ⠐⠂ [quarter_E quarter_F] ⠨⠅ [quarter_G quarter_A] | barline
+```
+
+Expected LilyPond:
+```lilypond
+<< { c2 } \\ { e4 f4 } >> g4 a4
+```
+
+**Steps:**
+
+1. Add new parser state in `BrailleParser._reset_state()`:
+   `_in_accord_sections: list[list[list]]` and
+   `_current_section_parts: list[list]`. Keep the existing
+   `_in_accord_parts` and `_in_accord_type` for the full-measure path.
+2. Update `_handle_in_accord()` to branch on `in_accord_type`:
+   `'full_measure'` (⠣⠜) unchanged; `'part_measure'` (⠐⠂) snapshots
+   pending into the current section; `'measure_division'` (⠨⠅) closes
+   the current section and starts a new one. Clear `_pending_accidental`
+   at all three boundaries (BANA 11.2).
+3. Update `_finalize_measure()` to close the final section and, for each
+   section, add its notes directly to the measure if it has one voice,
+   or wrap it in an `InAccord(in_accord_type='part_measure')` if it has
+   two or more.
+4. Update `_validate_measure_beat_count()` so each in-accord's beat
+   contribution uses the longest voice, not just the first.
+5. `InAccord.to_relative_lilypond()` needed no change — the existing
+   `<< {v1} \\ {v2} >>` rendering works for part-measure sections too.
+6. Write unit tests covering: two-voice first section + single-voice
+   second section; accidental non-carry at both the part-measure sign
+   and the measure-division sign; single-voice sections rendered as
+   flat notes (no `InAccord` wrapper); correct LilyPond output.
+7. Run `pytest tests/` before and after; verify no regressions.
+
+**Definition of Done:**
+- [x] `_in_accord_sections` and `_current_section_parts` state variables
+      exist in `_reset_state()`
+- [x] `_handle_in_accord()` handles all three sign types without warnings
+      for part_measure and measure_division
+- [x] `_finalize_measure()` creates a mix of `InAccord(part_measure)` items
+      and direct Notes when sections are present
+- [x] Single-voice sections add notes directly (no InAccord wrapper)
+- [x] `_validate_measure_beat_count()` counts beats correctly for
+      part-measure measures
+- [x] BANA 11.2 accidental non-carry holds at all in-accord boundaries
+- [x] New unit tests pass
+- [x] `pytest tests/` passes with no regressions
+
+**Senior note:** The part-measure path must not interfere with the
+full-measure path — they are mutually exclusive per measure. Full-measure
+in-accord never has `⠨⠅`; part-measure in-accord never has `⠣⠜`. The two
+sets of state variables are separate, and `_finalize_measure()` checks
+them in order.
+
+---
+
+###[ ] S5-4: Implement Staff class with voice assembly
 ### [ ] S5-5: Integration test: two-voice piano piece
 
-*Detailed steps for S5-3 through S5-5 to be written when S5-2 is complete.*
+*Detailed steps for S5-4 and S5-5 to be written when S5-3 is complete.*
 
 ---
 

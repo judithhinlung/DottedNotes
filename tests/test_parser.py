@@ -3114,13 +3114,76 @@ def test_parser_in_accord_across_two_measures():
     assert isinstance(staff.measures[1].notes[0], Note)
 
 
-def test_parser_part_measure_in_accord_emits_warning():
-    # ⠐⠂ (part-measure in-accord) should emit a "not yet supported" warning.
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter('always')
-        BrailleParser(tokens=BrailleTokenizer().tokenize('⠐⠹⠱⠐⠂⠐⠫⠻⠀')).parse()
-    msgs = [str(w.message) for w in caught]
-    assert any('not yet supported' in m for m in msgs)
+# --- Parser: part-measure in-accord (BANA 11.1.2) ---
+
+# 4/4 measure: [half C] part-measure-sign [quarter E, quarter F]
+# measure-division-sign [quarter G, quarter A] bar
+# Section 1 has two voices covering the first half of the measure (2 beats
+# each); section 2 is a single voice covering the second half (2 beats).
+_PART_MEASURE_ACCORD = '⠐⠝⠐⠂⠫⠻⠨⠅⠳⠪⠀'
+
+
+def test_part_measure_two_voices_first_half():
+    items = _parse_in_accord(_PART_MEASURE_ACCORD)
+    assert len(items) == 3
+    ia = items[0]
+    assert isinstance(ia, InAccord)
+    assert ia.in_accord_type == 'part_measure'
+    assert len(ia.parts) == 2
+    assert [(n.note_name, n.octave, n.duration.value) for n in ia.parts[0]] == [
+        ('C', 4, 2)
+    ]
+    assert [(n.note_name, n.octave, n.duration.value) for n in ia.parts[1]] == [
+        ('E', 4, 4), ('F', 4, 4)
+    ]
+    assert isinstance(items[1], Note) and items[1].note_name == 'G'
+    assert isinstance(items[2], Note) and items[2].note_name == 'A'
+
+
+def test_part_measure_division_creates_sections():
+    # The measure-division sign closes section 1 (two voices) before
+    # section 2 (single voice) begins.
+    items = _parse_in_accord(_PART_MEASURE_ACCORD)
+    ia = items[0]
+    assert len(ia.parts) == 2  # section 1 only — section 2 is single-voice
+
+
+def test_part_measure_accidental_does_not_carry_across_part_sign():
+    # Sharp before the part-measure sign (on voice 1's only note) must not
+    # carry into voice 2's first note (BANA 11.2).
+    text = '⠐⠩⠝⠐⠂⠫⠻⠨⠅⠳⠪⠀'
+    items = _parse_in_accord(text)
+    ia = items[0]
+    assert ia.parts[0][0].accidental is not None
+    assert ia.parts[0][0].accidental.type == AccidentalType.SHARP
+    assert ia.parts[1][0].accidental is None
+
+
+def test_part_measure_accidental_does_not_carry_across_division_sign():
+    # Sharp before the measure-division sign (on the last note of section 1)
+    # must not carry into section 2's first note (BANA 11.2).
+    text = '⠐⠝⠐⠂⠫⠩⠻⠨⠅⠳⠪⠀'
+    items = _parse_in_accord(text)
+    ia = items[0]
+    assert ia.parts[1][1].accidental is not None
+    assert ia.parts[1][1].accidental.type == AccidentalType.SHARP
+    assert items[1].accidental is None
+
+
+def test_single_voice_section_adds_notes_directly():
+    # Section 2 has only one voice, so its notes are added flat to the
+    # measure rather than wrapped in an InAccord.
+    items = _parse_in_accord(_PART_MEASURE_ACCORD)
+    assert not isinstance(items[1], InAccord)
+    assert not isinstance(items[2], InAccord)
+
+
+def test_part_measure_renders_lilypond():
+    tokens = BrailleTokenizer().tokenize(_PART_MEASURE_ACCORD)
+    score = BrailleParser(tokens=tokens).parse()
+    ly_out = score.staves[0].to_lilypond()
+    assert '<< { c2 } \\\\ { e4 f4 } >>' in ly_out
+    assert 'g' in ly_out and 'a4' in ly_out
 
 
 # --- InAccord model: to_relative_lilypond ---

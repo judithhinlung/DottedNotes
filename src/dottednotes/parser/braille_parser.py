@@ -662,22 +662,27 @@ class BrailleParser:
     def _handle_in_accord(
         self, token: BrailleToken, pending: list[_PendingNote]
     ) -> None:
-        """Handle a full-measure in-accord separator token (BANA 11.1.1).
+        """Handle an in-accord separator token (BANA 11.1).
 
-        Snapshots the current `pending` list as one voice part, appends it to
-        `_in_accord_parts`, and resets accidental state per BANA 11.2.
-        Part-measure in-accord and measure-division are recognised but not yet
-        fully implemented (S5-3).
+        ⠣⠜ (full_measure, 11.1.1): snapshots `pending` as one voice part and
+        appends it to `_in_accord_parts` — both voices span the whole measure.
+        ⠐⠂ (part_measure, 11.1.2): snapshots `pending` as one voice part within
+        the current temporal section.
+        ⠨⠅ (measure_division, 11.1.2): closes the current section (appending
+        its final voice part) and starts a new section.
+        In all three cases, resets accidental state per BANA 11.2.
         """
         in_accord_type = IN_ACCORD_CELLS[token.character]
-        if in_accord_type in ('part_measure', 'measure_division'):
-            warnings.warn(
-                f"In-accord type '{in_accord_type}' at position {token.position} "
-                "is not yet supported (S5-3). Voice parts will be combined as "
-                "full-measure in-accord for now.",
-                stacklevel=2,
-            )
-        self._in_accord_parts.append(self._finalize_voice_part(pending))
+
+        if in_accord_type == 'full_measure':
+            self._in_accord_parts.append(self._finalize_voice_part(pending))
+        elif in_accord_type == 'part_measure':
+            self._current_section_parts.append(self._finalize_voice_part(pending))
+        elif in_accord_type == 'measure_division':
+            self._current_section_parts.append(self._finalize_voice_part(pending))
+            self._in_accord_sections.append(list(self._current_section_parts))
+            self._current_section_parts = []
+
         # BANA 11.2: accidentals written before an in-accord sign do not carry
         # over to notes written after the sign.
         self._pending_accidental = None
@@ -755,7 +760,25 @@ class BrailleParser:
         self._pending_text_markings = []
         measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings)
 
-        if self._in_accord_parts:
+        if self._in_accord_sections or self._current_section_parts:
+            # Part-measure in-accord (BANA 11.1.2): close the final section
+            # with whatever is still in pending after the last in-accord sign.
+            self._current_section_parts.append(self._finalize_voice_part(pending))
+            self._in_accord_sections.append(list(self._current_section_parts))
+            self._current_section_parts = []
+
+            for section_parts in self._in_accord_sections:
+                if len(section_parts) == 1:
+                    # Single-voice section: add its notes directly to the measure.
+                    for item in section_parts[0]:
+                        measure.add_note(item)
+                else:
+                    measure.add_note(
+                        InAccord(parts=section_parts, in_accord_type='part_measure')
+                    )
+
+            self._in_accord_sections = []
+        elif self._in_accord_parts:
             # Final voice: whatever is still in pending after the last in-accord sign.
             all_parts = list(self._in_accord_parts)
             all_parts.append(self._finalize_voice_part(pending))
@@ -849,10 +872,13 @@ class BrailleParser:
         beats_actual = 0.0
         for item in measure.notes:
             if isinstance(item, InAccord):
-                # For in-accord, count beats from the primary voice (parts[0]).
+                # An in-accord's voices all cover the same span (BANA 11.1/11.1.2
+                # require equal note value per side); use the longest voice so a
+                # malformed voice mismatch doesn't silently understate the count.
                 if item.parts:
-                    beats_actual += sum(
-                        n.duration.duration_in_beats() for n in item.parts[0]
+                    beats_actual += max(
+                        sum(n.duration.duration_in_beats() for n in part)
+                        for part in item.parts
                     )
             else:
                 beats_actual += item.duration.duration_in_beats()
@@ -920,6 +946,11 @@ class BrailleParser:
         # In-accord state
         self._in_accord_parts: list[list] = []
         self._in_accord_type: str = 'full'
+        # Part-measure in-accord state (BANA 11.1.2): sections are temporal
+        # sub-groups of the measure separated by the measure-division sign;
+        # within a section, voice parts are separated by the part-measure sign.
+        self._in_accord_sections: list[list[list]] = []
+        self._current_section_parts: list[list] = []
         # Measure numbering state
         # _next_measure_number: the number to assign to the next measure finalized.
         # It starts at 1 and is overridden by explicit MEASURE_NUMBER tokens from

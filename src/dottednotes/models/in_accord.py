@@ -12,12 +12,13 @@ class InAccord:
     highest voice first; for bass/tenor clef, lowest voice first.
 
     in_accord_type values:
-        'full'    — full-measure in-accord (BANA 11.1.1): each part fills a whole measure.
-        'part'    — part-measure in-accord (BANA 11.1.2): deferred to S5-3.
+        'full_measure'      — full-measure in-accord (BANA 11.1.1): each part fills a whole measure.
+        'part_measure'      — part-measure in-accord (BANA 11.1.2): each part fills one temporal
+                              section of a measure; sections are concatenated by the caller.
     """
 
     parts: list[list] = field(default_factory=list)
-    in_accord_type: str = 'full'
+    in_accord_type: str = 'full_measure'
 
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Render as LilyPond simultaneous voices.
