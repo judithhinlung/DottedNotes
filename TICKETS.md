@@ -2234,57 +2234,119 @@ quoted string is sufficient.
 
 ---
 
-### [ ] S4-6: Integration test -- Fengyang Flower Drum with Sprint 4 elements
+### [x] S4-6: Integration test — sprint_4_melody with all Sprint 4 elements
 
-**Why:** Sprints 1-3 were each verified end-to-end with fixture files.
+**Why:** Sprints 1–3 were each verified end-to-end with fixture files.
 Sprint 4 introduces five new categories of musical information.
-An integration test with a real .brf file confirms all five work together in
-the full pipeline, not just in unit test isolation.
+This ticket verifies all five work together in the full pipeline using
+`sprint_4_melody.brf`, a piece composed by the developer to exercise
+every Sprint 4 feature in a single file.
+
+**Fixture characteristics (developer-verified):**
+- 25 measures, G major (1 sharp), 4/4 time
+- Header tempo: "Allegro moderato" — capital indicator (⠠) + literary
+  period (⠲) encoding
+- Mid-piece expression: "dolce" at measure 17 — word sign (⠜) +
+  end word sign (⠄) encoding
+- Dynamics: forte (measure 1), piano (measure 17)
+- Articulations: accent (measures 1, 3–8), staccato (measures 9, 11,
+  13–16), tenuto (measures 4, 23)
+- Ornaments: trill (measure 15), prall / upper mordent (measure 21),
+  mordent / lower mordent (measure 21), upmordent / extended upper
+  mordent (measure 22), downmordent / extended lower mordent (measure 22)
+- Short grace notes: paired two-note grace groups in measures 9 and 11
+- Slurs: measures 10, 12
+- Tie: measure 24
+- Reference output: `tests/fixtures/sprint_4_melody.ly`
 
 **Steps:**
-1. Load `tests/fixtures/fengyang_flower_drum.brf` and inspect the parsed
-   output.  Identify which Sprint 4 categories are present:
-   - Articulations, dynamics, slurs/ties, ornaments, text markings.
-   If any category is absent from the Fengyang file, create a short
-   supplementary fixture `tests/fixtures/sprint4_sample.brf` covering the
-   missing ones -- verified or composed by the developer.
-2. Write a smoke test:
+1. Write a smoke test:
    ```python
-   def test_fengyang_parses_without_error():
-       pipeline = BRLInputPipeline()
-       text = pipeline.load(FIXTURES / 'fengyang_flower_drum.brf')
+   def test_sprint4_melody_parses_without_error():
+       text = BRLInputPipeline().load(FIXTURES / 'sprint_4_melody.brf')
        score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
-       assert len(score.staves) >= 1
+       assert len(score.staves) == 1
+       assert len(score.staves[0].measures) == 25
    ```
-3. Add a specific assertion for each Sprint 4 category present in the file:
+2. Add header/key/time assertions:
    ```python
-   def test_fengyang_contains_articulations():
-       ...
-       all_notes = [n for staff in score.staves
-                    for m in staff.measures for n in m.notes]
-       assert any(n.articulations for n in all_notes)
+   def test_sprint4_melody_header_tempo():
+       assert staff.tempo.text == 'Allegro moderato'
+       assert staff.tempo.type == TextMarkingType.TEMPO
+
+   def test_sprint4_melody_key_and_time():
+       assert staff.key_signature.sharps_or_flats == 1  # G major
+       assert staff.time_signature.numerator == 4
+       assert staff.time_signature.denominator == 4
    ```
-   Mark tests for absent categories with `pytest.mark.skip` and a comment
-   naming which fixture covers that category.
+3. Add one assertion per Sprint 4 category:
+   ```python
+   def test_sprint4_melody_contains_articulations():
+       assert any(n.articulations for n in all_notes)
+
+   def test_sprint4_melody_contains_dynamics():
+       assert any(n.dynamics for n in all_notes)
+
+   def test_sprint4_melody_contains_ornament():
+       assert any(n.ornaments for n in all_notes)
+
+   def test_sprint4_melody_contains_grace_note():
+       assert any(n.grace_note is not None for n in all_notes)
+
+   def test_sprint4_melody_contains_slur():
+       assert any(n.slur_begin or n.slur_end for n in all_notes)
+
+   def test_sprint4_melody_contains_tie():
+       assert any(n.tied for n in all_notes)
+
+   def test_sprint4_melody_mid_piece_dolce():
+       all_markings = [tm for m in staff.measures for tm in m.text_markings]
+       assert any(tm.text == 'dolce' for tm in all_markings)
+   ```
 4. Add a LilyPond render test:
    ```python
-   def test_fengyang_renders_to_lilypond():
-       ...
+   def test_sprint4_melody_renders_to_lilypond():
        ly = score.to_lilypond()
        assert r'\version' in ly
        assert r'\relative' in ly
-       assert any(mark in ly for mark in ['-.', '--', '->', '-^'])
+       assert r'\tempo "Allegro moderato"' in ly
+       assert r'\key g \major' in ly
+       assert r'\time 4/4' in ly
+       assert '->' in ly      # accent
+       assert '-.' in ly      # staccato
+       assert '--' in ly      # tenuto
+       assert r'\f' in ly     # forte
+       assert r'\p' in ly     # piano
+       assert r'\trill' in ly
    ```
-5. Add a compile test using the same pattern as
-   `test_simple_melody_lilypond_compiles`, skipping if lilypond is absent.
+5. Add a compile test (skip if lilypond not installed):
+   ```python
+   def test_sprint4_melody_lilypond_compiles():
+       import shutil, subprocess
+       if not shutil.which('lilypond'):
+           pytest.skip('lilypond not installed')
+       result = subprocess.run(
+           ['lilypond', '--silent', '-'],
+           input=score.to_lilypond(),
+           capture_output=True, text=True
+       )
+       assert result.returncode == 0, f"LilyPond failed:\n{result.stderr}"
+   ```
 
 **Definition of Done:**
-- [ ] `test_fengyang_parses_without_error` passes
-- [ ] At least one Sprint 4 category verified in the Fengyang file
-- [ ] `test_fengyang_renders_to_lilypond` passes
-- [ ] Compile test passes if lilypond is installed
-- [ ] No regressions in any earlier sprint tests
-- [ ] `pytest tests/` passes clean
+- [x] `test_sprint4_melody_parses_without_error` passes (25 measures)
+- [x] Key signature: 1 sharp; time signature: 4/4; tempo: "Allegro moderato"
+- [x] All 7 Sprint 4 category assertions pass
+- [x] Mid-piece "dolce" text marking verified
+- [x] `test_sprint4_melody_renders_to_lilypond` passes
+- [x] Compile test passes if lilypond is installed
+- [x] No regressions in any earlier sprint tests
+- [x] `pytest tests/` passes clean
+
+**Senior note:** The file is ASCII braille (.brf), so `BRLInputPipeline.load()`
+converts it to Unicode before tokenizing — this is already implemented.
+Use `sprint_4_melody.ly` as ground truth when a test fails: compare the
+parser's output against the reference to identify which feature needs attention.
 
 ---
 

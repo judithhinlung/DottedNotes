@@ -99,6 +99,13 @@ class BrailleTokenizer:
 
             # --- whitespace / control ---
             if char == '\n':
+                if not at_measure_start:
+                    # In BANA music braille each physical line holds a segment of
+                    # measures separated by blank cells within the line.  The line
+                    # break itself is the bar-line separator between the last measure
+                    # on the line and the first measure on the next line.
+                    tokens.append(BrailleToken('⠀', SymbolCategory.BAR_LINE, i, line))
+                    at_measure_start = True
                 line += 1
                 i += 1
                 continue
@@ -342,7 +349,8 @@ class BrailleTokenizer:
                 header_active = False
             elif cat == SymbolCategory.BAR_LINE:
                 at_measure_start = True
-                header_active = False
+                if char != '⠀':  # blank cells are spacing, not musical content
+                    header_active = False
             elif cat == SymbolCategory.REST:
                 header_active = False
             i += 1
