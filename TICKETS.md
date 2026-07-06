@@ -2354,13 +2354,336 @@ parser's output against the reference to identify which feature needs attention.
 
 Estimated time: 1.5–2 weeks.
 
-### [ ] S5-1: Implement Chord class
+### [ ] S5-1: Implement Chord class and interval parsing
+
+**Why:** BANA music braille encodes chords as a written note followed by one or
+more interval cells.  Each interval cell specifies a diatonic distance from the
+written note; for treble/alto clef the interval descends, for bass/tenor it
+ascends.  This ticket adds the `Chord` model, the interval symbol table, the
+tokenizer classification, and the parser logic to build `Chord` objects from
+braille input.
+
+**Verified BANA interval symbols (developer-confirmed dot patterns):**
+
+| Interval | Dot pattern | Unicode | Notes |
+|----------|-------------|---------|-------|
+| 2nd      | 3,4         | ⠌       |       |
+| 3rd      | 3,4,6       | ⠬       |       |
+| 4th      | 3,4,5,6     | ⠼       | Same cell as NUMBER_SIGN; context-disambiguated |
+| 5th      | 3,5         | ⠔       |       |
+| 6th      | 3,5,6       | ⠴       |       |
+| 7th      | 2,5         | ⠒       |       |
+| 8th      | 3,6         | ⠤       | Same first cell as swell (⠤⠄); 2-cell check takes priority |
+
+**Direction rule:** treble/alto clef → intervals descend from the written note.
+Bass/tenor clef → intervals ascend from the written note.
+
+**Pitch calculation:** `raw = written_index ± (interval_number - 1)` (subtract
+for descending, add for ascending), using 0-based index into `['C','D','E','F',
+'G','A','B']`.  `note_name = diatonic_notes[raw % 7]`,
+`octave = written_octave + (raw // 7)` using Python floor division so negative
+raws wrap correctly.
+
+**Accidentals on interval notes:** An explicit accidental cell before the
+interval sign overrides the key signature for that interval note only.  If no
+explicit accidental is present, the key signature accidental is inferred.
+Sharps order: F C G D A E B.  Flats order: B E A D G C F.
+
+**Octave marks on interval notes:** An explicit octave mark before an interval
+sign overrides the calculated octave for that interval note only.
+
+**Interval doubling (carry mode, BANA 9.3):**
+Intervals always come AFTER the note they modify.  The sequence is:
+```
+note1  [int_sign]         → note1 gets interval from this first sign
+       [int_sign]         → same sign again (no note between) activates carry
+note2                     → carry auto-applies interval
+note3                     → carry auto-applies interval
+note4  [int_sign]         → carry auto-applies interval; this single sign is the
+                            terminator — it just clears carry (BANA 9.3.2)
+note5                     → no interval
+```
+Minimum meaningful test sequence: note + int + int, note, note, note + int
+(four notes receive the interval, terminator after the fourth).
+
+**Multiple doublings terminated together (BANA 9.3.3):** When two or more
+intervals are simultaneously doubled (each doubled separately on the same
+sequence of notes), terminating any one carry clears all active carries at once.
+
+**Steps:**
+1. Add `INTERVAL_CELLS: dict[str, int]` to `bana_symbols.py` using the
+   verified cells in the table above.
+2. Update `BrailleTokenizer`:
+   - In the `⠼` (NUMBER_SIGN) handler, emit `SymbolCategory.INTERVAL` when
+     `at_measure_start` is False (mid-measure = 4th interval, not key/time sig).
+   - In `_classify()`, add a check: if `char in INTERVAL_CELLS and char != '⠼'`
+     → return `SymbolCategory.INTERVAL`.  The `⠼` exclusion is because its
+     classification is already handled by the NUMBER_SIGN block above.
+3. Add `Chord` dataclass in `src/dottednotes/models/chord.py`:
+   - `notes: list[Note]` (written note at index 0; interval notes follow)
+   - `duration` property returning `notes[0].duration`
+   - `to_lilypond()` for absolute mode
+   - `to_relative_lilypond(prev_midi)` → `(str, int)` for relative mode;
+     each note inside `<...>` is relative to the previous chord note;
+     after the chord, `prev_midi` advances to the first note's MIDI pitch
+     (LilyPond rule).
+   - `NOTE_PITCH_ONLY(note)` helper: pitch name + accidental only (no octave,
+     no duration).
+   - `_chord_extras(written)` helper: collects articulations, ornaments, tie,
+     dynamics, slur marks from the written note.
+4. Add `Note._relative_pitch_str(prev_midi) → (str, int)` to `note.py` for use
+   inside chord `<...>` blocks (same nearest-neighbour logic as
+   `to_relative_lilypond` but without duration or extras).
+5. Update `models/__init__.py` to export `Chord`.
+6. Update `models/measure.py`: add `NoteOrChord = Union[Note, Chord]`;
+   change `notes: list[Note]` → `notes: list[NoteOrChord]` and likewise
+   `add_note`.
+7. Add module-level helpers to `braille_parser.py`:
+   - `_DIATONIC_NOTES`, `_SHARP_ORDER`, `_FLAT_ORDER` constants.
+   - `_key_sig_accidental(note_name, sharps_or_flats) → AccidentalType | None`
+   - `_interval_pitch(written_name, written_octave, interval_number,
+     descending) → (str, int)`
+8. Add interval carry state to `BrailleParser._reset_state()`:
+   ```python
+   self._active_intervals: dict[int, AccidentalType | None] = {}
+   self._last_interval_seen: int | None = None
+   self._interval_octave_override: int | None = None
+   self._octave_mark_pending: bool = False
+   ```
+9. Add `interval_notes: list[tuple[str, int, Accidental | None]]` to
+   `_PendingNote`.
+10. Update `_handle_octave_mark` to set `_octave_mark_pending = True`.
+11. Update `_buffer_note` to:
+    - Clear `_octave_mark_pending` (octave mark consumed by the note).
+    - Apply all active carry intervals via `_apply_interval` for each key in
+      `sorted(self._active_intervals)`.
+    - Reset `_last_interval_seen = None`.
+12. Add `_handle_interval(token, pending)` with three cases:
+    - **Case 1** (carry active, sign after note = terminator): clear
+      `_active_intervals` and `_last_interval_seen`.  Do NOT re-apply the
+      interval — the preceding note already received it from carry.
+    - **Case 2** (same sign seen twice, no note between = doubling): activate
+      carry by adding `interval_number` to `_active_intervals`; reset
+      `_last_interval_seen`.
+    - **Case 3** (first occurrence): set `_last_interval_seen`; if a note is
+      pending, call `_apply_interval` immediately.
+13. Add `_apply_interval(interval_number, pnote)`:
+    - Compute pitch via `_interval_pitch`.
+    - Override octave if `_interval_octave_override` is set (then clear it).
+    - Use `_pending_accidental` if set (then clear it), else infer from key
+      signature via `_key_sig_accidental`.
+    - Append `(iname, ioctave, iacc)` to `pnote.interval_notes`.
+14. Update `_finalize_measure`: if `pnote.interval_notes` is non-empty, build
+    interval `Note` objects and wrap the written note plus interval notes in a
+    `Chord`; otherwise produce a plain `Note` as before.
+15. Update bar line handling to call `_active_intervals.clear()` and reset
+    `_last_interval_seen` at double bar and section end.
+16. Update `_validate_measure_beat_count` to use `item.duration` (works for
+    both `Note` and `Chord`).
+17. Write unit tests covering:
+    - `INTERVAL_CELLS` contains all 7 entries.
+    - Tokenizer classifies all 6 unambiguous interval cells as `INTERVAL`.
+    - `⠼` mid-measure → `INTERVAL`; `⠼` at measure start → `KEY_SIGNATURE` or
+      `TIME_SIGNATURE` as before.
+    - `⠤⠄` (swell, 2-cell) still classified as `ARTICULATION`, not `INTERVAL`.
+    - Single interval creates a `Chord` (treble descending, bass ascending).
+    - Multi-interval creates a chord with the correct number of notes.
+    - Explicit accidental before interval overrides key signature.
+    - Key signature accidental is inferred when no explicit accidental.
+    - Interval doubling carry mode: 4-note sequence (note + int + int, 2 carry
+      notes, terminator note + int); all four notes become `Chord` objects.
+    - Terminator note has exactly one interval note (not duplicated).
+    - BANA 9.3.3: terminating one doubled interval clears all active carries.
+    - Carry terminates at final double bar.
+    - `Chord.to_relative_lilypond()` produces correct LilyPond syntax.
+    - Chord duration matches the written note's duration.
+
+**Definition of Done:**
+- [ ] `INTERVAL_CELLS` in `bana_symbols.py` contains all 7 verified interval cells
+- [ ] Tokenizer classifies all 6 unambiguous interval cells as `SymbolCategory.INTERVAL`
+- [ ] `⠼` mid-measure is classified as `INTERVAL`; at measure boundary it still routes to key/time sig handling
+- [ ] `⠤⠄` (swell) is still classified as `ARTICULATION`, not `INTERVAL`
+- [ ] `Chord` class exists in `models/chord.py` with `to_lilypond()` and `to_relative_lilypond()`
+- [ ] Single interval sign after a note produces a `Chord` with the correct interval note pitch
+- [ ] Treble/alto clef intervals descend; bass/tenor clef intervals ascend
+- [ ] Key signature accidentals are correctly inferred for interval notes
+- [ ] Explicit accidental before an interval sign overrides the key signature
+- [ ] Interval doubling carry mode works for a 4-note series
+- [ ] Terminator sign clears carry without duplicating the interval on the last note
+- [ ] BANA 9.3.3: terminating one doubled interval terminates all simultaneously active doublings
+- [ ] Active doublings clear at a double bar or section end
+- [ ] `Measure.notes` accepts `NoteOrChord`; `to_lilypond()` delegates to `Chord.to_relative_lilypond()` correctly
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+---
+
 ### [ ] S5-2: Implement in-accord parsing
+
+**Why:** When a measure contains two or more independent rhythmic lines that
+cannot be expressed as interval chords (different rhythms, different rests,
+etc.), BANA notation uses the "in-accord" device: the lines are written in
+succession, separated by an in-accord sign, all within the same measure.
+This ticket adds the sign table, tokenizer classification, parser logic, the
+`InAccord` domain model, and LilyPond rendering via `<< { voice1 } \\ { voice2 } >>`.
+
+**Source:** BANA Music Braille Code 2015, Chapter 11 (pages 87–91), Table 11.
+
+**Verified BANA in-accord symbols** (dot patterns derived from Table 11 ASCII
+representations via `ASCII_TO_DOTS` in `input_pipeline.py` — developer to
+confirm before implementation):
+
+| Sign | ASCII | First cell | Second cell | Decoded Unicode | Notes |
+|------|-------|-----------|-------------|----------------|-------|
+| Full-measure in-accord | `<>` | `<` = dots 1,2,6 | `>` = dots 3,4,5 | `⠣⠜` | U+2823 U+281C |
+| Part-measure in-accord | `"1` | `"` = dot 5 | `1` = dot 2 | `⠐⠂` | U+2810 U+2802 |
+| Measure division | `.k` | `.` = dots 4,6 | `k` = dots 1,3 | `⠨⠅` | U+2828 U+2805 |
+
+**Tokenizer disambiguation:** All three signs share their first cell with signs
+that have other meanings in isolation:
+- `⠣` (dots 1,2,6) is the BAR_LINE_PREFIX; `⠣⠜` must be recognized as
+  in-accord before the bar-line checks fall through to flat accidental.
+- `⠐` (dot 5) is the octave-4 mark; `⠐⠂` must be recognized before
+  `_classify()` emits OCTAVE_MARK.  Since `⠂` (dot 2) is never a valid
+  note/rest/ornament cell, this 2-cell sequence is unambiguous.
+- `⠨` (dots 4,6) is the octave-5 mark; `⠨⠅` must be recognized before
+  `_classify()`.  Since `⠅` (dots 1,3) ≠ `⠦` (dots 2,3,6, the articulation
+  second cell), there is no conflict with `⠨⠦` (accent articulation).
+
+**BANA 11.1 rules:**
+
+*Full-measure in-accord (11.1.1):* Both sides of `⠣⠜` must contain exactly a
+full measure of note values.  The voices are written treble-clef top-to-bottom
+(highest voice first, then lower) and bass-clef bottom-to-top (lowest first).
+An octave mark is required for the first note after the in-accord sign and
+also at the start of the measure following an in-accord measure.
+
+*Part-measure in-accord (11.1.2):* The measure is divided into sections by
+`⠨⠅` (measure-division sign).  Within each section the two parts are joined
+by `⠐⠂`.  The music on each side of `⠐⠂` must contain the same total note
+value.  Reconstructing the voices means: voice 1 = all section-A parts + all
+section-B parts etc.
+
+*Nested in-accords (11.1.3):* A part-measure in-accord may appear within a
+full-measure in-accord.  Deferred to a later sprint; not in scope for S5-2.
+
+**BANA 11.2 — Restating accidentals:** Accidentals written before an
+in-accord sign or measure-division sign do not carry over to notes written
+after the sign.  The parser must reset any in-measure accidental state at
+each in-accord boundary.
+
+**Domain model — `InAccord`:**
+
+```python
+@dataclass
+class InAccord:
+    parts: list[list[NoteOrChord]]   # one list per voice, in order written
+    in_accord_type: str = 'full'     # 'full' or 'part'
+
+    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+        # Each voice renders relative to the same prev_midi reference
+        # (LilyPond resets context for each voice inside << >>).
+        # After >>, the reference is the last note of parts[0] (primary voice).
+        ...
+```
+
+`Measure.notes` will be extended to `list[NoteOrChord | InAccord]` via a
+wider `MeasureItem` union type.  `Measure.to_lilypond()` already dispatches
+via `hasattr(item, 'to_relative_lilypond')`, so `InAccord` fits naturally.
+
+**LilyPond mapping:**
+
+```lilypond
+<< { c'4 d' e' f' } \\ { g4 e f d } >> |
+```
+
+For three or more voices, additional `\\ { voice_n }` blocks are appended.
+
+**Steps:**
+1. Add `IN_ACCORD_CELLS: dict[str, str]` to `bana_symbols.py` using the
+   three verified signs: `{'⠣⠜': 'full_measure', '⠐⠂': 'part_measure',
+   '⠨⠅': 'measure_division'}`.  Include dot-pattern comments.
+2. Update `BrailleTokenizer`:
+   - Inside the `⠣` (BAR_LINE_PREFIX) handler block, after the bar-line
+     sequence checks but before the key-signature/flat-accidental checks,
+     add: if `two == '⠣⠜'` → emit `SymbolCategory.IN_ACCORD`, advance 2,
+     continue.
+   - In the main multi-cell section (after the slur check, before
+     `_classify()`), add: if `two in IN_ACCORD_CELLS` → emit
+     `SymbolCategory.IN_ACCORD`, advance 2, continue.
+   - Do NOT change `at_measure_start` for in-accord tokens; they are
+     mid-measure separators, not bar lines or notes.
+3. Create `src/dottednotes/models/in_accord.py` with the `InAccord` dataclass:
+   - `parts: list[list[NoteOrChord]]`
+   - `in_accord_type: str = 'full'`
+   - `to_relative_lilypond(prev_midi) → (str, int)`:
+     render each voice as `{ note1 note2 ... }` relative to `prev_midi`;
+     return `<< {v1} \\ {v2} ... >>` and the MIDI pitch of the last
+     note/chord in `parts[0]`.
+4. Update `models/__init__.py` to export `InAccord`.
+5. Update `models/measure.py`: change `NoteOrChord` to `MeasureItem` (a
+   wider union adding `InAccord`), or add `InAccord` to the existing union.
+   Keep `NoteOrChord` as an alias for backward compatibility.
+6. Add in-accord parser state to `BrailleParser._reset_state()`:
+   ```python
+   self._in_accord_parts: list[list[_PendingNote]] = []
+   self._in_accord_type: str = 'full'
+   ```
+7. Add `_finalize_voice_part(pending: list[_PendingNote]) → list[NoteOrChord]`
+   to `BrailleParser`.  This is a refactor of the note-building loop in
+   `_finalize_measure`, extracted as a reusable helper.
+8. Add `_handle_in_accord(token)` to `BrailleParser`:
+   - Snapshot `pending` → call `_finalize_voice_part(pending)` → append to
+     `_in_accord_parts`.
+   - Clear `pending` for the next voice.
+   - Reset `_pending_accidental = None` (BANA 11.2 accidental reset).
+   - Set `_in_accord_type` based on `IN_ACCORD_CELLS[token.character]`.
+9. Update `_finalize_measure` to check `_in_accord_parts`:
+   - If non-empty: add the final `pending` as the last voice, build
+     `InAccord(parts=_in_accord_parts, in_accord_type=...)`, add it to the
+     measure via `measure.add_note(in_accord)`, clear `_in_accord_parts`.
+   - Otherwise: existing single-voice logic unchanged.
+10. Route `SymbolCategory.IN_ACCORD` tokens to `_handle_in_accord` in the
+    main parse loop.
+11. Write unit tests covering:
+    - `IN_ACCORD_CELLS` contains all three signs.
+    - Tokenizer emits `IN_ACCORD` for each of the three signs.
+    - `⠣⠜` is not classified as flat accidental + clef prefix.
+    - `⠐⠂` is not classified as octave-4 mark + unknown.
+    - `⠨⠅` is not classified as octave-5 mark + unknown.
+    - Parser: full-measure in-accord produces one `InAccord` in the measure
+      with the correct number of voice parts.
+    - Each voice part contains the correct notes in the correct order.
+    - Accidental from voice 1 does not carry into voice 2 (BANA 11.2).
+    - `InAccord.to_relative_lilypond()` produces `<< { ... } \\ { ... } >>`.
+    - Two voices correctly handled for treble clef (highest voice first).
+    - `pytest tests/` passes with no regressions.
+
+**Scope for S5-2:** Full-measure in-accord only (11.1.1).  Part-measure
+in-accord (11.1.2) and nested in-accords (11.1.3) are deferred to S5-3.
+The tokenizer recognizes all three sign types, but the parser only needs to
+handle `'full_measure'` for now; `'part_measure'` and `'measure_division'`
+can raise a `NotImplementedError` or a `warnings.warn` with a "not yet
+supported" message.
+
+**Definition of Done:**
+- [ ] `IN_ACCORD_CELLS` in `bana_symbols.py` contains all three verified sign sequences
+- [ ] Tokenizer emits `SymbolCategory.IN_ACCORD` for all three signs without false-positives on `⠣⠜` / `⠐⠂` / `⠨⠅` in isolation
+- [ ] `InAccord` class exists in `models/in_accord.py` with `to_relative_lilypond()`
+- [ ] `InAccord.to_relative_lilypond()` produces `<< { voice1 } \\ { voice2 } >>` with correct relative-mode pitches
+- [ ] Parser correctly splits a full-measure in-accord measure into two (or more) voice parts
+- [ ] BANA 11.2: accidentals do not carry across the in-accord sign boundary
+- [ ] `Measure.notes` accepts `InAccord` items; `Measure.to_lilypond()` renders them correctly
+- [ ] All unit tests pass
+- [ ] `pytest tests/` passes with no regressions
+
+---
+
 ### [ ] S5-3: Implement Voice class and multi-voice measure parsing
 ### [ ] S5-4: Implement Staff class with voice assembly
 ### [ ] S5-5: Integration test: two-voice piano piece
 
-*Detailed steps to be written when Sprint 4 is complete.*
+*Detailed steps for S5-3 through S5-5 to be written when S5-2 is complete.*
 
 ---
 
@@ -2497,3 +2820,16 @@ Estimated time: 1–1.5 weeks.
 - [ ] S11-6: Deploy to Render or Fly.io and verify end-to-end
 - [ ] S11-7: Test entire UI with VoiceOver before launch
 - [ ] S11-8: Share with braille music community for feedback
+**Sprint 11b: Interactive Web Editor (after Sprint 11)**
+- [ ] S11b-1: Implement session management with UUID-based temp workspaces
+- [ ] S11b-2: Implement incremental measure re-parsing with MeasureContext
+- [ ] S11b-3: Implement Score.replace_measure() with octave cache invalidation
+- [ ] S11b-4: Build accessible measure-by-measure HTML editor with ARIA labels
+- [ ] S11b-5: Implement in-browser MIDI playback with Tone.js
+- [ ] S11b-6: Implement seek-to-measure in MIDI playback
+- [ ] S11b-7: Connect edit events to server re-parse and MIDI refresh
+- [ ] S11b-8: Implement per-measure validation status announcements via aria-live
+- [ ] S11b-9: Add dot-number display toggle as alternative to Unicode braille display
+- [ ] S11b-10: Session cleanup — delete temp files after download or timeout
+- [ ] S11b-11: Full VoiceOver testing of complete edit-hear-correct loop
+- [ ] S11b-12: Test with a real composition error (wrong octave) end to end

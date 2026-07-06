@@ -459,16 +459,21 @@ def test_tokenizer_accidental_sharp():
 
 
 def test_tokenizer_unknown_cell():
-    # ⠬ = dots 3,4,6 — not a note, rest, octave, accidental, or bar line
-    tokens = BrailleTokenizer().tokenize('⠬')
-    assert len(tokens) == 1
-    assert tokens[0].category == SymbolCategory.UNKNOWN
+    # ⠸⠇ = octave-3 mark (⠸ dots 4,5,6) followed by an unrecognized cell
+    # (⠇ dots 1,2,3 — not a note, rest, accidental, bar line, articulation,
+    # ornament, slur, interval, or any other classified symbol)
+    tokens = BrailleTokenizer().tokenize('⠸⠇')  # dots 4,5,6 + dots 1,2,3
+    # The second cell (⠇ dots 1,2,3) is unrecognized
+    unknown_tokens = [t for t in tokens if t.category == SymbolCategory.UNKNOWN]
+    assert len(unknown_tokens) >= 1
 
 
 def test_tokenizer_unknown_does_not_raise():
-    # Any unrecognized cell must produce UNKNOWN, never raise
-    tokens = BrailleTokenizer().tokenize('⠿⠬⠻')
-    assert any(t.category == SymbolCategory.UNKNOWN for t in tokens)  # ⠬ is unrecognized
+    # Any unrecognized cell must produce UNKNOWN, never raise.
+    # ⠶ (dots 2,3,5,6) is not in any symbol table.
+    tokens = BrailleTokenizer().tokenize('⠶')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.UNKNOWN
 
 
 def test_tokenizer_bar_line_cell():
@@ -2574,3 +2579,277 @@ def test_sprint4_melody_lilypond_compiles():
         text=True,
     )
     assert result.returncode == 0, f'LilyPond failed:\n{result.stderr}'
+
+
+# ---------------------------------------------------------------------------
+# Sprint 5 — Chord and Interval Parsing
+# ---------------------------------------------------------------------------
+
+from dottednotes.bana_symbols import INTERVAL_CELLS
+from dottednotes.models import Chord
+
+
+def _parse_chords(text: str) -> list:
+    """Helper: tokenize and parse braille text, return items from first measure."""
+    from dottednotes.parser import BrailleParser, BrailleTokenizer
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    return score.staves[0].measures[0].notes
+
+
+# --- Tokenizer: interval cell classification ---
+
+def test_interval_cells_in_bana_symbols():
+    assert '⠌' in INTERVAL_CELLS and INTERVAL_CELLS['⠌'] == 2   # 2nd, dots 3,4
+    assert '⠬' in INTERVAL_CELLS and INTERVAL_CELLS['⠬'] == 3   # 3rd, dots 3,4,6
+    assert '⠼' in INTERVAL_CELLS and INTERVAL_CELLS['⠼'] == 4   # 4th, dots 3,4,5,6
+    assert '⠔' in INTERVAL_CELLS and INTERVAL_CELLS['⠔'] == 5   # 5th, dots 3,5
+    assert '⠴' in INTERVAL_CELLS and INTERVAL_CELLS['⠴'] == 6   # 6th, dots 3,5,6
+    assert '⠒' in INTERVAL_CELLS and INTERVAL_CELLS['⠒'] == 7   # 7th, dots 2,5
+    assert '⠤' in INTERVAL_CELLS and INTERVAL_CELLS['⠤'] == 8   # 8th (octave), dots 3,6
+
+
+def test_tokenizer_classifies_interval_cells():
+    from dottednotes.parser import BrailleTokenizer
+    # ⠐⠹ = octave-4 C-quarter (puts us mid-measure); ⠬ = 3rd interval
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠬')
+    interval_tokens = [t for t in tokens if t.category == SymbolCategory.INTERVAL]
+    assert len(interval_tokens) == 1
+    assert interval_tokens[0].character == '⠬'
+
+
+def test_tokenizer_fourth_interval_mid_measure():
+    """⠼ mid-measure (after a note) is a 4th interval, not a NUMBER_SIGN."""
+    from dottednotes.parser import BrailleTokenizer
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠼')
+    interval_tokens = [t for t in tokens if t.category == SymbolCategory.INTERVAL]
+    assert len(interval_tokens) == 1
+    assert interval_tokens[0].character == '⠼'
+
+
+def test_tokenizer_number_sign_at_measure_start_is_time_sig():
+    """⠼ at measure start is still a time/key signature prefix, not an interval."""
+    from dottednotes.parser import BrailleTokenizer
+    # ⠼⠙⠲ = 4/4 time signature
+    tokens = BrailleTokenizer().tokenize('⠼⠙⠲')
+    time_tokens = [t for t in tokens if t.category == SymbolCategory.TIME_SIGNATURE]
+    assert len(time_tokens) == 1
+
+
+def test_tokenizer_swell_2cell_takes_priority_over_octave_interval():
+    """⠤⠄ (swell) must still be classified as ARTICULATION, not as ⠤ (8th interval) + ⠄."""
+    from dottednotes.parser import BrailleTokenizer
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠤⠄')
+    art_tokens = [t for t in tokens if t.category == SymbolCategory.ARTICULATION]
+    interval_tokens = [t for t in tokens if t.category == SymbolCategory.INTERVAL]
+    assert len(art_tokens) == 1
+    assert len(interval_tokens) == 0
+
+
+# --- Parser: basic chord building (treble clef, descending intervals) ---
+
+def test_single_interval_creates_chord():
+    """A note followed by one interval sign produces a Chord, not a Note."""
+    # ⠐⠹ = octave-4 C-quarter; ⠬ = 3rd interval (treble → 3rd below C4 = A3)
+    items = _parse_chords('⠐⠹⠬')
+    assert len(items) == 1
+    assert isinstance(items[0], Chord)
+
+
+def test_chord_written_note_is_first():
+    """The first note in a Chord is the written (top) note."""
+    items = _parse_chords('⠐⠹⠬')
+    chord = items[0]
+    assert chord.notes[0].note_name == 'C'
+    assert chord.notes[0].octave == 4
+
+
+def test_third_below_c4_treble_is_a3():
+    """3rd below C4 in treble clef (C major) = A3."""
+    items = _parse_chords('⠐⠹⠬')
+    chord = items[0]
+    assert len(chord.notes) == 2
+    assert chord.notes[1].note_name == 'A'
+    assert chord.notes[1].octave == 3
+
+
+def test_sixth_below_c5_treble_eb_major_is_eflat4():
+    """6th below C5 in treble clef, Eb major key sig → E♭4."""
+    # ⠣⠣⠣ = 3 flats (Eb major); ⠼⠉⠲ = 3/4; newline separates header from music;
+    # ⠨⠹ = C5 quarter; ⠴ = 6th interval
+    items = _parse_chords('⠣⠣⠣⠼⠉⠲\n⠨⠹⠴')
+    chord = items[0]
+    assert chord.notes[0].note_name == 'C'
+    assert chord.notes[0].octave == 5
+    interval_note = chord.notes[1]
+    assert interval_note.note_name == 'E'
+    assert interval_note.octave == 4
+    assert interval_note.accidental is not None
+    from dottednotes.models import AccidentalType
+    assert interval_note.accidental.type == AccidentalType.FLAT
+
+
+def test_fifth_below_c4_treble_is_f3():
+    """5th below C4 in treble clef (C major) = F3."""
+    items = _parse_chords('⠐⠹⠔')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'F'
+    assert chord.notes[1].octave == 3
+
+
+def test_octave_interval_below_c5():
+    """8th (octave) below C5 = C4."""
+    items = _parse_chords('⠨⠹⠤')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'C'
+    assert chord.notes[1].octave == 4
+
+
+def test_second_interval_below_e4():
+    """2nd below E4 = D4."""
+    # ⠐⠫ = octave-4 E-quarter; ⠌ = 2nd interval
+    items = _parse_chords('⠐⠫⠌')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'D'
+    assert chord.notes[1].octave == 4
+
+
+def test_seventh_below_g4():
+    """7th below G4 = A3."""
+    # ⠐⠳ = octave-4 G-quarter; ⠒ = 7th interval
+    items = _parse_chords('⠐⠳⠒')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'A'
+    assert chord.notes[1].octave == 3
+
+
+# --- Parser: multiple intervals on one note ---
+
+def test_two_intervals_makes_three_note_chord():
+    # ⠐⠹ = C4 quarter; ⠬ = 3rd (A3); ⠔ = 5th (F3)
+    items = _parse_chords('⠐⠹⠬⠔')
+    assert len(items) == 1
+    chord = items[0]
+    assert len(chord.notes) == 3
+    assert chord.notes[0].note_name == 'C'
+    assert chord.notes[1].note_name == 'A'
+    assert chord.notes[2].note_name == 'F'
+
+
+# --- Parser: intervals with explicit accidentals ---
+
+def test_explicit_accidental_before_interval():
+    """An accidental before an interval overrides the key signature."""
+    # In G major (1 sharp: F#), a 3rd below A4 would be F#4 by key sig.
+    # Adding a natural before the 3rd interval sign makes it F natural.
+    # ⠩ = G major (1 sharp); ⠼⠙⠲ = 4/4; ⠐⠪ = A4 quarter;
+    # ⠡ = natural accidental; ⠬ = 3rd interval
+    items = _parse_chords('⠩⠼⠙⠲⠐⠪⠡⠬')
+    chord = items[0]
+    interval_note = chord.notes[1]
+    assert interval_note.note_name == 'F'
+    from dottednotes.models import AccidentalType
+    assert interval_note.accidental is not None
+    assert interval_note.accidental.type == AccidentalType.NATURAL
+
+
+# --- Parser: bass clef (ascending intervals) ---
+
+def test_bass_clef_third_above_e2():
+    """Bass clef: 3rd above E2 = G2."""
+    # ⠜⠼⠇ = bass clef; ⠼⠙⠲ = 4/4; ⠘⠫ = E2 (octave-2) quarter; ⠬ = 3rd interval
+    items = _parse_chords('⠜⠼⠇⠼⠙⠲⠘⠫⠬')
+    chord = items[0]
+    assert chord.notes[0].note_name == 'E'
+    assert chord.notes[0].octave == 2
+    assert chord.notes[1].note_name == 'G'
+    assert chord.notes[1].octave == 2
+
+
+def test_bass_clef_sixth_above_e2():
+    """Bass clef: 6th above E2 = C3."""
+    # ⠼⠙⠲ = 4/4 time sig; newline separates header from music;
+    # ⠜⠼⠇ = bass clef; ⠘⠫ = E2 quarter; ⠴ = 6th interval
+    items = _parse_chords('⠼⠙⠲\n⠜⠼⠇⠘⠫⠴')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'C'
+    assert chord.notes[1].octave == 3
+
+
+# --- LilyPond rendering ---
+
+def test_chord_lilypond_format():
+    """C4 quarter + 3rd below (A3) renders as '<c a>4': correct notes, duration, structure."""
+    # ⠐⠹⠬ = C4 quarter + 3rd below (A3) in C major
+    items = _parse_chords('⠐⠹⠬')
+    chord = items[0]
+    ly = chord.to_relative_lilypond(60)[0]
+    # Outer structure: angle brackets wrap both pitch names
+    assert ly.startswith('<')
+    assert '>4' in ly
+    # Pitch names inside the brackets
+    inner = ly[1:ly.index('>')]
+    assert inner == 'c a'
+    # Duration appears once after '>', not inside the brackets
+    assert '4' not in inner
+
+
+# --- Interval doubling (carry mode) ---
+
+def test_interval_doubling_carry_mode():
+    """Interval sign after note1 then doubled activates carry for 4 successive notes.
+
+    Sequence: ⠐⠹ = C4; ⠬ = 3rd applied to C4; ⠬ = doubled → carry;
+    ⠱⠐⠫⠳ = D4 E4 G4 (each gets 3rd from carry); ⠬ = terminator after G4.
+    Expected intervals (3rd below, treble, C major):
+      C4 → A3, D4 → B3, E4 → C4, G4 → E4
+    """
+    text = '⠐⠹⠬⠬⠱⠐⠫⠳⠬'
+    items = _parse_chords(text)
+    # All four notes become chords via carry
+    assert all(isinstance(item, Chord) for item in items)
+    # C4 + 3rd below = A3
+    assert items[0].notes[1].note_name == 'A'
+    # D4 + 3rd below = B3 (carry)
+    assert items[1].notes[1].note_name == 'B'
+    # G4 + 3rd below = E4 (last carried note, also the terminator note)
+    assert items[3].notes[1].note_name == 'E'
+
+
+def test_interval_doubling_terminates_at_final_bar():
+    """Active doublings terminate at a final double bar."""
+    # ⠐⠹⠬⠬ = C4 with 3rd applied + carry; ⠱⠐⠫⠳ = three carry notes; ⠣⠅ = final bar
+    # After the bar, a plain note (no interval) should just be a Note, not a Chord
+    text = '⠐⠹⠬⠬⠱⠐⠫⠳⠣⠅\n⠐⠹'
+    from dottednotes.parser import BrailleParser, BrailleTokenizer
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    staff = score.staves[0]
+    # First measure: four chords (carry active)
+    assert isinstance(staff.measures[0].notes[0], Chord)
+    # Second measure: plain note (carry terminated by final bar)
+    assert isinstance(staff.measures[1].notes[0], Note)
+
+
+def test_interval_doubling_terminator_note_has_exactly_one_interval():
+    """Terminator sign must not add a duplicate interval to the last carried note."""
+    # G4 gets E4 via carry; terminator ⠬ clears carry without re-applying the interval.
+    text = '⠐⠹⠬⠬⠱⠐⠫⠳⠬'
+    items = _parse_chords(text)
+    # G4 should be a 2-note chord (G4 + E4), NOT 3-note (G4 + E4 + E4)
+    assert len(items[3].notes) == 2
+
+
+def test_multiple_doublings_terminated_together():
+    """BANA 9.3.3: terminating one interval doubling terminates all active doublings."""
+    # ⠐⠹ = C4; ⠬⠬ = 3rd doubled; ⠔⠔ = 5th doubled
+    # ⠱⠐⠫⠳ = D4 E4 G4 (carry applies both 3rd and 5th)
+    # ⠬ = terminator for 3rd → clears 3rd AND 5th simultaneously (BANA 9.3.3)
+    # ⠵ = A4 (plain note, no intervals)
+    text = '⠐⠹⠬⠬⠔⠔⠱⠐⠫⠳⠬⠵'
+    items = _parse_chords(text)
+    assert len(items[0].notes) == 3   # C4 + A3 (3rd) + F3 (5th)
+    assert len(items[1].notes) == 3   # D4 + B3 (3rd) + G3 (5th)
+    assert len(items[2].notes) == 3   # E4 + C4 (3rd) + A3 (5th)
+    assert len(items[3].notes) == 3   # G4 + E4 (3rd) + C4 (5th)
+    assert isinstance(items[4], Note)  # A4: both carries ended (BANA 9.3.3)

@@ -446,3 +446,37 @@ ACCIACCATURA_INDICATOR: str = '⠐⠢'  # dots 5 + dots 2,6  — long grace (no 
 
 CAPITAL_INDICATOR: str = '⠠'   # dots 6 (U+2820) — literary capital letter indicator
 LITERARY_PERIOD: str = '⠲'     # dots 2,5,6 (U+2832) — literary period, terminates header text
+
+# ---------------------------------------------------------------------------
+# Interval cells
+# In braille music a chord is written as a note followed by one or more
+# interval signs.  Each interval sign encodes the diatonic distance from
+# the written note to the additional chord note.
+#
+# Direction depends on clef:
+#   Treble / alto clef: written note is the HIGHEST; intervals go DOWNWARD.
+#   Bass / tenor clef:  written note is the LOWEST;  intervals go UPWARD.
+#
+# Dot patterns (verified against BANA manual):
+#   2nd  — dots 3,4         U+280C  ⠌
+#   3rd  — dots 3,4,6       U+282C  ⠬
+#   4th  — dots 3,4,5,6     U+283C  ⠼  (same cell as NUMBER_SIGN — context-sensitive)
+#   5th  — dots 3,5         U+2814  ⠔
+#   6th  — dots 3,5,6       U+2834  ⠴
+#   7th  — dots 2,5         U+2812  ⠒
+#   8th  — dots 3,6         U+2824  ⠤  (same cell prefix as SWELL — 2-cell ⠤⠄ takes priority)
+#
+# The 4th-interval cell (⠼) is ambiguous with the NUMBER_SIGN.  The tokenizer
+# resolves this by context: ⠼ at a measure boundary starts a key/time signature;
+# ⠼ mid-measure (after a note has been seen) is a 4th interval.
+# ---------------------------------------------------------------------------
+
+INTERVAL_CELLS: dict[str, int] = {
+    '⠌': 2,   # dots 3,4         — 2nd
+    '⠬': 3,   # dots 3,4,6       — 3rd
+    '⠼': 4,   # dots 3,4,5,6     — 4th  (NUMBER_SIGN cell; context-disambiguated)
+    '⠔': 5,   # dots 3,5         — 5th
+    '⠴': 6,   # dots 3,5,6       — 6th
+    '⠒': 7,   # dots 2,5         — 7th
+    '⠤': 8,   # dots 3,6         — 8th (octave)
+}

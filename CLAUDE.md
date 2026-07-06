@@ -262,3 +262,20 @@ At the start of every Claude Code session:
 7. If you are unsure about a BANA convention, say so explicitly
    rather than guessing — incorrect braille parsing is worse than
    an honest "I don't know, let's look this up"
+
+8. The authoritative dot pattern reference is 
+   src/dottednotes/bana_symbols.py. 
+   Never guess dot patterns — if a symbol is not 
+   in that file, ask the developer to supply it 
+   from the BANA manual before implementing.
+   9. The BANA Music Braille Code 2015 manual is available at:
+   https://www.brailleauthority.org/music/Music_Braille_Code_2015.pdf
+   
+   At the start of any sprint involving new BANA symbols, fetch 
+   the relevant chapter(s) from this URL and cross-reference 
+   ASCII braille characters against ASCII_TO_DOTS in 
+   bana_symbols.py to get correct dot patterns.
+   
+   Never guess dot patterns. If the mapping is unclear from 
+   the ASCII representation, ask the developer to confirm 
+   before implementing.

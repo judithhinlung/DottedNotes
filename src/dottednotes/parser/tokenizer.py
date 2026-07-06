@@ -11,6 +11,7 @@ from dottednotes.bana_symbols import (
     DYNAMIC_CELLS,
     END_WORD_SIGN,
     GRACE_NOTE_INDICATOR,
+    INTERVAL_CELLS,
     KEY_SIGNATURE_CELLS,
     LITERARY_PERIOD,
     NOTE_CELLS,
@@ -164,25 +165,32 @@ class BrailleTokenizer:
                     tokens.append(BrailleToken(decoded, SymbolCategory.WORD_SIGN, start_pos, line))
                 continue
 
-            # --- number sign ⠼: key signature (4–7 acc.) or time signature ---
+            # --- number sign ⠼: key/time signature at measure boundary;
+            #     4th interval when mid-measure (not at_measure_start) ---
             elif char == self._NUMBER_SIGN:
-                three = text[i:i + 3]
-                if three in KEY_SIGNATURE_CELLS:
-                    tokens.append(BrailleToken(
-                        three, SymbolCategory.KEY_SIGNATURE, i, line))
-                    i += 3
-                    header_active = False
+                if at_measure_start:
+                    three = text[i:i + 3]
+                    if three in KEY_SIGNATURE_CELLS:
+                        tokens.append(BrailleToken(
+                            three, SymbolCategory.KEY_SIGNATURE, i, line))
+                        i += 3
+                        header_active = False
+                        continue
+                    if three in TIME_SIGNATURE_CELLS:
+                        tokens.append(BrailleToken(
+                            three, SymbolCategory.TIME_SIGNATURE, i, line))
+                        i += 3
+                        header_active = False
+                        continue
+                    # Unrecognized number-sign sequence at measure boundary
+                    tokens.append(BrailleToken(char, SymbolCategory.UNKNOWN, i, line))
+                    i += 1
                     continue
-                if three in TIME_SIGNATURE_CELLS:
-                    tokens.append(BrailleToken(
-                        three, SymbolCategory.TIME_SIGNATURE, i, line))
-                    i += 3
-                    header_active = False
+                else:
+                    # Mid-measure: ⠼ is the 4th interval sign
+                    tokens.append(BrailleToken(char, SymbolCategory.INTERVAL, i, line))
+                    i += 1
                     continue
-                # Unrecognized number-sign sequence
-                tokens.append(BrailleToken(char, SymbolCategory.UNKNOWN, i, line))
-                i += 1
-                continue
 
             # --- bar-line prefix ⠣: bar lines, flat key sigs, or flat accidental ---
             elif char == self._BAR_LINE_PREFIX:
@@ -368,4 +376,8 @@ class BrailleTokenizer:
             return SymbolCategory.ACCIDENTAL
         if char in BAR_LINE_CELLS:
             return SymbolCategory.BAR_LINE
+        # Interval cells (⠼ is handled above in the NUMBER_SIGN block;
+        # the remaining six are unambiguous at any position)
+        if char in INTERVAL_CELLS and char != '⠼':
+            return SymbolCategory.INTERVAL
         return SymbolCategory.UNKNOWN

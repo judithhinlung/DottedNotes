@@ -1,4 +1,5 @@
 from .accidental import Accidental, AccidentalType
+from .chord import Chord
 from .articulation import Articulation, ArticulationType
 from .base import BrailleSymbol
 from .clef import Clef, ClefType, CLEF_TO_LILYPOND
@@ -15,6 +16,7 @@ from .time_signature import TimeSignature, VALID_DENOMINATORS
 
 __all__ = [
     "Accidental",
+    "Chord",
     "AccidentalType",
     "Articulation",
     "ArticulationType",

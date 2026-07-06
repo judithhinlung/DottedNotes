@@ -12,6 +12,7 @@ from ..bana_symbols import (
     CLEF_CELLS,
     DYNAMIC_CELLS,
     GRACE_NOTE_INDICATOR,
+    INTERVAL_CELLS,
     KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
@@ -21,6 +22,7 @@ from ..bana_symbols import (
     SymbolCategory,
 )
 from ..models.accidental import Accidental, AccidentalType
+from ..models.chord import Chord
 from ..models.articulation import Articulation, ArticulationType
 from ..models.clef import Clef, ClefType
 from ..models.duration import Duration
@@ -82,6 +84,45 @@ _STR_TO_ORNAMENT_TYPE: dict[str, OrnamentType] = {
 }
 
 
+_DIATONIC_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+
+# Sharps order: F C G D A E B
+_SHARP_ORDER = ['F', 'C', 'G', 'D', 'A', 'E', 'B']
+# Flats order: B E A D G C F
+_FLAT_ORDER = ['B', 'E', 'A', 'D', 'G', 'C', 'F']
+
+
+def _key_sig_accidental(note_name: str, sharps_or_flats: int) -> AccidentalType | None:
+    """Return the AccidentalType implied by the key signature for this note, or None."""
+    if sharps_or_flats > 0:
+        if note_name in _SHARP_ORDER[:sharps_or_flats]:
+            return AccidentalType.SHARP
+    elif sharps_or_flats < 0:
+        num_flats = -sharps_or_flats
+        if note_name in _FLAT_ORDER[:num_flats]:
+            return AccidentalType.FLAT
+    return None
+
+
+def _interval_pitch(
+    written_name: str,
+    written_octave: int,
+    interval_number: int,
+    descending: bool,
+) -> tuple[str, int]:
+    """Return (note_name, octave) for an interval from the written note.
+
+    descending=True for treble/alto clef (intervals go downward from written note).
+    descending=False for bass/tenor clef (intervals go upward from written note).
+    """
+    written_index = _DIATONIC_NOTES.index(written_name)
+    steps = interval_number - 1
+    raw = written_index - steps if descending else written_index + steps
+    note_index = raw % 7
+    octave_offset = raw // 7  # Python floor division handles negatives correctly
+    return _DIATONIC_NOTES[note_index], written_octave + octave_offset
+
+
 @dataclass
 class _PendingNote:
     """A note buffered during measure accumulation, before duration resolution."""
@@ -99,6 +140,8 @@ class _PendingNote:
     slur_end: bool = False
     slur_bracket_open: bool = False
     slur_bracket_close: bool = False
+    # Each tuple: (note_name, octave, accidental_or_None)
+    interval_notes: list[tuple[str, int, Accidental | None]] = field(default_factory=list)
 
 
 class BrailleParser:
@@ -166,6 +209,10 @@ class BrailleParser:
                     )
                     pending = []
                     measure_number += 1
+                    # Terminate all active interval doublings at double/section bars.
+                    if bar_type in ('final_double_bar', 'section_double_bar'):
+                        self._active_intervals.clear()
+                        self._last_interval_seen = None
             elif token.category == SymbolCategory.KEY_SIGNATURE:
                 self._handle_key_signature(token)
             elif token.category == SymbolCategory.TIME_SIGNATURE:
@@ -187,6 +234,8 @@ class BrailleParser:
                     self._pending_dynamics.append(dynamic)
             elif token.category == SymbolCategory.SLUR:
                 self._handle_slur(token, pending)
+            elif token.category == SymbolCategory.INTERVAL:
+                self._handle_interval(token, pending)
             elif token.category == SymbolCategory.WORD_SIGN:
                 self._handle_word_sign(token, pending, staff)
             # REST, UNKNOWN — handled in later tickets
@@ -229,6 +278,7 @@ class BrailleParser:
 
     def _handle_octave_mark(self, token: BrailleToken) -> None:
         self._current_octave = OCTAVE_MARKS[token.character]
+        self._octave_mark_pending = True
 
     def _handle_accidental(self, token: BrailleToken) -> None:
         self._pending_accidental = Accidental(
@@ -286,6 +336,85 @@ class BrailleParser:
         elif slur_type == 'slur_bracket_close':
             if pending:
                 pending[-1].slur_bracket_close = True
+
+    def _handle_interval(self, token: BrailleToken, pending: list[_PendingNote]) -> None:
+        """Handle an interval cell, attaching a chord note to the most recent pending note.
+
+        Interval doubling (carry mode):
+          - Intervals always come AFTER the note they modify.
+          - On the first note: write the interval sign immediately after the note.
+            Write the same sign again (no note between) to activate carry.
+          - Every subsequent note receives the interval automatically via carry.
+          - A single instance of the sign after the LAST carried note is the
+            terminator: it does NOT add another interval, it just clears carry.
+          - All active doublings terminate simultaneously when any one must be
+            terminated (BANA 9.3.3).
+          - All active doublings terminate at a double bar or section end.
+        """
+        interval_number = INTERVAL_CELLS[token.character]
+
+        # If an octave mark was set since the last note, it belongs to this interval.
+        if self._octave_mark_pending:
+            self._interval_octave_override = self._current_octave
+            self._octave_mark_pending = False
+
+        # Case 1: carry is active — this sign after a note is the series terminator.
+        if interval_number in self._active_intervals and pending:
+            # The preceding note already received this interval via carry in _buffer_note.
+            # Terminator: clear all active doublings simultaneously (BANA 9.3.3).
+            self._active_intervals.clear()
+            self._last_interval_seen = None
+            return
+
+        # Case 2: doubled sign detected (same sign seen twice, no note between).
+        if interval_number == self._last_interval_seen:
+            # Activate carry; first-note application will happen in _buffer_note.
+            self._active_intervals[interval_number] = None
+            self._last_interval_seen = None
+            return
+
+        # Case 3: first occurrence of this sign — could be single or first of doubled.
+        self._last_interval_seen = interval_number
+        if pending:
+            # There is a preceding note: apply immediately as a single-note interval.
+            self._apply_interval(interval_number, pending[-1])
+        # If no preceding note: just record _last_interval_seen and wait for the
+        # next token to determine if this is a doubled sign (carry start) or an error.
+
+    def _apply_interval(
+        self,
+        interval_number: int,
+        pnote: '_PendingNote',
+    ) -> None:
+        """Compute the interval note's pitch and append it to pnote.interval_notes."""
+        clef_str = self._clef.clef_type.name  # 'TREBLE', 'BASS', 'ALTO', 'TENOR'
+        descending = clef_str in ('TREBLE', 'ALTO')
+        iname, ioctave = _interval_pitch(
+            pnote.note_name, pnote.octave, interval_number, descending
+        )
+
+        # An explicit octave mark before this interval overrides the calculated octave.
+        if self._interval_octave_override is not None:
+            ioctave = self._interval_octave_override
+            self._interval_octave_override = None
+
+        # An explicit accidental before the interval sign takes priority over the key sig.
+        if self._pending_accidental is not None:
+            iacc_type = self._pending_accidental.type
+            self._pending_accidental = None
+        else:
+            iacc_type = _key_sig_accidental(iname, self._key_signature.sharps_or_flats)
+
+        iacc: Accidental | None = None
+        if iacc_type is not None:
+            iacc = Accidental(
+                dots=frozenset(),
+                category=SymbolCategory.ACCIDENTAL,
+                raw_brl='',
+                type=iacc_type,
+            )
+
+        pnote.interval_notes.append((iname, ioctave, iacc))
 
     def _handle_ornament(self, token: BrailleToken, pending: list[_PendingNote]) -> None:
         char = token.character
@@ -367,6 +496,7 @@ class BrailleParser:
         note_name, base_duration = NOTE_CELLS[token.character]
         accidental = self._pending_accidental
         self._pending_accidental = None
+        self._octave_mark_pending = False  # octave mark was consumed by this note
 
         # Capture and clear pre-note dynamics.
         dynamics = list(self._pending_dynamics)
@@ -409,7 +539,7 @@ class BrailleParser:
         self._pending_slur_end = False
         self._pending_slur_bracket_open = False
 
-        return _PendingNote(
+        pnote = _PendingNote(
             note_name=note_name,
             octave=self._current_octave,
             base_duration=base_duration,
@@ -422,6 +552,15 @@ class BrailleParser:
             slur_end=slur_end,
             slur_bracket_open=slur_bracket_open,
         )
+
+        # Apply any active (carried) intervals to this new note.
+        for interval_number in sorted(self._active_intervals):
+            self._apply_interval(interval_number, pnote)
+
+        # A note resets doubled-sign detection for intervals.
+        self._last_interval_seen = None
+
+        return pnote
 
     def _handle_key_signature(self, token: BrailleToken) -> None:
         self._key_signature = KeySignature(
@@ -493,13 +632,14 @@ class BrailleParser:
         self._pending_text_markings = []
         measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings)
         for pnote, dur_value in zip(pending, resolved):
-            measure.add_note(Note(
+            dur = Duration(value=dur_value)
+            written = Note(
                 dots=frozenset(),
                 category=SymbolCategory.NOTE,
                 raw_brl=pnote.raw_brl,
                 note_name=pnote.note_name,
                 octave=pnote.octave,
-                duration=Duration(value=dur_value),
+                duration=dur,
                 accidental=pnote.accidental,
                 dynamics=pnote.dynamics,
                 articulations=pnote.articulations,
@@ -510,7 +650,22 @@ class BrailleParser:
                 slur_end=pnote.slur_end,
                 slur_bracket_open=pnote.slur_bracket_open,
                 slur_bracket_close=pnote.slur_bracket_close,
-            ))
+            )
+            if pnote.interval_notes:
+                chord_notes = [written]
+                for iname, ioctave, iacc in pnote.interval_notes:
+                    chord_notes.append(Note(
+                        dots=frozenset(),
+                        category=SymbolCategory.NOTE,
+                        raw_brl='',
+                        note_name=iname,
+                        octave=ioctave,
+                        duration=dur,
+                        accidental=iacc,
+                    ))
+                measure.add_note(Chord(notes=chord_notes))
+            else:
+                measure.add_note(written)
         self._validate_measure_beat_count(measure)
         return measure
 
@@ -591,7 +746,7 @@ class BrailleParser:
     def _validate_measure_beat_count(self, measure: Measure) -> None:
         """Warn (plain text) if resolved beat count doesn't match the time signature."""
         beats_expected = self._time_signature.beats_per_measure()
-        beats_actual = sum(n.duration.duration_in_beats() for n in measure.notes)
+        beats_actual = sum(item.duration.duration_in_beats() for item in measure.notes)
         if beats_actual != beats_expected:
             warnings.warn(
                 f"Measure {measure.number}: expected {beats_expected} beats "
@@ -648,3 +803,8 @@ class BrailleParser:
         self._pending_slur_bracket_open: bool = False
         self._pending_tempo: TextMarking | None = None
         self._pending_text_markings: list[TextMarking] = []
+        # Interval / chord state
+        self._active_intervals: dict[int, AccidentalType | None] = {}
+        self._last_interval_seen: int | None = None
+        self._interval_octave_override: int | None = None
+        self._octave_mark_pending: bool = False

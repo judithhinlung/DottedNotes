@@ -81,6 +81,36 @@ class Note(BrailleSymbol):
         return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}"
                 f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}")
 
+    def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
+        """Return (pitch_only_str, new_midi) for use inside a chord <...> block.
+
+        Renders only the pitch (name + accidental + octave marks), no duration
+        or other markings.  Each chord note is relative to the preceding chord note.
+        """
+        semitone = _NOTE_SEMITONES[self.note_name]
+        if self.accidental:
+            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(self.accidental.type.name, 0)
+
+        base = (prev_midi // 12) * 12 + semitone
+        while base < prev_midi - 5:
+            base += 12
+        while base > prev_midi + 6:
+            base -= 12
+
+        target_midi = self._midi_pitch()
+        diff = target_midi - base
+        octave_adj = diff // 12
+        if octave_adj > 0:
+            octave_str = "'" * octave_adj
+        elif octave_adj < 0:
+            octave_str = "," * (-octave_adj)
+        else:
+            octave_str = ""
+
+        ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
+        accidental_str = self.accidental.to_lilypond() if self.accidental else ''
+        return f"{ly_name}{accidental_str}{octave_str}", target_midi
+
     def _midi_pitch(self) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
         semitone = _NOTE_SEMITONES[self.note_name]
