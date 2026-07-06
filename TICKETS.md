@@ -1300,6 +1300,261 @@ def test_simple_melody_renders_to_lilypond():
 - [x] Test is skipped gracefully if lilypond is not installed
       (do not fail CI just because lilypond is not in the CI environment)
 
+(dots 4-6 followed by dots 1-4-5-6)
+- Left-hand sign (dots 4-6 followed by dots 2-4-5-6)
+- Word sign (dots 4-5-6)
+- Any note cell directly
+
+The tokenizer must not mistake these literary number cells
+for musical number cells, and must not prepend a number sign
+when they appear in the margin position.
+
+**Literary braille upper-cell digit dot patterns:**
+These are the digits 1-9 and 0 as they appear in measure
+number position (no number sign prefix):
+- 1: dots 2-4-5
+- 2: dots 2-4-5-6
+- 3: dots 2-4-5-6  (verify against manual — 2 and 3 differ)
+- 4: dots 1-4-5
+- 5: dots 1-4-5-6
+- 6: dots 1-2-4-5
+- 7: dots 1-2-4-5-6
+- 8: dots 1-2-5-6
+- 9: dots 2-4
+- 0: dots 2-4-5 (with preceding context — verify)
+
+Note: verify all dot patterns against BANA manual Chapter 1
+before implementing, as literary braille digits must be
+confirmed from the authoritative source.
+
+**Steps:**
+1. Add literary braille digit cells to bana_symbols.py:
+```python
+# Literary braille digits (upper cell, no number sign)
+# Used for measure numbers in score margins
+LITERARY_DIGITS = {
+    frozenset({2,4,5}):       1,
+        frozenset({2,4,5,6}):     2,
+	    # complete from BANA manual verification
+	    }
+	    ```
+
+2. Add a MeasureNumber token type to SymbolCategory enum
+   in bana_symbols.py:
+   ```python
+   class SymbolCategory(Enum):
+       # existing categories...
+           MEASURE_NUMBER = auto()
+	   ```
+
+3. Implement margin position detection in BrailleTokenizer.
+   A cell is in margin position when it appears either:
+      - At the very start of the input stream
+         - Immediately after a newline character
+	    The tokenizer must track line position state:
+	    ```python
+	    class BrailleTokenizer:
+	        def __init__(self):
+		        self._at_line_start = True  # True at beginning of each line
+			        self._current_line = 1
+				        self._current_col = 0
+
+    def _is_margin_position(self) -> bool:
+            """True when tokenizer is at the start of a new line."""
+	            return self._at_line_start
+
+    def _handle_newline(self):
+            self._at_line_start = True
+	            self._current_line += 1
+		            self._current_col = 0
+			    ```
+
+4. Implement measure number token accumulation.
+   When in margin position and the current cell matches
+      a LITERARY_DIGITS entry, accumulate digit cells until
+         a space cell is reached, then emit a single
+	    MEASURE_NUMBER token with the full integer value:
+	    ```python
+	    def _try_parse_measure_number(
+	        self,
+		    chars: list[str],
+		        pos: int
+			) -> tuple[BrailleToken | None, int]:
+			    """
+			        Attempt to parse a measure number from margin position.
+				    Returns (token, chars_consumed) or (None, 0) if no
+				        measure number found at this position.
+					    """
+					        if not self._is_margin_position():
+						        return None, 0
+
+    digits = []
+        i = pos
+	    while i < len(chars):
+	            dots = self._char_to_dots(chars[i])
+		            if dots in LITERARY_DIGITS:
+			                digits.append(LITERARY_DIGITS[dots])
+					            i += 1
+						            elif chars[i] == '\u2800':  # space cell = end of number
+							                break
+									        else:
+										            # Not a digit — not a measure number
+											                # Reset and return nothing
+													            return None, 0
+
+    if not digits:
+            return None, 0
+
+    # Convert digit list to integer e.g. [1,2] → 12
+        number = int(''.join(str(d) for d in digits))
+	    token = BrailleToken(
+	            symbol=BrailleSymbol(
+		                dots=frozenset(),
+				            category=SymbolCategory.MEASURE_NUMBER,
+					                raw_brl=''.join(chars[pos:i])
+							        ),
+								        value=number,
+									        position=pos,
+										        line=self._current_line
+											    )
+											        # Consume the trailing space cell too
+												    return token, i - pos + 1
+
+```
+
+5. Update BrailleTokenizer.tokenize() to call
+   _try_parse_measure_number() first at each line start,
+      before attempting any other token type.
+         If a measure number is found, set _at_line_start = False
+	    and continue tokenizing the musical content.
+
+6. Update BrailleParser to handle MEASURE_NUMBER tokens.
+   When a MEASURE_NUMBER token is encountered, update the
+      parser's current measure number state and use it to
+         number the next Measure object created:
+	 ```python
+	 def _handle_measure_number_token(
+	     self, token: BrailleToken
+	     ) -> None:
+	         """
+		     Update current measure number from margin token.
+		         Also validates continuity — warn if the measure number
+			     is not sequential from the previous line's last measure.
+			         """
+				     expected = self._last_measure_number + 1
+				         if token.value != expected:
+					         self._warn(
+						             f"Line {token.line}: measure number {token.value} "
+							                 f"found, expected {expected}. "
+									             f"Score may have missing or repeated measures."
+										             )
+											         self._current_measure_number = token.value
+												 ```
+
+7. Add measure_number field to Measure dataclass:
+```python
+@dataclass
+class Measure:
+    notes: list
+        time_signature: TimeSignature
+	    key_signature: KeySignature
+	        bar_line: BarLine
+		    measure_number: int = 0   # 0 = unnumbered
+		        dynamics: list = field(default_factory=list)
+			```
+
+8. Write unit tests:
+```python
+def test_measure_number_at_line_start():
+    """Measure number in margin is parsed as MEASURE_NUMBER token."""
+        tokenizer = BrailleTokenizer()
+	    # Construct input: literary digit 1, space, then a note cell
+	        input_str = literary_digit(1) + '\u2800' + note_cell('C', 4)
+		    tokens = tokenizer.tokenize(input_str)
+		        assert tokens[0].symbol.category == SymbolCategory.MEASURE_NUMBER
+			    assert tokens[0].value == 1
+
+def test_two_digit_measure_number():
+    """Two-digit measure numbers are accumulated correctly."""
+        tokenizer = BrailleTokenizer()
+	    input_str = literary_digit(1) + literary_digit(2) + '\u2800'
+	        tokens = tokenizer.tokenize(input_str)
+		    assert tokens[0].value == 12
+
+def test_measure_number_not_parsed_mid_line():
+    """Literary digit cells mid-line are not parsed as measure numbers."""
+        tokenizer = BrailleTokenizer()
+	    # A digit cell appearing after a note cell should not
+	        # be interpreted as a measure number
+		    input_str = note_cell('C', 4) + literary_digit(1)
+		        tokens = tokenizer.tokenize(input_str)
+			    assert tokens[0].symbol.category == SymbolCategory.NOTE
+			        assert tokens[1].symbol.category != SymbolCategory.MEASURE_NUMBER
+
+def test_measure_number_continuity_warning():
+    """Non-sequential measure numbers produce a warning."""
+        parser = BrailleParser(tokens=[
+	        make_measure_number_token(1),
+		        # measures...
+			        make_measure_number_token(3),  # skipped 2 — should warn
+				    ])
+				        with pytest.warns(UserWarning, match="expected 2"):
+					        parser.parse()
+
+def test_measure_number_assigned_to_measure():
+    """Parsed measure number is assigned to the Measure object."""
+        # Parse a score with measure number 5 at line start
+	    # Verify the resulting Measure has measure_number=5
+	        pass  # implement with fixture file
+		```
+
+9. Add a fixture file tests/fixtures/numbered_measures.brf
+   containing a short score with explicit measure numbers
+      in the margins, and write an integration test that
+         verifies correct measure numbers are assigned throughout.
+
+10. Before implementing, fetch and read:
+    - BANA manual Chapter 1 (literary braille number cells)
+        - BANA manual Chapter 2 (score layout and margin conventions)
+	    - LilyPond Notation Reference → Rhythms → Bar numbers
+	          to understand how measure numbers appear in LilyPond output
+
+**Definition of Done:**
+- [ ] LITERARY_DIGITS table populated with verified dot patterns
+      from BANA manual — no guessed patterns
+      - [ ] SymbolCategory.MEASURE_NUMBER enum value exists
+      - [ ] BrailleTokenizer tracks line-start position state correctly
+      - [ ] Measure numbers at line start are parsed as MEASURE_NUMBER tokens
+      - [ ] Multi-digit measure numbers (10, 24, 100+) are accumulated correctly
+      - [ ] Literary digit cells appearing mid-line are NOT parsed as
+            measure numbers
+	    - [ ] BrailleParser assigns measure numbers to Measure objects
+	    - [ ] Non-sequential measure numbers produce a plain text warning
+	          (not an exception — best-effort parsing continues)
+		  - [ ] measure_number field exists on Measure dataclass
+		  - [ ] All unit tests pass including the mid-line non-parsing test
+		  - [ ] Integration test with numbered_measures.brf fixture passes
+		  - [ ] pytest tests/ passes with no regressions
+
+**Senior note:** The mid-line non-parsing test (S2-8 step 8 test 3)
+is the most important test in this ticket. Literary digit cells
+appear in musical contexts too — interval numbers, fingering,
+and other symbols use overlapping dot patterns. The tokenizer
+must use position state (margin vs mid-line) as the primary
+discriminator, not dot pattern alone. If you rely only on dot
+patterns to identify measure numbers you will get false positives
+throughout the score. Position state is the key.
+
+Also note that some scores do not include measure numbers at all,
+and some include them only at the start of every system rather
+than every line. The parser must handle all three cases
+gracefully:
+- Measure numbers on every line: use them directly
+- Measure numbers on some lines only: use where present,
+  infer sequentially where absent
+  - No measure numbers: assign sequentially from 1
+  ```
+
 ---
 
 # Sprint 3: Key Signatures, Time Signatures, Clefs

@@ -12,24 +12,27 @@ from ..bana_symbols import (
     CLEF_CELLS,
     DYNAMIC_CELLS,
     GRACE_NOTE_INDICATOR,
+    IN_ACCORD_CELLS,
     INTERVAL_CELLS,
     KEY_SIGNATURE_CELLS,
     NOTE_CELLS,
     OCTAVE_MARKS,
     ORNAMENT_CELLS,
+    REST_CELLS,
     SLUR_CELLS,
     TIME_SIGNATURE_CELLS,
     SymbolCategory,
 )
 from ..models.accidental import Accidental, AccidentalType
 from ..models.chord import Chord
+from ..models.in_accord import InAccord
 from ..models.articulation import Articulation, ArticulationType
 from ..models.clef import Clef, ClefType
 from ..models.duration import Duration
 from ..models.dynamic import Dynamic, DynamicLevel
 from ..models.key_signature import KeySignature
 from ..models.measure import Measure
-from ..models.note import Note
+from ..models.note import Note, Rest
 from ..models.ornament import GraceNote, Ornament, OrnamentType
 from ..models.score import Score
 from ..models.staff import Staff
@@ -144,6 +147,13 @@ class _PendingNote:
     interval_notes: list[tuple[str, int, Accidental | None]] = field(default_factory=list)
 
 
+@dataclass
+class _PendingRest:
+    """A rest buffered during measure accumulation, before duration resolution."""
+    base_duration: int   # 1, 2, or 4 from REST_CELLS
+    raw_brl: str
+
+
 class BrailleParser:
     """
     Parses a list of BrailleToken objects (from BrailleTokenizer) into a Score.
@@ -236,9 +246,14 @@ class BrailleParser:
                 self._handle_slur(token, pending)
             elif token.category == SymbolCategory.INTERVAL:
                 self._handle_interval(token, pending)
+            elif token.category == SymbolCategory.IN_ACCORD:
+                self._handle_in_accord(token, pending)
+                pending = []
+            elif token.category == SymbolCategory.REST:
+                pending.append(self._buffer_rest(token))
             elif token.category == SymbolCategory.WORD_SIGN:
                 self._handle_word_sign(token, pending, staff)
-            # REST, UNKNOWN — handled in later tickets
+            # UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
         if pending:
@@ -562,6 +577,14 @@ class BrailleParser:
 
         return pnote
 
+    def _buffer_rest(self, token: BrailleToken) -> _PendingRest:
+        # An octave mark before a rest is meaningless (rests have no pitch); clear it.
+        self._octave_mark_pending = False
+        return _PendingRest(
+            base_duration=REST_CELLS[token.character],
+            raw_brl=token.character,
+        )
+
     def _handle_key_signature(self, token: BrailleToken) -> None:
         self._key_signature = KeySignature(
             dots=frozenset(),
@@ -617,22 +640,57 @@ class BrailleParser:
         )
         self._clef_parsed = True
 
+    def _handle_in_accord(
+        self, token: BrailleToken, pending: list[_PendingNote]
+    ) -> None:
+        """Handle a full-measure in-accord separator token (BANA 11.1.1).
+
+        Snapshots the current `pending` list as one voice part, appends it to
+        `_in_accord_parts`, and resets accidental state per BANA 11.2.
+        Part-measure in-accord and measure-division are recognised but not yet
+        fully implemented (S5-3).
+        """
+        in_accord_type = IN_ACCORD_CELLS[token.character]
+        if in_accord_type in ('part_measure', 'measure_division'):
+            warnings.warn(
+                f"In-accord type '{in_accord_type}' at position {token.position} "
+                "is not yet supported (S5-3). Voice parts will be combined as "
+                "full-measure in-accord for now.",
+                stacklevel=2,
+            )
+        self._in_accord_parts.append(self._finalize_voice_part(pending))
+        # BANA 11.2: accidentals written before an in-accord sign do not carry
+        # over to notes written after the sign.
+        self._pending_accidental = None
+        self._in_accord_type = in_accord_type
+
     # ------------------------------------------------------------------
     # Measure finalization and duration resolution
     # ------------------------------------------------------------------
 
-    def _finalize_measure(
-        self,
-        pending: list[_PendingNote],
-        number: int,
-        bar_line_type: str = 'measure_separator',
-    ) -> Measure:
+    def _finalize_voice_part(self, pending: list[_PendingNote]) -> list:
+        """Build a list of Note/Chord objects from pending notes with resolved durations.
+
+        Extracted from _finalize_measure so that in-accord voices can each be
+        processed independently.
+        """
         resolved = self._resolve_measure_durations(pending)
-        text_markings = list(self._pending_text_markings)
-        self._pending_text_markings = []
-        measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings)
+        items: list = []
         for pnote, dur_value in zip(pending, resolved):
             dur = Duration(value=dur_value)
+            if isinstance(pnote, _PendingRest):
+                is_full = (
+                    len(pending) == 1
+                    and dur.duration_in_beats() == self._time_signature.beats_per_measure()
+                )
+                items.append(Rest(
+                    dots=frozenset(),
+                    category=SymbolCategory.REST,
+                    raw_brl=pnote.raw_brl,
+                    duration=dur,
+                    is_full_measure=is_full,
+                ))
+                continue
             written = Note(
                 dots=frozenset(),
                 category=SymbolCategory.NOTE,
@@ -663,9 +721,32 @@ class BrailleParser:
                         duration=dur,
                         accidental=iacc,
                     ))
-                measure.add_note(Chord(notes=chord_notes))
+                items.append(Chord(notes=chord_notes))
             else:
-                measure.add_note(written)
+                items.append(written)
+        return items
+
+    def _finalize_measure(
+        self,
+        pending: list[_PendingNote],
+        number: int,
+        bar_line_type: str = 'measure_separator',
+    ) -> Measure:
+        text_markings = list(self._pending_text_markings)
+        self._pending_text_markings = []
+        measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings)
+
+        if self._in_accord_parts:
+            # Final voice: whatever is still in pending after the last in-accord sign.
+            all_parts = list(self._in_accord_parts)
+            all_parts.append(self._finalize_voice_part(pending))
+            measure.add_note(InAccord(parts=all_parts, in_accord_type=self._in_accord_type))
+            self._in_accord_parts = []
+            self._in_accord_type = 'full'
+        else:
+            for item in self._finalize_voice_part(pending):
+                measure.add_note(item)
+
         self._validate_measure_beat_count(measure)
         return measure
 
@@ -746,7 +827,16 @@ class BrailleParser:
     def _validate_measure_beat_count(self, measure: Measure) -> None:
         """Warn (plain text) if resolved beat count doesn't match the time signature."""
         beats_expected = self._time_signature.beats_per_measure()
-        beats_actual = sum(item.duration.duration_in_beats() for item in measure.notes)
+        beats_actual = 0.0
+        for item in measure.notes:
+            if isinstance(item, InAccord):
+                # For in-accord, count beats from the primary voice (parts[0]).
+                if item.parts:
+                    beats_actual += sum(
+                        n.duration.duration_in_beats() for n in item.parts[0]
+                    )
+            else:
+                beats_actual += item.duration.duration_in_beats()
         if beats_actual != beats_expected:
             warnings.warn(
                 f"Measure {measure.number}: expected {beats_expected} beats "
@@ -808,3 +898,6 @@ class BrailleParser:
         self._last_interval_seen: int | None = None
         self._interval_octave_override: int | None = None
         self._octave_mark_pending: bool = False
+        # In-accord state
+        self._in_accord_parts: list[list] = []
+        self._in_accord_type: str = 'full'

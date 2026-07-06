@@ -2853,3 +2853,225 @@ def test_multiple_doublings_terminated_together():
     assert len(items[2].notes) == 3   # E4 + C4 (3rd) + A3 (5th)
     assert len(items[3].notes) == 3   # G4 + E4 (3rd) + C4 (5th)
     assert isinstance(items[4], Note)  # A4: both carries ended (BANA 9.3.3)
+
+
+# =============================================================================
+# S5-2: In-accord parsing
+# =============================================================================
+
+from dottednotes.bana_symbols import IN_ACCORD_CELLS
+from dottednotes.models.in_accord import InAccord
+from dottednotes.models.note import Note
+from dottednotes.models.accidental import Accidental, AccidentalType
+
+
+# --- Symbol table ---
+
+def test_in_accord_cells_contains_all_three_signs():
+    assert '⠣⠜' in IN_ACCORD_CELLS and IN_ACCORD_CELLS['⠣⠜'] == 'full_measure'
+    assert '⠐⠂' in IN_ACCORD_CELLS and IN_ACCORD_CELLS['⠐⠂'] == 'part_measure'
+    assert '⠨⠅' in IN_ACCORD_CELLS and IN_ACCORD_CELLS['⠨⠅'] == 'measure_division'
+
+
+# --- Tokenizer: in-accord sign classification ---
+
+def test_tokenizer_classifies_full_measure_in_accord():
+    tokens = BrailleTokenizer().tokenize('⠣⠜')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.IN_ACCORD
+    assert tokens[0].character == '⠣⠜'
+
+
+def test_tokenizer_classifies_part_measure_in_accord():
+    tokens = BrailleTokenizer().tokenize('⠐⠂')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.IN_ACCORD
+    assert tokens[0].character == '⠐⠂'
+
+
+def test_tokenizer_classifies_measure_division():
+    tokens = BrailleTokenizer().tokenize('⠨⠅')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.IN_ACCORD
+    assert tokens[0].character == '⠨⠅'
+
+
+def test_tokenizer_in_accord_not_confused_with_flat_accidental():
+    # ⠣⠜ must be IN_ACCORD, not ACCIDENTAL (flat) followed by something else
+    tokens = BrailleTokenizer().tokenize('⠣⠜')
+    assert tokens[0].category == SymbolCategory.IN_ACCORD
+    assert tokens[0].category != SymbolCategory.ACCIDENTAL
+
+
+def test_tokenizer_in_accord_not_confused_with_octave4_mark():
+    # ⠐⠂ must be IN_ACCORD, not OCTAVE_MARK (⠐) followed by UNKNOWN (⠂)
+    tokens = BrailleTokenizer().tokenize('⠐⠂')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.IN_ACCORD
+
+
+def test_tokenizer_in_accord_not_confused_with_octave5_mark():
+    # ⠨⠅ must be IN_ACCORD, not OCTAVE_MARK (⠨) followed by UNKNOWN (⠅)
+    tokens = BrailleTokenizer().tokenize('⠨⠅')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.IN_ACCORD
+
+
+def test_tokenizer_flat_alone_still_accidental():
+    # ⠣ alone (not followed by ⠜) should still be ACCIDENTAL in mid-measure context.
+    # Use ⠐⠹⠣⠱ (C4 quarter, flat accidental, D quarter) — ⠣ is not followed by ⠜.
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠣⠱')
+    in_accord_toks = [t for t in tokens if t.category == SymbolCategory.IN_ACCORD]
+    accidental_toks = [t for t in tokens if t.category == SymbolCategory.ACCIDENTAL]
+    assert len(in_accord_toks) == 0
+    assert len(accidental_toks) == 1
+
+
+def test_tokenizer_octave4_mark_alone_still_octave_mark():
+    # ⠐ alone (not followed by ⠂) should still be OCTAVE_MARK.
+    tokens = BrailleTokenizer().tokenize('⠐⠹')
+    assert tokens[0].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[0].character == '⠐'
+
+
+def test_tokenizer_octave5_mark_alone_still_octave_mark():
+    # ⠨ alone (not followed by ⠅) should still be OCTAVE_MARK.
+    # Use ⠨⠦ (accent articulation) to ensure ⠨ isn't consumed as in-accord.
+    tokens = BrailleTokenizer().tokenize('⠨⠦')
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠨⠦'
+
+
+# --- Parser: full-measure in-accord ---
+
+# Braille sequence: voice1 (C4 D4 E4 F4) + full-measure in-accord + voice2 (G4 A4 B4 C4) + bar
+_FULL_ACCORD = '⠐⠹⠱⠫⠻⠣⠜⠐⠳⠪⠺⠹⠀'
+
+
+def _parse_in_accord(text: str) -> list:
+    """Helper: parse braille text, return notes from first measure."""
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    return score.staves[0].measures[0].notes
+
+
+def test_parser_full_measure_in_accord_parses_correctly():
+    items = _parse_in_accord(_FULL_ACCORD)
+    assert len(items) == 1
+    ia = items[0]
+    assert isinstance(ia, InAccord)
+    assert len(ia.parts) == 2
+    assert [(n.note_name, n.octave) for n in ia.parts[0]] == [
+        ('C', 4), ('D', 4), ('E', 4), ('F', 4)
+    ]
+    assert [(n.note_name, n.octave) for n in ia.parts[1]] == [
+        ('G', 4), ('A', 4), ('B', 4), ('C', 4)
+    ]
+
+
+def test_parser_in_accord_accidental_does_not_carry_across_boundary():
+    # Voice 1 ends with a sharp-F4; voice 2 starts after the in-accord sign.
+    # BANA 11.2: the sharp must not carry into voice 2.
+    # ⠩⠻ = sharp F4 quarter
+    # After ⠣⠜, the first note of voice 2 (G4) should have no accidental.
+    text = '⠐⠹⠱⠫⠩⠻⠣⠜⠐⠳⠪⠺⠹⠀'
+    items = _parse_in_accord(text)
+    voice1 = items[0].parts[0]
+    voice2 = items[0].parts[1]
+    # Voice 1: F4 should have a sharp
+    assert voice1[3].accidental is not None
+    assert voice1[3].accidental.type == AccidentalType.SHARP
+    # Voice 2: G4 should have no accidental carried from voice 1
+    assert voice2[0].accidental is None
+
+
+def test_parser_in_accord_type_is_full():
+    items = _parse_in_accord(_FULL_ACCORD)
+    assert items[0].in_accord_type == 'full_measure'
+
+
+def test_parser_in_accord_across_two_measures():
+    # Two measures: first has in-accord, second is plain.
+    text = _FULL_ACCORD + '⠐⠹⠀'
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    staff = score.staves[0]
+    assert len(staff.measures) == 2
+    assert isinstance(staff.measures[0].notes[0], InAccord)
+    assert isinstance(staff.measures[1].notes[0], Note)
+
+
+def test_parser_part_measure_in_accord_emits_warning():
+    # ⠐⠂ (part-measure in-accord) should emit a "not yet supported" warning.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter('always')
+        BrailleParser(tokens=BrailleTokenizer().tokenize('⠐⠹⠱⠐⠂⠐⠫⠻⠀')).parse()
+    msgs = [str(w.message) for w in caught]
+    assert any('not yet supported' in m for m in msgs)
+
+
+# --- InAccord model: to_relative_lilypond ---
+
+def test_in_accord_to_relative_lilypond_structure():
+    ia = _parse_in_accord(_FULL_ACCORD)[0]
+    ly, _ = ia.to_relative_lilypond(60)
+    assert ly.startswith('<<')
+    assert ly.endswith('>>')
+    assert ly.count('\\\\') == 1  # exactly one separator for two voices
+
+
+def test_in_accord_to_relative_lilypond_prev_midi_advances_with_primary_voice():
+    # After the in-accord block, prev_midi should reflect the last note of voice 1 (F4 = 65).
+    items = _parse_in_accord(_FULL_ACCORD)
+    ia = items[0]
+    _, new_midi = ia.to_relative_lilypond(60)
+    # F4 = MIDI 65
+    assert new_midi == 65
+
+
+def test_in_accord_renders_inside_measure_to_lilypond():
+    # Measure.to_lilypond() should delegate to InAccord.to_relative_lilypond().
+    tokens = BrailleTokenizer().tokenize(_FULL_ACCORD)
+    score = BrailleParser(tokens=tokens).parse()
+    staff = score.staves[0]
+    ly_out = staff.to_lilypond()
+    assert '<<' in ly_out
+    assert '\\\\' in ly_out
+    assert '>>' in ly_out
+
+
+# Voice 1: C4 D4 E4 F4, voice 2: G4 A4 B4 C4, voice 3: E4 F4 G4 A4 (all quarter notes)
+_THREE_VOICE_ACCORD = '⠐⠹⠱⠫⠻⠣⠜⠐⠳⠪⠺⠹⠣⠜⠐⠫⠻⠳⠪⠀'
+
+
+def test_three_voice_in_accord_parses_correctly():
+    items = _parse_in_accord(_THREE_VOICE_ACCORD)
+    assert len(items) == 1
+    ia = items[0]
+    assert isinstance(ia, InAccord)
+    assert len(ia.parts) == 3
+    assert [(n.note_name, n.octave) for n in ia.parts[0]] == [
+        ('C', 4), ('D', 4), ('E', 4), ('F', 4)
+    ]
+    assert [(n.note_name, n.octave) for n in ia.parts[1]] == [
+        ('G', 4), ('A', 4), ('B', 4), ('C', 4)
+    ]
+    assert [(n.note_name, n.octave) for n in ia.parts[2]] == [
+        ('E', 4), ('F', 4), ('G', 4), ('A', 4)
+    ]
+
+
+def test_in_accord_voice_with_transcriber_added_rest():
+    # Transcriber-added rests use dot 5 (⠐) as a prefix before the rest cell.
+    # The dot 5 is also the octave-4 mark; before a rest it is harmlessly consumed.
+    # Voice 1: C4 D4 E4 F4 quarter notes
+    # Voice 2: ⠐⠍ = dot-5 prefix + whole-rest cell → whole-measure rest
+    from dottednotes.models.note import Rest
+    text = '⠐⠹⠱⠫⠻⠣⠜⠐⠍⠀'
+    items = _parse_in_accord(text)
+    ia = items[0]
+    assert len(ia.parts) == 2
+    voice2 = ia.parts[1]
+    assert len(voice2) == 1
+    assert isinstance(voice2[0], Rest)
+    assert voice2[0].is_full_measure is True

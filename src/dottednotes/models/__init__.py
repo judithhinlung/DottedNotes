@@ -5,6 +5,7 @@ from .base import BrailleSymbol
 from .clef import Clef, ClefType, CLEF_TO_LILYPOND
 from .duration import Duration
 from .dynamic import Dynamic, DynamicLevel
+from .in_accord import InAccord
 from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
 from .note import Note, Rest
@@ -27,6 +28,7 @@ __all__ = [
     "Duration",
     "Dynamic",
     "DynamicLevel",
+    "InAccord",
     "KEY_TO_LILYPOND",
     "KeySignature",
     "Measure",

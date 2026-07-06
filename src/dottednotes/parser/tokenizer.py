@@ -11,6 +11,7 @@ from dottednotes.bana_symbols import (
     DYNAMIC_CELLS,
     END_WORD_SIGN,
     GRACE_NOTE_INDICATOR,
+    IN_ACCORD_CELLS,
     INTERVAL_CELLS,
     KEY_SIGNATURE_CELLS,
     LITERARY_PERIOD,
@@ -211,6 +212,12 @@ class BrailleTokenizer:
                     at_measure_start = True
                     header_active = False
                     continue
+                # Full-measure in-accord (⠣⠜): must be checked before flat key sigs
+                # and flat accidental fallthrough.  ⠣⠜ is never a bar line or key sig.
+                if two == '⠣⠜':
+                    tokens.append(BrailleToken(two, SymbolCategory.IN_ACCORD, i, line))
+                    i += 2
+                    continue
                 # At a measure boundary: check for flat key signatures
                 if at_measure_start:
                     if three in KEY_SIGNATURE_CELLS:
@@ -279,6 +286,15 @@ class BrailleTokenizer:
             # over ⠐ (octave 4) and ⠐⠦ (mezzo staccato).
             three = text[i:i + 3]
             two = text[i:i + 2]
+
+            # In-accord 2-cell sequences (part_measure ⠐⠂ and measure_division ⠨⠅).
+            # Must be checked before single-cell octave-mark / ornament / articulation
+            # fallback because ⠐ and ⠨ are also OCTAVE_MARKS.
+            # The full-measure sign ⠣⠜ is handled above in the ⠣ block.
+            if two in IN_ACCORD_CELLS:
+                tokens.append(BrailleToken(two, SymbolCategory.IN_ACCORD, i, line))
+                i += 2
+                continue
 
             # Ornament 3-cell sequences
             if three in ORNAMENT_CELLS:

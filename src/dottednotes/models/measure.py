@@ -4,10 +4,12 @@ from dataclasses import dataclass, field
 from typing import Union
 
 from .chord import Chord
-from .note import Note
+from .in_accord import InAccord
+from .note import Note, Rest
 from .text_marking import TextMarking
 
 NoteOrChord = Union[Note, Chord]
+MeasureItem = Union[Note, Rest, Chord, InAccord]
 
 _BAR_LINE_TO_LY: dict[str, str] = {
     'measure_separator': '|',
@@ -21,7 +23,7 @@ _BAR_LINE_TO_LY: dict[str, str] = {
 @dataclass
 class Measure:
     number: int
-    notes: list[NoteOrChord] = field(default_factory=list)
+    notes: list[MeasureItem] = field(default_factory=list)
     time_signature: tuple[int, int] = (4, 4)
     # positive = sharps, negative = flats
     key_signature: int = 0
@@ -29,7 +31,7 @@ class Measure:
     bar_line_type: str = 'measure_separator'
     text_markings: list[TextMarking] = field(default_factory=list)
 
-    def add_note(self, note: NoteOrChord) -> None:
+    def add_note(self, note: MeasureItem) -> None:
         self.notes.append(note)
 
     def to_lilypond(self, prev_midi: int = 60) -> tuple[str, int]:

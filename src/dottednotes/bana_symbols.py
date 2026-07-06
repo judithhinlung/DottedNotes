@@ -480,3 +480,28 @@ INTERVAL_CELLS: dict[str, int] = {
     '⠒': 7,   # dots 2,5         — 7th
     '⠤': 8,   # dots 3,6         — 8th (octave)
 }
+
+# ---------------------------------------------------------------------------
+# In-accord cells
+# In-accord is BANA's term for two or more independent rhythmic lines written
+# within the same measure, separated by one of these signs.
+#
+# Source: BANA Music Braille Code 2015, Chapter 11 (pages 87–91), Table 11.
+#
+# Dot patterns verified from Table 11 ASCII representations via ASCII_TO_DOTS
+# (developer to confirm against BANA manual before first use in a real file):
+#
+#   Full-measure in-accord: ASCII `<>` — dots 1,2,6 + dots 3,4,5 → U+2823 U+281C
+#   Part-measure in-accord: ASCII `"1` — dot 5     + dot 2       → U+2810 U+2802
+#   Measure division:       ASCII `.k` — dots 4,6   + dots 1,3    → U+2828 U+2805
+#
+# Scope note: S5-2 implements full-measure in-accord only (BANA 11.1.1).
+# Part-measure and measure-division are recognized by the tokenizer but emit a
+# "not yet supported" warning from the parser.  See S5-3 for full support.
+# ---------------------------------------------------------------------------
+
+IN_ACCORD_CELLS: dict[str, str] = {
+    '⠣⠜': 'full_measure',    # dots 1,2,6 + dots 3,4,5  — full-measure in-accord
+    '⠐⠂': 'part_measure',    # dot 5      + dot 2        — part-measure in-accord
+    '⠨⠅': 'measure_division', # dots 4,6   + dots 1,3    — measure division sign
+}

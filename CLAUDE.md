@@ -279,3 +279,30 @@ At the start of every Claude Code session:
    Never guess dot patterns. If the mapping is unclear from 
    the ASCII representation, ask the developer to confirm 
    before implementing.
+
+   10. The LilyPond Learning Manual is available at:
+    https://lilypond.org/doc/v2.26/Documentation/learning/index.html
+    
+    The LilyPond Notation Reference is available at:
+    https://lilypond.org/doc/v2.26/Documentation/notation/index.html
+    
+    Before implementing any to_lilypond() method or LilyPond 
+    output feature, fetch the relevant section of the Notation 
+    Reference first and verify the correct syntax before writing 
+    any code. Never guess LilyPond syntax from memory.
+    
+    Quick section references for common lookups:
+    - Note names and accidentals: Notation Reference → Pitches
+    - Durations and rhythms: Notation Reference → Rhythms  
+    - Articulations: Notation Reference → Expressive marks
+    - Dynamics: Notation Reference → Expressive marks
+    - Ornaments: Notation Reference → Expressive marks
+    - Slurs and ties: Notation Reference → Expressive marks
+    - Repeats: Notation Reference → Repeats
+    - Chords: Notation Reference → Simultaneous notes
+    - Multiple voices: Notation Reference → Simultaneous notes
+    - Clefs: Notation Reference → Staff notation
+    - Key signatures: Notation Reference → Pitches
+    - Time signatures: Notation Reference → Rhythms
+    - MIDI output: Notation Reference → MIDI output
+    - Instrument names: Notation Reference → Staff notation
