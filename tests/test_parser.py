@@ -211,15 +211,21 @@ def test_validate_measure_warns_on_mismatch():
 
 
 def test_eighth_note_cell_c_tokenized_as_note():
-    # ⠙ = C 8th-note cell (dots 1,4,5)
-    tokens = BrailleTokenizer().tokenize('⠙')
-    assert tokens[0].category == SymbolCategory.NOTE
+    # ⠙ = C 8th-note cell (dots 1,4,5); must be mid-line (after an octave mark)
+    # so the tokenizer does not mistake it for a measure-number digit at line start.
+    tokens = BrailleTokenizer().tokenize('⠐⠙')
+    note_tokens = [t for t in tokens if t.category == SymbolCategory.NOTE]
+    assert len(note_tokens) == 1
+    assert note_tokens[0].character == '⠙'
 
 
 def test_all_eighth_note_cells_tokenized_as_note():
-    # All 7 8th-note cells should classify as NOTE, not UNKNOWN
-    tokens = BrailleTokenizer().tokenize('⠙⠑⠋⠛⠓⠊⠚')
-    assert all(t.category == SymbolCategory.NOTE for t in tokens)
+    # All 7 8th-note cells should classify as NOTE when mid-line (not at line start).
+    # Prefix with octave mark to move them past the at-line-start position.
+    tokens = BrailleTokenizer().tokenize('⠐⠙⠑⠋⠛⠓⠊⠚')
+    note_tokens = [t for t in tokens if t.category == SymbolCategory.NOTE]
+    assert len(note_tokens) == 7
+    assert all(t.category == SymbolCategory.NOTE for t in note_tokens)
 
 
 def test_eight_eighth_notes_resolve_to_eighth():
@@ -816,6 +822,113 @@ def test_simple_melody_lilypond_compiles(tmp_path: Path):
     assert result.returncode == 0, (
         f"LilyPond compilation failed:\n{result.stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S2-8: Measure number parsing — margin tokens and Measure.number assignment
+# ---------------------------------------------------------------------------
+
+_NUMBERED_FIXTURE = FIXTURES / 'simple_melody_with_measure_numbers.brf'
+
+
+def _parse_numbered() -> list:
+    """Return Measure objects from the numbered fixture."""
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(_NUMBERED_FIXTURE)
+    tokens = BrailleTokenizer().tokenize(text)
+    return BrailleParser(tokens=tokens).parse().staves[0].measures
+
+
+def test_literary_digits_table_populated():
+    """LITERARY_DIGITS must cover all ten digits 0-9."""
+    from dottednotes.bana_symbols import LITERARY_DIGITS
+    assert set(LITERARY_DIGITS.values()) == set(range(10))
+
+
+def test_measure_number_category_exists():
+    """SymbolCategory must have MEASURE_NUMBER."""
+    assert hasattr(SymbolCategory, 'MEASURE_NUMBER')
+
+
+def test_measure_number_token_at_line_start():
+    """A literary-digit cell at the very start of a line is a MEASURE_NUMBER token."""
+    # Line 2 of the numbered fixture begins with 'A' (digit 1).
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(_NUMBERED_FIXTURE)
+    tokens = BrailleTokenizer().tokenize(text)
+    mn_tokens = [t for t in tokens if t.category == SymbolCategory.MEASURE_NUMBER]
+    assert len(mn_tokens) >= 1
+    assert mn_tokens[0].character == '1'
+
+
+def test_two_system_measure_numbers():
+    """Fixture has two systems with explicit measure numbers: 1 and 5."""
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(_NUMBERED_FIXTURE)
+    tokens = BrailleTokenizer().tokenize(text)
+    mn_tokens = [t for t in tokens if t.category == SymbolCategory.MEASURE_NUMBER]
+    assert len(mn_tokens) == 2
+    assert mn_tokens[0].character == '1'
+    assert mn_tokens[1].character == '5'
+
+
+def test_measure_number_not_parsed_mid_line():
+    """Literary digit cells that appear mid-line are not parsed as MEASURE_NUMBER."""
+    # ⠐⠹⠑ = octave-4 mark, C-quarter, D-eighth (⠑ = dots 1,5 = digit 5 mid-line)
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠑')
+    cats = [t.category for t in tokens]
+    assert SymbolCategory.MEASURE_NUMBER not in cats
+    assert SymbolCategory.NOTE in cats
+
+
+def test_measure_number_assigned_to_measure_objects():
+    """Measure.number reflects the explicit margin number from the fixture."""
+    measures = _parse_numbered()
+    # System 1 starts at measure 1; system 2 starts at measure 5.
+    assert measures[0].number == 1
+    assert measures[4].number == 5
+
+
+def test_sequential_measure_numbers_assigned():
+    """All 8 measures should be numbered 1-8 sequentially."""
+    measures = _parse_numbered()
+    assert [m.number for m in measures] == list(range(1, 9))
+
+
+def test_two_digit_measure_number_tokenized():
+    """Two consecutive literary-digit cells at line start produce a single token."""
+    # 'A' (digit 1) + 'J' (digit 0) = measure 10; followed by space then a note.
+    text = '⠁⠚⠀⠐⠹'  # digits 1,0 + blank + octave4 + C-quarter
+    tokens = BrailleTokenizer().tokenize(text)
+    mn_tokens = [t for t in tokens if t.category == SymbolCategory.MEASURE_NUMBER]
+    assert len(mn_tokens) == 1
+    assert mn_tokens[0].character == '10'
+
+
+def test_measure_number_continuity_warning():
+    """Non-sequential margin measure numbers produce a plain text warning."""
+    # Manually construct tokens: MEASURE_NUMBER(1) then notes then MEASURE_NUMBER(3)
+    # (skipping 2 — should warn).
+    # Build a minimal two-system BRF string with a skipped number.
+    # System 1 starts at 1: ⠁ (digit 1) + ⠀ + ⠐⠹⠀ (octave C quarter bar)
+    # Newline (→ implicit bar + at_line_start)
+    # System 2 starts at 3 instead of 2: ⠉ (digit 3) + ⠀ + ⠐⠹⠀
+    text = '⠁⠀⠐⠹⠀\n⠉⠀⠐⠹⠀'
+    tokens = BrailleTokenizer().tokenize(text)
+    with pytest.warns(UserWarning, match='measure number 3.*expected 2'):
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_no_measure_numbers_assigns_sequentially():
+    """A score with no margin numbers assigns sequential numbers from 1."""
+    # Simple two-measure melody with no measure number tokens.
+    text = '⠐⠹⠱⠫⠻⠀⠐⠳⠪⠺⠹⠀'
+    tokens = BrailleTokenizer().tokenize(text)
+    assert all(t.category != SymbolCategory.MEASURE_NUMBER for t in tokens)
+    score = BrailleParser(tokens=tokens).parse()
+    measures = score.staves[0].measures
+    assert measures[0].number == 1
+    assert measures[1].number == 2
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ from dottednotes.bana_symbols import (
     GRACE_NOTE_INDICATOR,
     IN_ACCORD_CELLS,
     INTERVAL_CELLS,
+    LITERARY_DIGITS,
     KEY_SIGNATURE_CELLS,
     LITERARY_PERIOD,
     NOTE_CELLS,
@@ -91,6 +92,7 @@ class BrailleTokenizer:
         line = 1
         i = 0
         at_measure_start = True   # True at start-of-piece and after bar lines
+        at_line_start = True      # True at start-of-piece and after each newline
         # True until the first key sig / time sig / clef / note / rest / bar line
         # is emitted.  CAPITAL_INDICATOR (⠠) is only valid as a literary capital
         # in the piece header; after that point ⠠ reverts to the octave-7 mark.
@@ -109,11 +111,47 @@ class BrailleTokenizer:
                     tokens.append(BrailleToken('⠀', SymbolCategory.BAR_LINE, i, line))
                     at_measure_start = True
                 line += 1
+                at_line_start = True
                 i += 1
                 continue
             if char in ('\r', '\t'):
                 i += 1
                 continue
+
+            # --- measure number at line start ---
+            # BANA music braille places an explicit measure number at the left
+            # margin of each system.  It uses literary braille letter-digits
+            # (A–J = 1–0) WITHOUT a number-sign prefix, followed by at least one
+            # blank cell (⠀) before the musical content.
+            #
+            # Disambiguation: digits 4–9 and 0 share dot patterns with 8th-note
+            # cells, and digit 3 shares with the slur cell.  Position state
+            # (at_line_start) is the primary discriminator.  A look-ahead
+            # confirming that a blank cell (⠀) follows the digit sequence
+            # distinguishes a measure number from a musical cell at column 0 in
+            # a score that uses no measure numbers.
+            if at_line_start and char in LITERARY_DIGITS:
+                j = i
+                digit_values: list[int] = []
+                while j < len(text) and text[j] in LITERARY_DIGITS:
+                    digit_values.append(LITERARY_DIGITS[text[j]])
+                    j += 1
+                # Emit MEASURE_NUMBER when at least one digit is found.
+                # BANA rule: an octave mark is required before the first note at
+                # line start, so a bare note-class cell at column 0 is always a
+                # measure-number digit, never a musical note.
+                if digit_values:
+                    number = int(''.join(str(d) for d in digit_values))
+                    # Store decoded integer as string (consistent with WORD_SIGN convention).
+                    tokens.append(BrailleToken(str(number), SymbolCategory.MEASURE_NUMBER, i, line))
+                    i = j
+                    # Consume any trailing blank cells (measure-number separator).
+                    while i < len(text) and text[i] == '⠀':
+                        i += 1
+                    at_line_start = False
+                    continue
+                # No digits found — fall through and process normally.
+            at_line_start = False
 
             # --- word sign ⠜: clef (3–4 cells), dynamic, or literary text ---
             #

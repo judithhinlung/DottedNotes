@@ -54,6 +54,7 @@ class SymbolCategory(Enum):
     INTERVAL = auto()
     CHORD_INDICATOR = auto()
     IN_ACCORD = auto()
+    MEASURE_NUMBER = auto()
     WORD_SIGN = auto()
     UNKNOWN = auto()
 
@@ -504,4 +505,38 @@ IN_ACCORD_CELLS: dict[str, str] = {
     '⠣⠜': 'full_measure',    # dots 1,2,6 + dots 3,4,5  — full-measure in-accord
     '⠐⠂': 'part_measure',    # dot 5      + dot 2        — part-measure in-accord
     '⠨⠅': 'measure_division', # dots 4,6   + dots 1,3    — measure division sign
+}
+
+# ---------------------------------------------------------------------------
+# Literary braille digits — used for measure numbers at the start of each line.
+#
+# In BANA music braille, measure numbers appear at the left margin of each
+# system.  They use the standard literary braille letter-digit convention:
+# the same braille cells as letters A–J represent digits 1–0 respectively,
+# but WITHOUT a number-sign prefix (⠼).
+#
+# Dot patterns verified from the fengyang_flower_drum.brf fixture file:
+#   A (dot 1)        = 1   → line starts with measure 1
+#   D (dots 1,4,5)   = 4   → line starts with measure 4
+#   F (dots 1,2,4)   = 6   → line starts with measure 6
+#   AJ (dots1 + dots2,4,5) = 10 → line starts with measure 10
+#
+# IMPORTANT: digits 4–9 and 0 overlap with the 8th-note cell patterns in
+# NOTE_CELLS (C–B eighth notes).  Digit 3 (⠉, dots 1,4) overlaps with the
+# slur cell.  Position state (at_line_start) is the primary disambiguator:
+# these cells are measure-number digits ONLY when at the start of a line,
+# and ONLY when followed by another digit or a blank cell (⠀).
+# ---------------------------------------------------------------------------
+
+LITERARY_DIGITS: dict[str, int] = {
+    '⠁': 1,   # dot 1        (A)
+    '⠃': 2,   # dots 1,2     (B)
+    '⠉': 3,   # dots 1,4     (C) — also the slur cell mid-line
+    '⠙': 4,   # dots 1,4,5   (D) — also C-eighth note mid-line
+    '⠑': 5,   # dots 1,5     (E) — also D-eighth note mid-line
+    '⠋': 6,   # dots 1,2,4   (F) — also E-eighth note mid-line
+    '⠛': 7,   # dots 1,2,4,5 (G) — also F-eighth note mid-line
+    '⠓': 8,   # dots 1,2,5   (H) — also G-eighth note mid-line
+    '⠊': 9,   # dots 2,4     (I) — also A-eighth note mid-line
+    '⠚': 0,   # dots 2,4,5   (J) — also B-eighth note mid-line
 }

@@ -182,7 +182,6 @@ class BrailleParser:
         score = Score()
         staff = Staff(name="")
         pending: list[_PendingNote] = []
-        measure_number = 1
 
         for token in self._tokens:
             if token.category == SymbolCategory.OCTAVE_MARK:
@@ -215,10 +214,10 @@ class BrailleParser:
                         or BAR_LINE_CELLS.get(token.character, 'measure_separator')
                     )
                     staff.add_measure(
-                        self._finalize_measure(pending, measure_number, bar_type)
+                        self._finalize_measure(pending, self._next_measure_number, bar_type)
                     )
                     pending = []
-                    measure_number += 1
+                    self._next_measure_number += 1
                     # Terminate all active interval doublings at double/section bars.
                     if bar_type in ('final_double_bar', 'section_double_bar'):
                         self._active_intervals.clear()
@@ -251,13 +250,15 @@ class BrailleParser:
                 pending = []
             elif token.category == SymbolCategory.REST:
                 pending.append(self._buffer_rest(token))
+            elif token.category == SymbolCategory.MEASURE_NUMBER:
+                self._handle_measure_number(token)
             elif token.category == SymbolCategory.WORD_SIGN:
                 self._handle_word_sign(token, pending, staff)
             # UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
         if pending:
-            staff.add_measure(self._finalize_measure(pending, measure_number))
+            staff.add_measure(self._finalize_measure(pending, self._next_measure_number))
 
         # Warn about orphaned grace note state at end of input
         if self._pending_grace_note_indicator:
@@ -640,6 +641,24 @@ class BrailleParser:
         )
         self._clef_parsed = True
 
+    def _handle_measure_number(self, token: BrailleToken) -> None:
+        """Update the current measure number from an explicit margin token.
+
+        Warns (plain text) if the number is not sequential from the running
+        internal counter — score may have missing or repeated measures.
+        Best-effort parsing continues regardless.
+        """
+        explicit_number = int(token.character)
+        if self._last_margin_measure_number != 0 and explicit_number != self._next_measure_number:
+            warnings.warn(
+                f"Line {token.line}: measure number {explicit_number} found, "
+                f"expected {self._next_measure_number}. "
+                "Score may have missing or repeated measures.",
+                stacklevel=2,
+            )
+        self._next_measure_number = explicit_number
+        self._last_margin_measure_number = explicit_number
+
     def _handle_in_accord(
         self, token: BrailleToken, pending: list[_PendingNote]
     ) -> None:
@@ -901,3 +920,11 @@ class BrailleParser:
         # In-accord state
         self._in_accord_parts: list[list] = []
         self._in_accord_type: str = 'full'
+        # Measure numbering state
+        # _next_measure_number: the number to assign to the next measure finalized.
+        # It starts at 1 and is overridden by explicit MEASURE_NUMBER tokens from
+        # the margin, then incremented after each bar line.
+        # _last_margin_measure_number: tracks the last number seen in the margin
+        # so we can warn about non-sequential jumps (0 = none seen yet).
+        self._next_measure_number: int = 1
+        self._last_margin_measure_number: int = 0
