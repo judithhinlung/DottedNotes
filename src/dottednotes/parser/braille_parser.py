@@ -145,6 +145,7 @@ class _PendingNote:
     slur_bracket_close: bool = False
     # Each tuple: (note_name, octave, accidental_or_None)
     interval_notes: list[tuple[str, int, Accidental | None]] = field(default_factory=list)
+    dots: int = 0
 
 
 @dataclass
@@ -152,6 +153,7 @@ class _PendingRest:
     """A rest buffered during measure accumulation, before duration resolution."""
     base_duration: int   # 1, 2, or 4 from REST_CELLS
     raw_brl: str
+    dots: int = 0
 
 
 class BrailleParser:
@@ -262,6 +264,14 @@ class BrailleParser:
             elif token.category == SymbolCategory.WORD_SIGN:
                 piece_started = bool(right_staff.measures or left_staff.measures)
                 self._handle_word_sign(token, pending, piece_started)
+            elif token.category == SymbolCategory.AUGMENTATION_DOT:
+                if pending:
+                    pending[-1].dots = min(pending[-1].dots + 1, 2)
+                else:
+                    warnings.warn(
+                        "Augmentation dot with no preceding note or rest; ignoring.",
+                        stacklevel=2,
+                    )
             # UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
@@ -743,7 +753,7 @@ class BrailleParser:
         resolved = self._resolve_measure_durations(pending)
         items: list = []
         for pnote, dur_value in zip(pending, resolved):
-            dur = Duration(value=dur_value)
+            dur = Duration(value=dur_value, dots=pnote.dots)
             if isinstance(pnote, _PendingRest):
                 is_full = (
                     len(pending) == 1
@@ -867,6 +877,14 @@ class BrailleParser:
 
         Half/32nd (base_duration 2): count_2 * 2 > beats → all 32nd.
         Quarter (base_duration 4): always quarter.
+
+        After the state machine runs, any base_1 cell resolved to whole via
+        the "otherwise" branch (no run/individual adjacency) is re-checked
+        against the measure's beat budget (S5-6 Bug B): a whole note must
+        fill the entire measure, so if the total (including augmentation
+        dots) overflows, that cell is re-resolved as a 16th instead. This
+        only affects standalone ambiguous cells — the run/individual
+        adjacency detection above is unchanged.
         """
         beats = self._time_signature.beats_per_measure()
         count_2 = sum(1 for n in pending if n.base_duration == 2)
@@ -874,6 +892,11 @@ class BrailleParser:
 
         resolved = [0] * len(pending)
         state = "normal"  # "normal" | "run" | "individual"
+        # Indices tentatively resolved to a whole note by the "otherwise"
+        # branch below — a whole note must fill the entire measure by BANA
+        # convention, so these are re-checked against the measure's beat
+        # budget afterward (Bug B).
+        whole_candidates: list[int] = []
 
         for i, n in enumerate(pending):
             next_bd = pending[i + 1].base_duration if i + 1 < len(pending) else None
@@ -888,7 +911,8 @@ class BrailleParser:
                     resolved[i] = 16
                     state = "individual"
                 else:
-                    resolved[i] = 1  # whole note
+                    resolved[i] = 1  # tentatively whole note
+                    whole_candidates.append(i)
                     state = "normal"
 
             elif n.base_duration == 8:
@@ -905,6 +929,21 @@ class BrailleParser:
             else:  # base_duration == 4
                 resolved[i] = 4
                 state = "normal"
+
+        if whole_candidates:
+            total = sum(
+                Duration(value=resolved[i], dots=pending[i].dots).duration_in_beats()
+                for i in range(len(pending))
+            )
+            for idx in whole_candidates:
+                if total <= beats:
+                    break
+                # A whole note here would overflow the measure — it must
+                # actually be a 16th note (context-based disambiguation).
+                old = Duration(value=1, dots=pending[idx].dots).duration_in_beats()
+                new = Duration(value=16, dots=pending[idx].dots).duration_in_beats()
+                resolved[idx] = 16
+                total += new - old
 
         return resolved
 

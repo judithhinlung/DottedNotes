@@ -305,15 +305,119 @@ def test_consecutive_16th_cells_without_eighth_cells():
 
 
 def test_16th_context_does_not_bleed_past_quarter():
-    # A quarter (base_4) ends the 16th context; a base_1 cell after it
-    # with no qualifying successor is a whole note.
+    # A quarter (base_4) ends the run/individual adjacency context, so the
+    # trailing base_1 cell has no run/individual signal of its own (S5-6
+    # Bug B). But treating it as a whole note would total 5.5 beats in a
+    # 4/4 measure (0.25+0.25+1+4) — an impossible overflow, so the
+    # beat-budget check re-resolves it as a 16th instead. This replaces the
+    # previous (buggy) expectation that a cell with "no qualifying
+    # successor" always defaults to whole regardless of fit.
+    #
+    # Note: this trailing cell isn't part of a genuine 4-note (or 6-note
+    # triplet) 16th-note run — a real run needs that many notes to total a
+    # full beat, and a lone 16th like this one can't. Bug B is deliberately
+    # scoped to the overflow check only (validated against
+    # children_s_piece.brf) and doesn't validate beat-grouping completeness;
+    # that's a separate, unresolved question, not something this test
+    # should be read as endorsing as valid BANA notation.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        notes = _parse('⠐⠽⠙⠹⠽')  # 16th, run-16th, quarter, whole
+        notes = _parse('⠐⠽⠙⠹⠽')  # 16th, run-continuation, quarter, 16th (was: whole)
     assert notes[0].duration.value == 16
     assert notes[1].duration.value == 16
     assert notes[2].duration.value == 4
-    assert notes[3].duration.value == 1   # whole, not 16th
+    assert notes[3].duration.value == 16   # overflow-corrected, not whole
+
+
+# --- S5-6: augmentation dots and beat-budget resolution of standalone
+#     ambiguous whole/16th cells ---
+
+
+def test_tokenizer_classifies_dot3_after_note_as_augmentation_dot():
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠄')  # octave4, C quarter, dot-3
+    assert tokens[-1].category == SymbolCategory.AUGMENTATION_DOT
+    assert tokens[-1].character == '⠄'
+
+
+def test_dotted_quarter_note_has_one_dot():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹⠄')  # C quarter + augmentation dot
+    assert notes[0].duration.value == 4
+    assert notes[0].duration.dots == 1
+
+
+def test_dotted_half_note_has_one_dot():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠝⠄')  # C half/32nd-ambiguous + augmentation dot
+    assert notes[0].duration.value == 2
+    assert notes[0].duration.dots == 1
+
+
+def test_dotted_eighth_note_has_one_dot():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠙⠄')  # C eighth (genuine, unambiguous) + dot
+    assert notes[0].duration.value == 8
+    assert notes[0].duration.dots == 1
+
+
+def test_dotted_rest_has_one_dot():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠧⠄')  # quarter rest + augmentation dot
+    assert notes[0].duration.value == 4
+    assert notes[0].duration.dots == 1
+
+
+def test_augmentation_dots_cap_at_two():
+    # The exact BANA encoding for a double-dot (whether it's really two
+    # consecutive dot-3 cells) hasn't been confirmed with the developer —
+    # this only verifies the implementation's defensive cap, not that this
+    # input is genuine double-dot notation.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹⠄⠄⠄')  # C quarter + three augmentation-dot cells
+    assert notes[0].duration.dots == 2
+
+
+def test_augmentation_dot_with_no_preceding_note_warns():
+    tokens = [_make_token('⠄', SymbolCategory.AUGMENTATION_DOT)]
+    with pytest.warns(UserWarning, match="Augmentation dot"):
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_measure1_pattern_matches_children_s_piece_ground_truth():
+    # Mirrors children_s_piece.brf measure 1's developer-confirmed notation:
+    # g8. b16 d4-. g4-. in 3/4 time. Should resolve with NO beat-count
+    # warning: 0.75 (dotted 8th) + 0.25 (16th) + 1 + 1 = 3.0 exactly.
+    tokens = [
+        _make_token('⠼⠉⠲', SymbolCategory.TIME_SIGNATURE),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠓', SymbolCategory.NOTE),               # G, base_8
+        _make_token('⠄', SymbolCategory.AUGMENTATION_DOT),
+        _make_token('⠾', SymbolCategory.NOTE),               # B, base_1 (ambiguous)
+        _make_token('⠱', SymbolCategory.NOTE),               # D, base_4
+        _make_token('⠳', SymbolCategory.NOTE),               # G, base_4
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = BrailleParser(tokens=tokens).parse()
+    notes = score.staves[0].measures[0].notes
+    assert [n.duration.value for n in notes] == [8, 16, 4, 4]
+    assert notes[0].duration.dots == 1
+    assert not caught  # exact fit — no beat-count mismatch warning
+
+
+def test_standalone_whole_note_exactly_filling_measure_is_unaffected():
+    # Equality (not overflow) must not trigger the Bug B re-check.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        notes = _parse('⠐⠽')  # single whole/16th cell, fills 4/4 exactly
+    assert notes[0].duration.value == 1
+    assert not caught
 
 
 def test_input_pipeline_read(tmp_path: Path):
@@ -3400,12 +3504,12 @@ def test_score_to_lilypond_empty_score_unchanged():
 
 # --- S5-5: integration test — two-hand piano piece ---
 #
-# Note: this fixture is not asserted to parse warning-free. Full-measure
-# in-accord measures trigger _validate_measure_beat_count warnings because
-# _resolve_measure_durations (S2) resolves whole/16th ambiguity across the
-# whole measure's flattened pending-note buffer, not per in-accord voice —
-# a pre-existing duration-resolution limitation unrelated to staff routing.
-# See the S5-4 ticket's Senior note for a worked example and follow-up.
+# Note: this fixture is not asserted to parse fully warning-free. As of
+# S5-6 (augmentation dots + beat-budget resolution of standalone ambiguous
+# cells), only one `_validate_measure_beat_count` warning remains: measure
+# 22's left hand, where a 16th-note run doesn't stop once a full beat is
+# complete — a separate, confirmed resolver bug tracked as S5-7. See S5-6's
+# Scope Boundary and S5-7 for the worked example and fix plan.
 
 
 def test_children_s_piece_has_two_correctly_named_staves():
@@ -3456,3 +3560,62 @@ def test_children_s_piece_renders_piano_staff_lilypond():
     assert r'\new PianoStaff <<' in ly
     assert ly.count(r'\new Staff {') == 2
     assert ly.count("\\relative c' {") == 2
+
+
+def test_children_s_piece_measure1_matches_lilypond_ground_truth():
+    # Children_s_Piece.ly measure 1: <<{g8.\mf b16 d4-. g4-.}\\{d,4\mf g4 g4}>>
+    # No beat-count warning expected: 0.75+0.25+1+1 = 3.0 exactly (S5-6 Bug B).
+    from dottednotes.models.in_accord import InAccord
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = BrailleParser(tokens=tokens).parse()
+    m1 = score.staves[0].measures[0]
+    in_accord = m1.notes[0]
+    assert isinstance(in_accord, InAccord)
+    part0, part1 = in_accord.parts
+    assert [(n.note_name, n.duration.value, n.duration.dots) for n in part0] == [
+        ('G', 8, 1), ('B', 16, 0), ('D', 4, 0), ('G', 4, 0),
+    ]
+    assert [(n.note_name, n.duration.value) for n in part1] == [
+        ('D', 4), ('G', 4), ('G', 4),
+    ]
+    assert not any("Measure 1:" in str(w.message) for w in caught)
+
+
+def test_children_s_piece_measure22_right_hand_matches_lilypond_ground_truth():
+    # Children_s_Piece.ly measure 22 upper: four eighth-note chords + a
+    # closing quarter chord (<cis g e>8 <d a fis>8 <e b g>8 <fis cis a>8
+    # <g d b>4) — 3.0 beats exactly, no dots. The left hand's measure 22
+    # still warns (S5-7, unrelated to this hand); see
+    # test_children_s_piece_has_exactly_one_remaining_warning for that.
+    from dottednotes.models.chord import Chord
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    m22 = score.staves[0].measures[21]
+    assert all(isinstance(item, Chord) for item in m22.notes)
+    assert [n.notes[0].duration.value for n in m22.notes] == [8, 8, 8, 8, 4]
+    assert all(n.notes[0].duration.dots == 0 for n in m22.notes)
+
+
+def test_children_s_piece_has_exactly_one_remaining_warning():
+    # As of S5-6, only measure 22's left hand still warns (S5-7's
+    # run-doesn't-stop-at-a-beat-boundary bug). If this count changes,
+    # either a regression was introduced or S5-7 was fixed — either way
+    # this assertion should be revisited, not silently loosened.
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        BrailleParser(tokens=tokens).parse()
+    assert len(caught) == 1
+    assert "Measure 22:" in str(caught[0].message)

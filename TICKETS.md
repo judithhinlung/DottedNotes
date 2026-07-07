@@ -3190,6 +3190,282 @@ S5-4/S5-5's staff-routing logic.
 
 ---
 
+### [x] S5-6: Fix augmentation dots and beat-budget resolution of standalone ambiguous cells
+
+**Why:** Integrating `children_s_piece.brf` for S5-4/S5-5, ~20 of its 41
+measures produced `_validate_measure_beat_count` warnings, documented as an
+out-of-scope, pre-existing duration-resolution limitation and deferred (see
+S5-4's Senior note). Two concrete, compounding causes were found and fixed
+together, then verified live against the fixture (implemented and run,
+then reverted pending this ticket): warnings dropped from 20 to 1 (see
+Scope boundary — a second, unrelated fixture transcription typo found
+during this investigation has already been corrected directly in
+`children_s_piece.brf`, confirmed against the developer's Lilypond ground
+truth, `tests/fixtures/Children_s_Piece.ly`).
+
+**Bug A — augmentation dots are unimplemented.** A lone dot-3 cell (⠄)
+immediately after a note/rest is BANA's augmentation (duration) dot,
+confirmed by the developer. Today: the tokenizer's `_classify()` fallback
+(`tokenizer.py` ~422-437) doesn't recognize `END_WORD_SIGN` (⠄, already
+defined in `bana_symbols.py`) as anything, so it falls through to
+`SymbolCategory.UNKNOWN`; the main parse loop (`braille_parser.py` ~265) has
+a literal no-op for `UNKNOWN` ("handled in later tickets"). No `_PendingNote`
+has a dots field, and `_finalize_voice_part` builds every `Duration` as
+`Duration(value=dur_value)` with no `dots` argument — even though
+`models/duration.py`'s `Duration` already fully supports `dots: int = 0..2`.
+Confirmed: measures 13/23/27/39/41 in the fixture are each a single,
+unambiguous note resolved to a plain half note (2 beats) inside a 3/4
+measure — clearly meant to be a dotted half (3 beats, matching the time
+signature exactly).
+
+**Bug B — a standalone ambiguous whole/16th cell always defaults to whole,
+even when that overflows the measure.** `_resolve_measure_durations`
+(`braille_parser.py` ~837-909) only resolves an ambiguous cell
+(`base_duration == 1`) as a 16th via *forward* adjacency to a following
+base-8 or base-1 cell (run/individual detection). When neither applies (the
+`else` branch), it unconditionally defaults to whole — even when a whole
+note plainly can't fit. Confirmed live against measure 1 of
+`children_s_piece.brf` (`g'8. b16 d4-. g4-.`, a 3/4 measure): the pending
+sequence is `[G:base_8, B:base_1, D:base_4, G:base_4]`. At B, the next cell
+is D (`base_4`), so the forward-only check falls into the `else` branch and
+resolves B as whole (4 beats) — but a whole note alone already exceeds the
+entire 3/4 measure's budget, so it cannot be correct. **Fix:** after the
+existing adjacency pass completes, recompute the voice-part's total beats
+(now correctly including augmentation dots from Bug A); for any cell that
+the `else` branch resolved to whole, if the total exceeds the time
+signature's beat budget, re-resolve that cell as 16th and adjust the
+running total, continuing until the total fits or no more such cells
+remain. This only touches the `else`-branch default — the existing
+forward-adjacency run/individual detection (RUN/INDIVIDUAL states) is
+**unchanged**, since that's tested, developer-confirmed behavior for actual
+16th-note runs (see `test_single_16th_cell_starts_run_with_eighth_cells`,
+`tests/test_parser.py` ~289-296, which explicitly documents that a *pure*
+global count-based check was tried before and rejected for exactly this
+reason — it can't tell a run leader from a genuine whole note). Verified
+this reproduces the developer's exact confirmed total for measure 1: 6.5
+(pre-fix) → 3.0 (post-fix, exact match).
+
+**Scope boundary:** after both fixes plus the two fixture corrections below,
+1 warning remains on `children_s_piece.brf`: measure 22, left hand only.
+
+Three separate problems were found in measure 22 while validating this
+ticket against the developer's Lilypond ground truth
+(`tests/fixtures/Children_s_Piece.ly`):
+
+- **Right hand, typo #1 — already fixed.** The ground truth
+  (`<cis g e>8 <d a fis>8 <e b g>8 <fis cis a>8 <g d b>4`) is four plain
+  eighth-note chords plus a closing quarter chord. The fixture had the cell
+  for the second chord's D using ⠵ (D, whole/16th-class, base_duration 1)
+  instead of ⠑ (D, eighth-class, base_duration 8) — a one-cell slip (ASCII
+  'Z' instead of 'E' in the raw `.brf`), the same category of error as the
+  two already fixed in S5-4's Senior note. Corrected directly in
+  `tests/fixtures/children_s_piece.brf`.
+- **Right hand, typo #2 — surfaced by implementing Bug A, already fixed.**
+  Once augmentation dots were implemented, a second issue appeared: an
+  extra dot-3 cell (⠄, ASCII `'`) sat immediately after the first chord's C
+  note (file position 690, before its interval markers), which had
+  previously been silently ignored as `UNKNOWN` and so had no effect. Once
+  Bug A made it a real augmentation dot, it wrongly made the first chord a
+  dotted eighth (0.75 beat), which the ground truth doesn't show (plain
+  `<cis g e>8`) — and no other note in that measure has this extra cell
+  before its interval markers. Confirmed with the developer and removed
+  from `tests/fixtures/children_s_piece.brf`. With both typos fixed, the
+  right hand resolves to exactly 3.0 beats with no warning and no dots.
+- **Left hand — a real resolver bug, not a transcription issue.** The
+  ground truth (`g8.\< fis16 e8 fis8 e4`) is a dotted-8th + a single 16th
+  (completing exactly 1 beat: 0.75 + 0.25), then two genuine eighths (1
+  beat), then a quarter (1 beat) = 3.0 exactly. `_resolve_measure_durations`
+  currently resolves this as `[8, 16, 16, 16, 4]` instead of the correct
+  `[8, 16, 8, 8, 4]` — once the run starts (the ambiguous F cell resolves
+  to 16th because the next cell is base-8), `state == "run"` never turns
+  off, so it keeps converting every subsequent base-8 cell to a 16th
+  instead of stopping once a full beat is complete. This is **S5-7**,
+  confirmed here with real developer ground truth (previously only
+  hypothesized from unverified fixtures — see S5-7 for the update). Not
+  fixed in S5-6 — leave this 1 warning and let S5-7 resolve it; do not
+  attempt to silence it here.
+
+A related but distinct issue surfaced while checking this: scanning every
+other `.brf` fixture for 16th-run lengths (not just `children_s_piece.brf`)
+turned up runs of 2, 3, 6, 7, 8, 10, and 12 notes in
+`Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf`,
+`Faure_Gabriel_Morceau_de_Concours.brf`, and `fengyang_flower_drum.brf` —
+all in simple 3/4 or 4/4 time, where a clean run should always be exactly 4
+notes (1 beat). This strongly suggests `_resolve_measure_durations`'s
+`"run"` state never resets after a full beat's worth of 16ths, silently
+chaining multiple beats' runs into one. This is a separate, likely
+real bug, but Beethoven/Fauré aren't developer-verified ground truth (per
+S0-6, only `fengyang_flower_drum.brf` and `children_s_piece.brf` are), so
+there's no confirmed-correct duration set to validate a fix against yet.
+Out of scope for S5-6 — see S5-7.
+
+**Steps (Bug A — augmentation dots):**
+1. Add a new `SymbolCategory.AUGMENTATION_DOT` category in `bana_symbols.py`.
+2. In `tokenizer.py`'s `_classify()`, add a branch: `if char ==
+   END_WORD_SIGN: return SymbolCategory.AUGMENTATION_DOT` — safe because by
+   the time `END_WORD_SIGN` reaches this fallback, it has NOT been consumed
+   by the word-sign collection loop (~192-194) or the S5-4 hand-sign
+   disambiguator (both `continue` past this point when they consume it) —
+   verified no existing test relies on `END_WORD_SIGN` alone producing
+   `UNKNOWN` (`test_tokenizer_unknown_cell` / `_unknown_does_not_raise` use
+   different cells).
+3. Add `dots: int = 0` to both `_PendingNote` and `_PendingRest`
+   (`braille_parser.py` ~129-155) — rests can be dotted too.
+4. In `BrailleParser.parse()`, add a branch for
+   `SymbolCategory.AUGMENTATION_DOT`: if `pending`, increment
+   `pending[-1].dots` (cap at 2, matching `Duration`'s supported range);
+   otherwise this cell is malformed input — warn plainly, don't raise.
+5. In `_finalize_voice_part` (`braille_parser.py` ~737-793), change
+   `Duration(value=dur_value)` to `Duration(value=dur_value,
+   dots=pnote.dots)` for both the note and rest construction paths.
+6. Write unit tests: tokenizer classifies a dot-3 cell after a note as
+   `AUGMENTATION_DOT`; a dotted quarter/half/eighth each resolve to the
+   correct `Duration(dots=1)`; a double-dot (two consecutive dot-3 cells,
+   if that's confirmed as the correct BANA double-dot encoding — ask the
+   developer before assuming) resolves to `dots=2`; a dot-3 cell with no
+   preceding note warns rather than crashing.
+
+**Steps (Bug B — beat-budget check on the standalone-whole default):**
+1. In `_resolve_measure_durations`, track the indices resolved via the
+   `else` branch (base_duration==1, tentatively whole, no run/individual
+   adjacency) in a `whole_candidates` list, leaving the rest of the state
+   machine untouched.
+2. After the main loop, if `whole_candidates` is non-empty: compute total
+   beats via `sum(Duration(value=resolved[i], dots=pending[i].dots
+   ).duration_in_beats() for i in range(len(pending)))`. While the total
+   exceeds `beats` and candidates remain, flip the next candidate's
+   `resolved[idx]` from 1 to 16, subtracting its old beat contribution and
+   adding the new one to the running total.
+3. Update `test_16th_context_does_not_bleed_past_quarter`
+   (`tests/test_parser.py` ~307-316): its input (`⠽⠙⠹⠽`) already totals 5.5
+   beats under a 4/4 signature before the trailing ambiguous cell resolves
+   — that cell overflows as a whole note too, so under the fix it correctly
+   becomes a 16th, not a whole note. Update the assertion and docstring to
+   reflect the corrected (and more correct) behavior; this is an
+   intentional behavior change, not a regression — the old expectation
+   encoded the exact bug this ticket fixes.
+4. Write unit tests: measure 1's exact voice (`8th, ambiguous, quarter,
+   quarter`) resolves to `(8, 16, 4, 4)` with dots applied correctly;
+   existing forward-adjacency run/individual tests are unaffected (confirm
+   by running the full suite); a standalone whole note that exactly fills
+   its measure is unaffected (no false flip when total equals, not
+   exceeds, the beat budget).
+
+**Definition of Done:**
+- [x] `AUGMENTATION_DOT` category added and tokenized correctly, without
+      breaking existing `END_WORD_SIGN` consumption in word-sign/hand-sign contexts
+- [x] `_PendingNote.dots` / `_PendingRest.dots` flow through to `Duration.dots`
+      in both note and rest paths
+- [x] `_resolve_measure_durations` re-checks `else`-branch whole-note
+      candidates against the measure's beat budget, without changing
+      run/individual adjacency behavior
+- [x] `children_s_piece.brf` integration test (S5-5) is tightened to assert
+      the corrected durations for measure 1 (per the developer's confirmed
+      ground truth: `g'8. b16 d4-. g4-.`) and for measure 22's right hand
+      (per `Children_s_Piece.ly`: four eighth-note chords + a closing
+      quarter chord)
+- [x] `_validate_measure_beat_count` warnings on `children_s_piece.brf` drop
+      from 20 to the 1 on measure 22's left hand (documented in Scope
+      boundary as S5-7's issue, not this ticket's)
+- [x] `test_16th_context_does_not_bleed_past_quarter` updated to reflect the
+      corrected behavior (see Steps)
+- [x] All new unit tests pass; `pytest tests/` passes with no regressions
+
+**Senior note:** This resolves the duration-resolution limitation deferred
+in S5-4's Senior note for all measures except measure 22 (filed separately
+per the Scope boundary above). The fix deliberately layers a beat-budget
+check on top of the existing adjacency-based run detection rather than
+replacing it — a pure global count-based approach for whole/16th cells was
+already tried and rejected for run-leader cases (see
+`test_single_16th_cell_starts_run_with_eighth_cells`'s comment), so keep
+that reasoning in mind if extending this further.
+
+---
+
+### [ ] S5-7: Fix 16th-note run state not resetting at beat boundaries
+
+**Why:** While validating S5-6's beat-budget fix, a scan of every 16th-note
+run resolved by `_resolve_measure_durations` across all `.brf` fixtures
+found run lengths of 2, 3, 6, 7, 8, 10, and 12 notes in
+`Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf`,
+`Faure_Gabriel_Morceau_de_Concours.brf`, and `fengyang_flower_drum.brf` —
+all in simple 3/4 or 4/4 time, where a clean 16th-note run should always
+total exactly 1 beat. **Since confirmed directly against
+`children_s_piece.brf`'s own Lilypond ground truth
+(`tests/fixtures/Children_s_Piece.ly`)**, not just inferred from run
+lengths: measure 22's left hand is `g8.\< fis16 e8 fis8 e4` — a dotted-8th
++ one 16th (0.75 + 0.25 = exactly 1 beat), then two genuine eighths (1
+beat), then a quarter (1 beat). The parser currently produces
+`[8, 16, 16, 16, 4]` instead of `[8, 16, 8, 8, 4]`: it correctly starts the
+run at the ambiguous F cell (next cell is base-8), but never stops it once
+that first 16th completes the beat, so it keeps sweeping the following two
+genuine eighths into the run too.
+
+**Confirmed cause:** in `_resolve_measure_durations` (`braille_parser.py`
+~837-909), once `state` becomes `"run"` it stays `"run"` for every
+subsequent `base_duration == 8` cell with no limit — there is no check for
+how many notes/beats the run has consumed. This is a *different* defect
+from S5-6's Bug B (which is about a *standalone* ambiguous cell with no
+run at all) — this ticket is about a run that starts correctly but doesn't
+stop where it should.
+
+**Remaining open question:** the `children_s_piece.brf` case confirms a run
+must stop once it completes exactly 1 beat (here, a dotted-8th + 16th
+pair — not a fixed "always 4 notes" grouping, since the leading dotted-8th
+already accounts for 0.75 of the beat before the run even starts). It does
+**not** by itself confirm the general multi-beat case: the longer runs seen
+in `Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf` (8, 10, 12 notes) and
+`Faure_Gabriel_Morceau_de_Concours.brf` (6, 12 notes) aren't developer
+ground truth (per S0-6, only `fengyang_flower_drum.brf` and
+`children_s_piece.brf` are). Confirm with the developer whether the general
+rule is "a run stops once the notes resolved so far (run notes plus
+whatever preceded them within the current beat) sum to exactly one beat,
+then a new run may start fresh" — do not extend beyond the
+`children_s_piece.brf` case without that confirmation.
+
+**Steps:**
+1. Use `children_s_piece.brf` measure 22 (left hand) as the primary,
+   developer-confirmed regression case: `[8(dots=1), 1, 8, 8, 4]` must
+   resolve to `[8, 16, 8, 8, 4]`, not `[8, 16, 16, 16, 4]`.
+2. With the developer, confirm the general beat-boundary rule (see
+   "Remaining open question") against at least one multi-beat passage —
+   candidates: the length-8 or length-12 runs in
+   `Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf`, or a new short
+   synthetic fixture built specifically to test this.
+3. Update `_resolve_measure_durations`'s `"run"` state handling to close
+   the run once the confirmed beat-boundary condition is met, starting a
+   new run (not INDIVIDUAL/NORMAL) for the next 16th-class cell if one
+   immediately follows and still has adjacency to a run-worthy cell.
+4. Add unit tests: `children_s_piece.brf` measure 22 left hand resolves
+   correctly (per Step 1); a synthetic multi-beat passage matching whatever
+   the developer confirms in Step 2; existing run tests in
+   `tests/test_parser.py` (~246-316) still pass unchanged.
+5. Re-run the fixture scan used to find this bug (dump 16th-run lengths
+   across all `.brf` fixtures) and confirm `children_s_piece.brf` now shows
+   no anomalous run lengths; document (don't necessarily "fix blind") any
+   remaining anomalies in Beethoven/Fauré if the developer hasn't extended
+   confirmation to those specific passages yet.
+
+**Definition of Done:**
+- [ ] `children_s_piece.brf` measure 22 (left hand) resolves to
+      `[8, 16, 8, 8, 4]`; the fixture's last remaining
+      `_validate_measure_beat_count` warning (from S5-6) is gone
+- [ ] Developer has confirmed the general multi-beat grouping rule before
+      it's applied beyond the `children_s_piece.brf` case
+- [ ] `_resolve_measure_durations` resets 16th-note runs at the confirmed
+      boundary instead of running unbounded
+- [ ] All new unit tests pass; `pytest tests/` passes with no regressions
+- [ ] `children_s_piece.brf` re-scan shows zero anomalous run lengths
+
+**Senior note:** The core defect is now confirmed with real developer
+ground truth (not just inferred from suspicious run lengths), so
+implementation can proceed for the `children_s_piece.brf` case with
+confidence. Treat the generalization to longer, multi-beat runs (as seen
+in Beethoven/Fauré) as still unverified until the developer confirms it
+separately — don't assume "always reset every 4" is the complete rule.
+
+---
+
 # Sprint 5b: Orchestral Score Support
 
 Estimated time: 1.5–2 weeks.

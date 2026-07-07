@@ -57,6 +57,7 @@ class SymbolCategory(Enum):
     MEASURE_NUMBER = auto()
     HAND_SIGN = auto()
     WORD_SIGN = auto()
+    AUGMENTATION_DOT = auto()
     UNKNOWN = auto()
 
 

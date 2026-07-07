@@ -449,4 +449,6 @@ class BrailleTokenizer:
         # the remaining six are unambiguous at any position)
         if char in INTERVAL_CELLS and char != '⠼':
             return SymbolCategory.INTERVAL
+        if char == END_WORD_SIGN:
+            return SymbolCategory.AUGMENTATION_DOT
         return SymbolCategory.UNKNOWN
