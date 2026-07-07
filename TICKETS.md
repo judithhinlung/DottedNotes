@@ -3409,42 +3409,49 @@ from S5-6's Bug B (which is about a *standalone* ambiguous cell with no
 run at all) — this ticket is about a run that starts correctly but doesn't
 stop where it should.
 
-**Remaining open question:** the `children_s_piece.brf` case confirms a run
-must stop once it completes exactly 1 beat (here, a dotted-8th + 16th
-pair — not a fixed "always 4 notes" grouping, since the leading dotted-8th
-already accounts for 0.75 of the beat before the run even starts). It does
-**not** by itself confirm the general multi-beat case: the longer runs seen
-in `Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf` (8, 10, 12 notes) and
-`Faure_Gabriel_Morceau_de_Concours.brf` (6, 12 notes) aren't developer
-ground truth (per S0-6, only `fengyang_flower_drum.brf` and
-`children_s_piece.brf` are). Confirm with the developer whether the general
-rule is "a run stops once the notes resolved so far (run notes plus
-whatever preceded them within the current beat) sum to exactly one beat,
-then a new run may start fresh" — do not extend beyond the
-`children_s_piece.brf` case without that confirmation.
+**Confirmed general rule:** the developer confirmed the beat-completion
+algorithm directly: a run consumes 16th-equivalents (0.25 beat each) until
+the *current beat* — including whatever fraction of it was already
+consumed before the run's leader — reaches exactly 1.0 beat, at which point
+the run ends. A base-8 cell right after that point is a genuine 8th unless
+a **fresh** base-1 leader starts a new run for the next beat. This
+naturally covers both the plain case (a run starting at a clean beat
+boundary needs exactly 4 notes) and `children_s_piece.brf` measure 22's
+case (a run starting after a dotted-8th, which already spent 0.75 of the
+beat, needs only 1 note). Triplet (6-note) runs are explicitly **out of
+scope**: `Duration` has no tuplet concept (a "16th" is hard-coded to 1/4
+beat), so a sextuplet's 1/6-beat notes aren't representable without a
+data-model change — deferred to a future ticket.
+
+**Implemented:** `_resolve_measure_durations` now tracks a `beat_progress`
+float (fraction of the current beat consumed, reset to 0 whenever it
+reaches a whole number) alongside the existing state machine. Once a RUN
+cell brings `beat_progress` to exactly 1.0, `state` returns to `"normal"` —
+the run/individual adjacency detection itself is otherwise unchanged.
 
 **Steps:**
-1. Use `children_s_piece.brf` measure 22 (left hand) as the primary,
-   developer-confirmed regression case: `[8(dots=1), 1, 8, 8, 4]` must
-   resolve to `[8, 16, 8, 8, 4]`, not `[8, 16, 16, 16, 4]`.
-2. With the developer, confirm the general beat-boundary rule (see
-   "Remaining open question") against at least one multi-beat passage —
-   candidates: the length-8 or length-12 runs in
-   `Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf`, or a new short
-   synthetic fixture built specifically to test this.
-3. Update `_resolve_measure_durations`'s `"run"` state handling to close
-   the run once the confirmed beat-boundary condition is met, starting a
-   new run (not INDIVIDUAL/NORMAL) for the next 16th-class cell if one
-   immediately follows and still has adjacency to a run-worthy cell.
-4. Add unit tests: `children_s_piece.brf` measure 22 left hand resolves
-   correctly (per Step 1); a synthetic multi-beat passage matching whatever
-   the developer confirms in Step 2; existing run tests in
-   `tests/test_parser.py` (~246-316) still pass unchanged.
-5. Re-run the fixture scan used to find this bug (dump 16th-run lengths
-   across all `.brf` fixtures) and confirm `children_s_piece.brf` now shows
-   no anomalous run lengths; document (don't necessarily "fix blind") any
-   remaining anomalies in Beethoven/Fauré if the developer hasn't extended
-   confirmation to those specific passages yet.
+1. ~~Use `children_s_piece.brf` measure 22 (left hand) as the primary,
+   developer-confirmed regression case~~ — done:
+   `[8(dots=1), 1, 8, 8, 4]` now resolves to `[8, 16, 8, 8, 4]`, matching
+   `g8. fis16 e8 fis8 e4` exactly, with zero warnings on that measure.
+2. ~~Confirm the general beat-boundary rule with the developer~~ — done,
+   see "Confirmed general rule" above.
+3. Done: `_resolve_measure_durations`'s `"run"` state now closes once
+   `beat_progress` reaches 1.0; a fresh base-1 leader correctly starts a
+   new run for the next beat if one follows.
+4. Added unit tests: `test_children_s_piece_measure22_left_hand_matches_lilypond_ground_truth`
+   (Step 1's regression case); `test_16th_run_splits_into_two_beat_groups`
+   (two fresh-leader 4-note groups); `test_16th_run_without_fresh_leader_does_not_continue_past_a_beat`
+   (only one leader for 8 cells — the run ends after 4, the rest resolve as
+   genuine 8ths); confirmed all existing run/individual tests
+   (`tests/test_parser.py` ~246-316) pass unchanged.
+5. Re-ran the fixture scan: `children_s_piece.brf` now parses with **zero**
+   `_validate_measure_beat_count` warnings (`test_children_s_piece_has_no_remaining_warnings`).
+   Beethoven/Fauré's warning counts (953 / 68) are unchanged by this fix
+   (verified by comparing against S5-6-only output) — they're pre-existing,
+   out-of-scope, unverified-fixture issues from S5-6, not something this
+   ticket introduced or worsened. fengyang_flower_drum.brf's warning count
+   actually *improved* (79 → 58).
 
 **Definition of Done:**
 - [ ] `children_s_piece.brf` measure 22 (left hand) resolves to
@@ -3458,11 +3465,11 @@ then a new run may start fresh" — do not extend beyond the
 - [ ] `children_s_piece.brf` re-scan shows zero anomalous run lengths
 
 **Senior note:** The core defect is now confirmed with real developer
-ground truth (not just inferred from suspicious run lengths), so
-implementation can proceed for the `children_s_piece.brf` case with
-confidence. Treat the generalization to longer, multi-beat runs (as seen
-in Beethoven/Fauré) as still unverified until the developer confirms it
-separately — don't assume "always reset every 4" is the complete rule.
+ground truth and fixed. Beethoven/Fauré's large warning counts remain
+unresolved and out of scope — they're not developer-verified ground truth
+(per S0-6), and this ticket's fix neither caused nor meaningfully changed
+them. Triplet/tuplet support (the "6 notes = 1 beat" case) needs a real
+`Duration` data-model change and is deferred to a future ticket.
 
 ---
 

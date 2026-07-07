@@ -3504,12 +3504,10 @@ def test_score_to_lilypond_empty_score_unchanged():
 
 # --- S5-5: integration test — two-hand piano piece ---
 #
-# Note: this fixture is not asserted to parse fully warning-free. As of
-# S5-6 (augmentation dots + beat-budget resolution of standalone ambiguous
-# cells), only one `_validate_measure_beat_count` warning remains: measure
-# 22's left hand, where a 16th-note run doesn't stop once a full beat is
-# complete — a separate, confirmed resolver bug tracked as S5-7. See S5-6's
-# Scope Boundary and S5-7 for the worked example and fix plan.
+# As of S5-7 (16th-note runs end once they complete the current beat,
+# accounting for beat space already consumed before the run's leader),
+# children_s_piece.brf parses with zero _validate_measure_beat_count
+# warnings — see test_children_s_piece_has_no_remaining_warnings below.
 
 
 def test_children_s_piece_has_two_correctly_named_staves():
@@ -3589,9 +3587,9 @@ def test_children_s_piece_measure1_matches_lilypond_ground_truth():
 def test_children_s_piece_measure22_right_hand_matches_lilypond_ground_truth():
     # Children_s_Piece.ly measure 22 upper: four eighth-note chords + a
     # closing quarter chord (<cis g e>8 <d a fis>8 <e b g>8 <fis cis a>8
-    # <g d b>4) — 3.0 beats exactly, no dots. The left hand's measure 22
-    # still warns (S5-7, unrelated to this hand); see
-    # test_children_s_piece_has_exactly_one_remaining_warning for that.
+    # <g d b>4) — 3.0 beats exactly, no dots. See
+    # test_children_s_piece_measure22_left_hand_matches_lilypond_ground_truth
+    # for the left hand (S5-7's primary regression case).
     from dottednotes.models.chord import Chord
 
     pipeline = BRLInputPipeline()
@@ -3606,16 +3604,57 @@ def test_children_s_piece_measure22_right_hand_matches_lilypond_ground_truth():
     assert all(n.notes[0].duration.dots == 0 for n in m22.notes)
 
 
-def test_children_s_piece_has_exactly_one_remaining_warning():
-    # As of S5-6, only measure 22's left hand still warns (S5-7's
-    # run-doesn't-stop-at-a-beat-boundary bug). If this count changes,
-    # either a regression was introduced or S5-7 was fixed — either way
-    # this assertion should be revisited, not silently loosened.
+def test_children_s_piece_has_no_remaining_warnings():
+    # As of S5-7 (run ends once it completes the current beat, accounting
+    # for beat space already consumed before the run's leader),
+    # children_s_piece.brf parses with zero _validate_measure_beat_count
+    # warnings. If this regresses, check whether a real bug was
+    # introduced — don't silently loosen this assertion.
     pipeline = BRLInputPipeline()
     text = pipeline.load(FIXTURES / 'children_s_piece.brf')
     tokens = BrailleTokenizer().tokenize(text)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         BrailleParser(tokens=tokens).parse()
-    assert len(caught) == 1
-    assert "Measure 22:" in str(caught[0].message)
+    assert caught == []
+
+
+def test_children_s_piece_measure22_left_hand_matches_lilypond_ground_truth():
+    # Children_s_Piece.ly measure 22 lower: g8.\< fis16 e8 fis8 e4 — a
+    # dotted-8th (0.75 beat) + a single 16th completing that beat exactly,
+    # then two genuine eighths (1 beat), then a quarter (1 beat) = 3.0.
+    # This is S5-7's primary regression case: the run must stop after just
+    # one 16th (not continue sweeping the following two eighths into it).
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = BrailleParser(tokens=tokens).parse()
+    m22 = score.staves[1].measures[21]
+    assert [(n.note_name, n.duration.value, n.duration.dots) for n in m22.notes] == [
+        ('G', 8, 1), ('F', 16, 0), ('E', 8, 0), ('F', 8, 0), ('E', 4, 0),
+    ]
+    assert not any("Measure 22:" in str(w.message) for w in caught)
+
+
+def test_16th_run_splits_into_two_beat_groups():
+    # A run of 8 consecutive 16th-class notes across two beats needs a
+    # fresh leader cell for the second beat (S5-7): once the first run
+    # completes a beat, a plain base-8 cell right after is a genuine
+    # eighth, not an automatic continuation.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠙⠙⠙⠽⠙⠙⠙')  # leader,cont,cont,cont x2
+    assert [n.duration.value for n in notes] == [16] * 8
+
+
+def test_16th_run_without_fresh_leader_does_not_continue_past_a_beat():
+    # Same 8-cell shape, but only ONE leader for both groups: the run ends
+    # after 4 notes (1 beat); the remaining base-8 cells have no active run
+    # to continue and no leader of their own, so they resolve as genuine
+    # eighths — not a silent continuation.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠽⠙⠙⠙⠙⠙⠙⠙')  # 1 leader + 7 continuations
+    assert [n.duration.value for n in notes] == [16, 16, 16, 16, 8, 8, 8, 8]

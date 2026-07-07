@@ -875,6 +875,21 @@ class BrailleParser:
         consecutive base_1 cells are individual 16th notes; a base_8 cell
         that follows them is a genuine 8th note, never a run continuation.
 
+        A RUN ends once it completes the current beat (S5-7): a running
+        beat-position counter (reset to 0 whenever it reaches a whole
+        number) tracks how much of the current beat has been consumed,
+        including by whatever preceded the run's leader. Once a RUN cell
+        brings that counter to exactly 1.0, the run ends (state returns to
+        NORMAL) — a base_8 cell right after is a genuine 8th unless a fresh
+        base_1 leader starts a new run. This lets a run preceded by a
+        dotted note (which already consumed part of the beat) correctly
+        stop after fewer than 4 notes, matching BANA's actual grouping
+        (confirmed against children_s_piece.brf measure 22: a dotted-8th +
+        a single 16th completes the beat; the following two notes are
+        genuine 8ths, not a continuing run). Triplet (6-note) runs are not
+        handled here — Duration has no tuplet concept yet; see the S5-7
+        Senior note.
+
         Half/32nd (base_duration 2): count_2 * 2 > beats → all 32nd.
         Quarter (base_duration 4): always quarter.
 
@@ -897,6 +912,11 @@ class BrailleParser:
         # convention, so these are re-checked against the measure's beat
         # budget afterward (Bug B).
         whole_candidates: list[int] = []
+        # Fraction of the current beat consumed so far (S5-7); reset to 0
+        # whenever it reaches a whole number. Lets a RUN account for beat
+        # space already spent by whatever preceded its leader.
+        beat_progress = 0.0
+        EPSILON = 1e-9
 
         for i, n in enumerate(pending):
             next_bd = pending[i + 1].base_duration if i + 1 < len(pending) else None
@@ -929,6 +949,16 @@ class BrailleParser:
             else:  # base_duration == 4
                 resolved[i] = 4
                 state = "normal"
+
+            beat_progress += Duration(
+                value=resolved[i], dots=pending[i].dots
+            ).duration_in_beats()
+            if beat_progress >= 1.0 - EPSILON:
+                beat_progress %= 1.0
+                if beat_progress < EPSILON:
+                    beat_progress = 0.0
+                if state == "run":
+                    state = "normal"  # beat complete — a fresh leader is needed to continue
 
         if whole_candidates:
             total = sum(
