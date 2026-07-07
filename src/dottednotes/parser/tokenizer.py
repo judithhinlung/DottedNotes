@@ -11,6 +11,7 @@ from dottednotes.bana_symbols import (
     DYNAMIC_CELLS,
     END_WORD_SIGN,
     GRACE_NOTE_INDICATOR,
+    HAND_SIGN_CELLS,
     IN_ACCORD_CELLS,
     INTERVAL_CELLS,
     LITERARY_DIGITS,
@@ -324,6 +325,20 @@ class BrailleTokenizer:
             # over ⠐ (octave 4) and ⠐⠦ (mezzo staccato).
             three = text[i:i + 3]
             two = text[i:i + 2]
+
+            # Hand-sign 2-cell sequences (right ⠨⠜, left ⠸⠜), marking which
+            # physical staff the following line's measures belong to. Must be
+            # checked before single-cell octave-mark fallback because ⠨ and ⠸
+            # are also OCTAVE_MARKS, and before IN_ACCORD_CELLS so that ⠨⠜
+            # (right hand) is never confused with ⠨⠅ (measure_division) —
+            # exact 2-character dict-key lookup already disambiguates both.
+            if two in HAND_SIGN_CELLS:
+                tokens.append(BrailleToken(HAND_SIGN_CELLS[two], SymbolCategory.HAND_SIGN, i, line))
+                i += 2
+                header_active = False
+                if i < len(text) and text[i] == END_WORD_SIGN:
+                    i += 1  # consume disambiguating end-word-sign; no token emitted
+                continue
 
             # In-accord 2-cell sequences (part_measure ⠐⠂ and measure_division ⠨⠅).
             # Must be checked before single-cell octave-mark / ornament / articulation

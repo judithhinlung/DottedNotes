@@ -3251,3 +3251,208 @@ def test_in_accord_voice_with_transcriber_added_rest():
     assert len(voice2) == 1
     assert isinstance(voice2[0], Rest)
     assert voice2[0].is_full_measure is True
+
+
+# --- S5-4: hand signs and staff assembly ---
+
+from dottednotes.bana_symbols import HAND_SIGN_CELLS
+
+
+def test_hand_sign_cells_contains_both_signs():
+    assert '⠨⠜' in HAND_SIGN_CELLS and HAND_SIGN_CELLS['⠨⠜'] == 'right'
+    assert '⠸⠜' in HAND_SIGN_CELLS and HAND_SIGN_CELLS['⠸⠜'] == 'left'
+
+
+# --- Tokenizer: hand-sign classification ---
+
+def test_tokenizer_classifies_right_hand_sign():
+    tokens = BrailleTokenizer().tokenize('⠨⠜')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.HAND_SIGN
+    assert tokens[0].character == 'right'
+
+
+def test_tokenizer_classifies_left_hand_sign():
+    tokens = BrailleTokenizer().tokenize('⠸⠜')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.HAND_SIGN
+    assert tokens[0].character == 'left'
+
+
+def test_tokenizer_hand_sign_not_confused_with_octave5_mark():
+    # ⠨ alone (not followed by ⠜) should still be OCTAVE_MARK.
+    tokens = BrailleTokenizer().tokenize('⠨⠹')
+    assert tokens[0].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[0].character == '⠨'
+
+
+def test_tokenizer_hand_sign_not_confused_with_octave3_mark():
+    # ⠸ alone (not followed by ⠜) should still be OCTAVE_MARK.
+    tokens = BrailleTokenizer().tokenize('⠸⠹')
+    assert tokens[0].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[0].character == '⠸'
+
+
+def test_tokenizer_right_hand_sign_not_confused_with_measure_division():
+    # ⠨⠅ (measure_division) must stay IN_ACCORD, not HAND_SIGN, despite sharing ⠨.
+    tokens = BrailleTokenizer().tokenize('⠨⠅')
+    assert tokens[0].category == SymbolCategory.IN_ACCORD
+    assert tokens[0].character == '⠨⠅'
+
+
+def test_tokenizer_hand_sign_consumes_disambiguator_when_present():
+    # ⠝ (half/32nd C) contains dot 1 — the disambiguator (⠄, dot 3) is present
+    # in the source and must be silently consumed, not emitted as a token.
+    tokens = BrailleTokenizer().tokenize('⠨⠜⠄⠝⠹')
+    assert [t.category for t in tokens] == [
+        SymbolCategory.HAND_SIGN, SymbolCategory.NOTE, SymbolCategory.NOTE,
+    ]
+    assert tokens[1].position == 3  # 2 cells for the hand sign + 1 disambiguator
+
+
+def test_tokenizer_hand_sign_no_disambiguator_when_absent():
+    tokens = BrailleTokenizer().tokenize('⠨⠜⠝⠹')
+    assert [t.category for t in tokens] == [
+        SymbolCategory.HAND_SIGN, SymbolCategory.NOTE, SymbolCategory.NOTE,
+    ]
+    assert tokens[1].position == 2  # 2 cells for the hand sign, no disambiguator
+
+
+# --- Parser: staff routing ---
+
+# Two systems: right hand (C D E F | C D E F), left hand (G A B C | G A B C).
+_TWO_HAND_SNIPPET = (
+    '⠨⠜⠐⠹⠱⠫⠻⠀'
+    '⠸⠜⠸⠳⠪⠺⠹⠀'
+    '⠨⠜⠐⠹⠱⠫⠻⠀'
+    '⠸⠜⠸⠳⠪⠺⠹⠀'
+)
+
+
+def test_parser_routes_measures_to_two_staves():
+    tokens = BrailleTokenizer().tokenize(_TWO_HAND_SNIPPET)
+    score = BrailleParser(tokens=tokens).parse()
+    assert len(score.staves) == 2
+    assert score.staves[0].name == 'right hand'
+    assert score.staves[1].name == 'left hand'
+    assert len(score.staves[0].measures) == 2
+    assert len(score.staves[1].measures) == 2
+
+
+def test_parser_staff_routing_note_content():
+    tokens = BrailleTokenizer().tokenize(_TWO_HAND_SNIPPET)
+    score = BrailleParser(tokens=tokens).parse()
+    right_notes = [n.note_name for n in score.staves[0].measures[0].notes]
+    left_notes = [n.note_name for n in score.staves[1].measures[0].notes]
+    assert right_notes == ['C', 'D', 'E', 'F']
+    assert left_notes == ['G', 'A', 'B', 'C']
+
+
+def test_parser_staff_routing_measure_numbers_match():
+    tokens = BrailleTokenizer().tokenize(_TWO_HAND_SNIPPET)
+    score = BrailleParser(tokens=tokens).parse()
+    right_numbers = [m.number for m in score.staves[0].measures]
+    left_numbers = [m.number for m in score.staves[1].measures]
+    assert right_numbers == [1, 2]
+    assert left_numbers == [1, 2]
+
+
+def test_parser_no_hand_sign_still_produces_one_staff():
+    # Backward compatibility: files with no hand signs at all route everything
+    # to a single staff, now named "right hand" instead of "".
+    text = '⠐⠹⠱⠫⠻⠀'
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    assert len(score.staves) == 1
+    assert score.staves[0].name == 'right hand'
+    assert len(score.staves[0].measures) == 1
+
+
+def test_parser_staff_clef_heuristic_differs_by_hand():
+    tokens = BrailleTokenizer().tokenize(_TWO_HAND_SNIPPET)
+    score = BrailleParser(tokens=tokens).parse()
+    assert r'\clef treble' in score.staves[0].to_lilypond()
+    assert r'\clef bass' in score.staves[1].to_lilypond()
+
+
+# --- Score.to_lilypond(): PianoStaff wrapping for two staves ---
+
+def test_score_to_lilypond_two_staves_uses_piano_staff():
+    tokens = BrailleTokenizer().tokenize(_TWO_HAND_SNIPPET)
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\new PianoStaff <<' in ly
+    assert ly.count(r'\new Staff {') == 2
+    assert '>>' in ly
+
+
+def test_score_to_lilypond_single_staff_unchanged():
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠱⠫⠻⠀')
+    score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\new PianoStaff' not in ly
+    assert "\\relative c' {" in ly
+
+
+def test_score_to_lilypond_empty_score_unchanged():
+    assert Score().to_lilypond() == '\\version "2.24.0"\n'
+
+
+# --- S5-5: integration test — two-hand piano piece ---
+#
+# Note: this fixture is not asserted to parse warning-free. Full-measure
+# in-accord measures trigger _validate_measure_beat_count warnings because
+# _resolve_measure_durations (S2) resolves whole/16th ambiguity across the
+# whole measure's flattened pending-note buffer, not per in-accord voice —
+# a pre-existing duration-resolution limitation unrelated to staff routing.
+# See the S5-4 ticket's Senior note for a worked example and follow-up.
+
+
+def test_children_s_piece_has_two_correctly_named_staves():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    assert len(score.staves) == 2
+    assert score.staves[0].name == 'right hand'
+    assert score.staves[1].name == 'left hand'
+
+
+def test_children_s_piece_staves_have_matching_measure_numbers():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    right_numbers = [m.number for m in score.staves[0].measures]
+    left_numbers = [m.number for m in score.staves[1].measures]
+    assert right_numbers == left_numbers
+    assert right_numbers == list(range(1, 42))  # 41 measures
+
+
+def test_children_s_piece_clefs_resolve_by_hand():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    assert r'\clef treble' in score.staves[0].to_lilypond()
+    assert r'\clef bass' in score.staves[1].to_lilypond()
+
+
+def test_children_s_piece_renders_piano_staff_lilypond():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    ly = score.to_lilypond()
+    assert r'\version' in ly
+    assert r'\new PianoStaff <<' in ly
+    assert ly.count(r'\new Staff {') == 2
+    assert ly.count("\\relative c' {") == 2

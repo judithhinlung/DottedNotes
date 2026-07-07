@@ -180,7 +180,8 @@ class BrailleParser:
     def parse(self) -> Score:
         self._reset_state()
         score = Score()
-        staff = Staff(name="")
+        right_staff = Staff(name="right hand")
+        left_staff = Staff(name="left hand")
         pending: list[_PendingNote] = []
 
         for token in self._tokens:
@@ -207,17 +208,23 @@ class BrailleParser:
                         self._pending_slur_end = True
                         self._last_token_was_slur = False
                     pending.append(self._buffer_note(token))
+            elif token.category == SymbolCategory.HAND_SIGN:
+                self._current_hand = token.character
             elif token.category == SymbolCategory.BAR_LINE:
                 if pending:
                     bar_type = (
                         BAR_LINE_SEQUENCES.get(token.character)
                         or BAR_LINE_CELLS.get(token.character, 'measure_separator')
                     )
-                    staff.add_measure(
-                        self._finalize_measure(pending, self._next_measure_number, bar_type)
+                    active = left_staff if self._current_hand == 'left' else right_staff
+                    active.add_measure(
+                        self._finalize_measure(
+                            pending,
+                            self._next_measure_number_for(active, right_staff, left_staff),
+                            bar_type,
+                        )
                     )
                     pending = []
-                    self._next_measure_number += 1
                     # Terminate all active interval doublings at double/section bars.
                     if bar_type in ('final_double_bar', 'section_double_bar'):
                         self._active_intervals.clear()
@@ -253,12 +260,18 @@ class BrailleParser:
             elif token.category == SymbolCategory.MEASURE_NUMBER:
                 self._handle_measure_number(token)
             elif token.category == SymbolCategory.WORD_SIGN:
-                self._handle_word_sign(token, pending, staff)
+                piece_started = bool(right_staff.measures or left_staff.measures)
+                self._handle_word_sign(token, pending, piece_started)
             # UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
         if pending:
-            staff.add_measure(self._finalize_measure(pending, self._next_measure_number))
+            active = left_staff if self._current_hand == 'left' else right_staff
+            active.add_measure(
+                self._finalize_measure(
+                    pending, self._next_measure_number_for(active, right_staff, left_staff)
+                )
+            )
 
         # Warn about orphaned grace note state at end of input
         if self._pending_grace_note_indicator:
@@ -273,18 +286,25 @@ class BrailleParser:
                 stacklevel=2,
             )
 
-        # Attach parsed header state to the staff
-        if self._key_signature_parsed:
-            staff.key_signature = self._key_signature
-        if self._time_signature_parsed:
-            staff.time_signature = self._time_signature
+        # Attach parsed header state. Key/time signature apply to the whole
+        # piece, so both hands get them. Clef and tempo are attached to the
+        # right hand only (top staff) — this fixture never restates them
+        # per hand; see the S5-4 Senior note for the rationale.
+        for hand_staff in (right_staff, left_staff):
+            if not hand_staff.measures:
+                continue
+            if self._key_signature_parsed:
+                hand_staff.key_signature = self._key_signature
+            if self._time_signature_parsed:
+                hand_staff.time_signature = self._time_signature
         if self._clef_parsed:
-            staff.clef = self._clef
+            right_staff.clef = self._clef
         if self._pending_tempo is not None:
-            staff.tempo = self._pending_tempo
+            right_staff.tempo = self._pending_tempo
 
-        if staff.measures:
-            score.add_staff(staff)
+        for hand_staff in (right_staff, left_staff):
+            if hand_staff.measures:
+                score.add_staff(hand_staff)
 
         return score
 
@@ -610,7 +630,7 @@ class BrailleParser:
         self,
         token: BrailleToken,
         pending: list[_PendingNote],
-        staff: Staff,
+        piece_started: bool,
     ) -> None:
         text = token.character  # already decoded to a plain string by the tokenizer
         marking_type = (
@@ -619,8 +639,9 @@ class BrailleParser:
             else TextMarkingType.EXPRESSION
         )
         marking = TextMarking(text=text, type=marking_type)
-        if not pending and not staff.measures:
-            # Before the first note and first measure: this is a header tempo/direction.
+        if not pending and not piece_started:
+            # Before the first note and first measure of either staff: this is
+            # a header tempo/direction.
             self._pending_tempo = marking
         else:
             # Mid-piece: attach to the current (not-yet-finalized) measure.
@@ -658,6 +679,27 @@ class BrailleParser:
             )
         self._next_measure_number = explicit_number
         self._last_margin_measure_number = explicit_number
+
+    def _next_measure_number_for(
+        self, active: Staff, right_staff: Staff, left_staff: Staff
+    ) -> int:
+        """Return the measure number to assign to the measure being finalized on `active`.
+
+        BANA margin numbers are only ever restated on right-hand lines, so
+        the shared `_next_measure_number` counter must advance only for the
+        right hand. Left-hand measures mirror the right hand's measure at
+        the same position, since a system's right-hand line (and all of its
+        bar lines) always fully precedes its paired left-hand line in the
+        token stream.
+        """
+        if active is left_staff:
+            idx = len(left_staff.measures)
+            if idx < len(right_staff.measures):
+                return right_staff.measures[idx].number
+            return self._next_measure_number
+        number = self._next_measure_number
+        self._next_measure_number += 1
+        return number
 
     def _handle_in_accord(
         self, token: BrailleToken, pending: list[_PendingNote]
@@ -959,3 +1001,7 @@ class BrailleParser:
         # so we can warn about non-sequential jumps (0 = none seen yet).
         self._next_measure_number: int = 1
         self._last_margin_measure_number: int = 0
+        # Hand-sign state: which staff subsequent measures belong to.
+        # None (no hand sign seen yet) routes to the right-hand staff, so
+        # single-staff files with no hand signs behave exactly as before.
+        self._current_hand: str | None = None

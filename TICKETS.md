@@ -3011,10 +3011,182 @@ them in order.
 
 ---
 
-###[ ] S5-4: Implement Staff class with voice assembly
-### [ ] S5-5: Integration test: two-voice piano piece
+### [x] S5-4: Implement Staff class with voice assembly
 
-*Detailed steps for S5-4 and S5-5 to be written when S5-3 is complete.*
+**Why:** A piano piece has two physical staves — right hand and left hand —
+each a separate sequence of measures, rendered together as a LilyPond grand
+staff (`\new PianoStaff << \new Staff {...} \new Staff {...} >>`, confirmed
+via the LilyPond Notation Reference, "Keyboard and other multi-staff
+instruments"). S5-1 through S5-3 handle chords and in-accord voices *within*
+a single staff/measure; this ticket adds the layer above that: routing each
+hand's line of BANA braille content to its own `Staff` instance and
+rendering both as one score.
+
+**Verified BANA hand-sign symbols (developer-confirmed dot patterns, from
+`tests/fixtures/children_s_piece.brf`):**
+
+| Sign | ASCII | Cells | Unicode | Notes |
+|------|-------|-------|---------|-------|
+| Right hand | `.>` | dots(4,6) + dots(3,4,5) | ⠨⠜ | First cell also `OCTAVE_MARKS['⠨']=5`; second cell also `_CLEF_PREFIX` |
+| Left hand  | `_>` | dots(4,5,6) + dots(3,4,5) | ⠸⠜ | First cell also `OCTAVE_MARKS['⠸']=3`; second cell also `_CLEF_PREFIX` |
+
+Both signs' second cell (⠜, dots 3,4,5) is already `_CLEF_PREFIX` in
+`tokenizer.py`. ⠨ also collides with `IN_ACCORD_CELLS['⠨⠅']`'s first cell.
+Resolved by exact 2-character dict-key lookup — same mechanism already used
+for `IN_ACCORD_CELLS` vs bare octave marks.
+
+**Disambiguator rule (verified with zero exceptions across every hand-sign
+occurrence in the fixture):** a dot-3 cell (`END_WORD_SIGN`, ⠄) immediately
+follows the hand sign if and only if the very next real content cell
+contains dot 1, 2, or 3. The tokenizer does not predict this — after
+emitting the hand-sign token, if the next input cell equals `END_WORD_SIGN`,
+consume and discard it, exactly like the existing `END_WORD_SIGN`
+consumption in the word-sign collection loop (`tokenizer.py` ~192-194).
+
+**Steps:**
+
+1. Add `HAND_SIGN_CELLS: dict[str, str] = {'⠨⠜': 'right', '⠸⠜': 'left'}` to
+   `bana_symbols.py`, following the `IN_ACCORD_CELLS` comment-block
+   convention: cite the fixture source, note the overlap with
+   `OCTAVE_MARKS`, `_CLEF_PREFIX`, and `IN_ACCORD_CELLS['⠨⠅']`.
+2. Add `HAND_SIGN = auto()` to `SymbolCategory` in `bana_symbols.py`.
+3. Update `BrailleTokenizer.tokenize()`: insert a new 2-cell lookahead
+   immediately before the existing `if two in IN_ACCORD_CELLS:` check,
+   reusing the already-computed `two = text[i:i+2]`. Emit
+   `SymbolCategory.HAND_SIGN` with the decoded hand string as the token's
+   character, set `header_active = False`, and consume a trailing
+   `END_WORD_SIGN` if present. Do not modify `at_measure_start` (hand sign
+   precedes notes, like key/time/clef tokens).
+4. Update `BrailleParser._reset_state()`: add
+   `self._current_hand: str | None = None` (routes to the right hand when
+   no hand sign has been seen, preserving single-staff behavior).
+5. Update `BrailleParser.parse()`:
+   - Replace the single `staff = Staff(name="")` with
+     `right_staff = Staff(name="right hand")` and
+     `left_staff = Staff(name="left hand")`.
+   - Route `SymbolCategory.HAND_SIGN` tokens: `self._current_hand = token.character`.
+   - In the `BAR_LINE` branch and the trailing-`pending` flush, compute
+     `active = left_staff if self._current_hand == 'left' else right_staff`
+     and call the new `_next_measure_number_for(active, right_staff, left_staff)`
+     helper instead of directly reading/incrementing `self._next_measure_number`.
+   - Change `_handle_word_sign`'s third parameter from `staff: Staff` to
+     `piece_started: bool`; callers pass
+     `bool(right_staff.measures or left_staff.measures)`.
+   - At the end of `parse()`: attach parsed key/time signature to **both**
+     staves that have measures; attach clef/tempo to `right_staff` only (top
+     staff — this fixture never restates them per hand). Call
+     `score.add_staff(...)` for each of `right_staff`/`left_staff` that has
+     measures.
+6. Add `BrailleParser._next_measure_number_for(self, active, right_staff, left_staff) -> int`:
+   - If `active is left_staff`: return
+     `right_staff.measures[len(left_staff.measures)].number` (mirrors the
+     right hand's measure at the same position — always already populated,
+     since a right-hand line's tokens, including its bar line, fully
+     precede its paired left-hand line's tokens). Fall back to
+     `self._next_measure_number` (without advancing) if not yet populated.
+   - Otherwise: return `self._next_measure_number`, then increment it —
+     the *only* place the shared counter advances, since BANA margin
+     numbers are only ever restated on right-hand lines.
+7. Update `Score.to_lilypond()` in `src/dottednotes/models/score.py`: keep
+   0- and 1-staff behavior unchanged; add a 2-staff branch emitting
+   `\new PianoStaff << \new Staff { \relative c' {...} } \new Staff { \relative c' {...} } >>`,
+   with `self.staves[0]` (right hand) as the top `\new Staff` block.
+8. `Staff._resolve_clef()`'s existing octave-heuristic (octave ≥4 → treble,
+   else bass) needs no change — it already operates per-`Staff`-instance,
+   so correct routing alone yields treble for the right hand and bass for
+   the left hand.
+9. Write unit tests covering: both hand signs classify correctly in
+   isolation; the disambiguator is consumed when present and left alone
+   when absent; `⠨⠜`/`⠸⠜` are not confused with bare octave marks or
+   `⠨⠅` (measure_division); a synthetic 2-measure/2-hand snippet routes
+   measures to the correct `Staff` with matching, non-double-incrementing
+   measure numbers; a no-hand-sign input still produces one staff (now
+   named `"right hand"`); `Score.to_lilypond()` emits the `PianoStaff`
+   wrapper for 2 staves and is unchanged for 0/1 staves.
+
+**Definition of Done:**
+- [x] `HAND_SIGN_CELLS` in `bana_symbols.py` contains both verified hand signs with overlap documented
+- [x] `SymbolCategory.HAND_SIGN` exists
+- [x] Tokenizer classifies `⠨⠜`/`⠸⠜` as `HAND_SIGN` without breaking existing octave-mark/in-accord/clef classification
+- [x] Tokenizer consumes a trailing `END_WORD_SIGN` after a hand sign exactly when present; leaves normal tokenizing untouched otherwise
+- [x] `at_measure_start` is unaffected by `HAND_SIGN` tokens
+- [x] `BrailleParser.parse()` creates two `Staff` instances and routes measures to the correct one based on the most recent `HAND_SIGN` token
+- [x] Left-hand measures receive the same measure number as the right-hand measure at the same position; the shared margin-number counter advances only on right-hand bar lines
+- [x] Files with no hand signs still produce exactly one staff, routed and numbered identically to current behavior (staff now named `"right hand"`)
+- [x] `Score.to_lilypond()` emits `\new PianoStaff << \new Staff {...} \new Staff {...} >>` for 2 staves; 0- and 1-staff output unchanged
+- [x] All new unit tests pass
+- [x] `pytest tests/` passes with no regressions
+
+**Senior note:** Two fixture-transcription issues surfaced while integrating
+`children_s_piece.brf` and were confirmed and fixed with the developer
+directly (not guessed): (1) a stray single `+` character sat alone on its
+own line (a hard line-break artifact) and was rejoined onto the preceding
+right-hand line; (2) a missing dot-3 separator in `>PS'` (should be `>P'S'`)
+had merged a piano dynamic (`⠜⠏` = 'p') and a note (`⠎` = A half/32nd) into
+one mis-tokenized word-sign, which — combined with a **separate, pre-existing
+bug** — produced a one-measure offset between the two hands partway through
+the piece. That separate bug: `_resolve_measure_durations` (S2's whole/16th
+ambiguity resolver) evaluates beat overflow across a measure's entire
+flattened pending-note buffer, but doesn't account for full-measure in-accord
+(S5-2/S5-3) splitting that buffer into independent voices. The developer
+confirmed measure 1's intended notation is
+`<<{g'8.\mf b16 d4-. g4-.}\\{d4 g4 g4}>>` — the resolver currently drops the
+augmentation dot on the first voice's dotted eighth and resolves the
+following ambiguous cell to a whole note instead of a 16th, producing a
+beat-count warning. This is out of scope for S5-4 (staff routing) and is
+**not** fixed here — `children_s_piece.brf` is expected to still produce
+`_validate_measure_beat_count` warnings for its full-measure in-accord
+measures; only the measure-numbering/staff-routing warning was fixed.
+File a follow-up ticket for per-voice duration resolution in in-accord
+measures before attempting to silence these warnings.
+
+---
+
+### [x] S5-5: Integration test: two-voice piano piece
+
+**Why:** S5-4 adds the staff-routing machinery; this ticket proves it works
+end to end against real two-hand BANA content —
+`tests/fixtures/children_s_piece.brf` — the same kind of full-pipeline check
+Sprint 2's and Sprint 4's integration tests did for `simple_melody.brf` and
+`fengyang_flower_drum.brf`.
+
+**Steps:**
+
+1. Load and tokenize `children_s_piece.brf` via `BRLInputPipeline` +
+   `BrailleTokenizer` + `BrailleParser`, following the pattern of
+   `test_parse_simple_melody` (`tests/test_parser.py`).
+2. Write integration tests asserting:
+   - Exactly 2 staves, named `"right hand"` and `"left hand"`.
+   - Both staves have equal, correct measure numbers: `list(range(1, 42))`
+     (41 measures each, verified by running the parser, not guessed).
+   - The right-hand staff resolves to `\clef treble`; the left-hand staff
+     resolves to `\clef bass` (via `Staff._resolve_clef()`'s existing
+     octave heuristic — no explicit clef cells are expected in this
+     fixture).
+   - `score.to_lilypond()` produces a well-formed
+     `\new PianoStaff << \new Staff {...} \new Staff {...} >>` block
+     containing exactly two `\new Staff {` blocks and two
+     `\relative c' {` blocks.
+3. Do **not** assert zero warnings for this fixture — see the S5-4 Senior
+   note. Full-measure in-accord measures trigger pre-existing
+   `_validate_measure_beat_count` warnings unrelated to staff routing.
+4. Run `pytest tests/` before and after; verify no regressions.
+
+**Definition of Done:**
+- [x] `children_s_piece.brf` parses via the full pipeline (warnings allowed; see Senior note)
+- [x] Score has exactly 2 staves, named `"right hand"` / `"left hand"`
+- [x] Both staves have equal, correct measure counts and matching numbers at every position (1–41)
+- [x] Right-hand staff resolves to treble clef, left-hand to bass, via the existing heuristic
+- [x] `Score.to_lilypond()` output contains a well-formed `\new PianoStaff << \new Staff {...} \new Staff {...} >>` block
+- [x] All new integration tests pass
+- [x] `pytest tests/` passes with no regressions
+
+**Senior note:** This is the first fixture with real two-hand content. Two
+transcription gaps were found and corrected with the developer during S5-4
+(see that ticket's Senior note) — the fixture in its current state produces
+`_validate_measure_beat_count` warnings only from the pre-existing,
+out-of-scope in-accord duration-resolution limitation, not from anything in
+S5-4/S5-5's staff-routing logic.
 
 ---
 

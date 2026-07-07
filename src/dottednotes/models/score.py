@@ -20,12 +20,25 @@ class Score:
         """Return a complete LilyPond document string for this score.
 
         Uses \\relative c' mode (reference pitch = C4) for all staves.
-        Single-staff scores are wrapped directly; multi-staff scores
-        will be supported in a later sprint.
+        Single-staff scores are wrapped directly. Two staves (piano right
+        hand / left hand) are wrapped in a \\new PianoStaff grand staff, per
+        the LilyPond Notation Reference "Keyboard and other multi-staff
+        instruments" chapter. More than two staves is not yet supported.
         """
         version_line = f'\\version "{_LILYPOND_VERSION}"'
         if not self.staves:
             return version_line + '\n'
+
+        if len(self.staves) == 2:
+            lines = [version_line, '\\new PianoStaff <<']
+            for staff in self.staves:
+                lines.append('  \\new Staff {')
+                lines.append("    \\relative c' {")
+                lines.append(staff.to_lilypond(start_midi=_C4_MIDI))
+                lines.append('    }')
+                lines.append('  }')
+            lines.append('>>')
+            return '\n'.join(lines) + '\n'
 
         staff_content = self.staves[0].to_lilypond(start_midi=_C4_MIDI)
         lines = [

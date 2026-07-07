@@ -55,6 +55,7 @@ class SymbolCategory(Enum):
     CHORD_INDICATOR = auto()
     IN_ACCORD = auto()
     MEASURE_NUMBER = auto()
+    HAND_SIGN = auto()
     WORD_SIGN = auto()
     UNKNOWN = auto()
 
@@ -505,6 +506,38 @@ IN_ACCORD_CELLS: dict[str, str] = {
     '⠣⠜': 'full_measure',    # dots 1,2,6 + dots 3,4,5  — full-measure in-accord
     '⠐⠂': 'part_measure',    # dot 5      + dot 2        — part-measure in-accord
     '⠨⠅': 'measure_division', # dots 4,6   + dots 1,3    — measure division sign
+}
+
+# ---------------------------------------------------------------------------
+# Hand signs
+# Piano BANA scores mark each physical staff line (right hand / left hand)
+# with a 2-cell sign at the start of every line, so the parser can route each
+# line's measures to the correct staff without relying on indentation.
+#
+# Source: developer-confirmed directly (not derived from the BANA manual),
+# cross-checked mechanically against every one of the 45 measure lines in
+# tests/fixtures/children_s_piece.brf with zero exceptions.
+#
+#   Right hand: ASCII `.>` — dots 4,6   + dots 3,4,5 → U+2828 U+281C
+#   Left hand:  ASCII `_>` — dots 4,5,6 + dots 3,4,5 → U+2838 U+281C
+#
+# Overlap warning: both signs' first cell is also an OCTAVE_MARKS entry
+# elsewhere (⠨=octave 5, ⠸=octave 3), and both share their second cell (⠜)
+# with _CLEF_PREFIX in tokenizer.py. ⠨ additionally collides with the first
+# cell of IN_ACCORD_CELLS['⠨⠅'] (measure_division). All are disambiguated by
+# exact 2-character dict-key lookup, the same mechanism already used for
+# IN_ACCORD_CELLS vs. bare octave marks.
+#
+# Disambiguator: a dot-3 cell (END_WORD_SIGN, ⠄) immediately follows the hand
+# sign in the source whenever the very next real content cell contains dot 1,
+# 2, or 3 — verified with zero exceptions across the fixture. The tokenizer
+# does not predict this; it simply consumes a trailing END_WORD_SIGN after a
+# hand sign if present, emitting no token for it.
+# ---------------------------------------------------------------------------
+
+HAND_SIGN_CELLS: dict[str, str] = {
+    '⠨⠜': 'right',   # dots 4,6   + dots 3,4,5 — right-hand staff
+    '⠸⠜': 'left',    # dots 4,5,6 + dots 3,4,5 — left-hand staff
 }
 
 # ---------------------------------------------------------------------------
