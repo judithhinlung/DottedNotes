@@ -42,6 +42,16 @@ from ..models.tuplet import Tuplet
 from .tokenizer import BrailleToken
 
 
+class TripletDurationError(ValueError):
+    """Raised when a triplet group's notes/rests overshoot the group's
+    implied target duration (S5-9): 3x the smallest tripleted note
+    duration seen in the group (or, when a doubled-sign block contains an
+    ambiguous leader cell, 3x the smallest seen across the whole block).
+    This is treated as malformed BANA input, not something to silently
+    reinterpret or merely warn about.
+    """
+
+
 _STR_TO_ACCIDENTAL_TYPE: dict[str, AccidentalType] = {
     'sharp':   AccidentalType.SHARP,
     'flat':    AccidentalType.FLAT,
@@ -147,7 +157,12 @@ class _PendingNote:
     # Each tuple: (note_name, octave, accidental_or_None)
     interval_notes: list[tuple[str, int, Accidental | None]] = field(default_factory=list)
     dots: int = 0
-    is_triplet: bool = False  # S5-8: part of a single-cell triplet group (BANA 8.4)
+    is_triplet: bool = False  # S5-8/S5-9: part of a single-cell triplet group
+    # (BANA 8.4). Groups may mix note values (S5-9) — no longer necessarily
+    # 3 same-value notes.
+    triplet_group_end: bool = False  # S5-9: True on the last note/rest of
+    # its triplet group (the one whose duration completes the group's
+    # target); set during streaming by _apply_triplet_flag.
 
 
 @dataclass
@@ -156,7 +171,10 @@ class _PendingRest:
     base_duration: int   # 1, 2, or 4 from REST_CELLS
     raw_brl: str
     dots: int = 0
-    is_triplet: bool = False  # S5-8: part of a single-cell triplet group (BANA 8.4)
+    is_triplet: bool = False  # S5-8/S5-9: part of a single-cell triplet group
+    # (BANA 8.4). Groups may mix note values (S5-9) — no longer necessarily
+    # 3 same-value notes.
+    triplet_group_end: bool = False  # S5-9: see _PendingNote.triplet_group_end
 
 
 class BrailleParser:
@@ -218,6 +236,7 @@ class BrailleParser:
             elif token.category == SymbolCategory.HAND_SIGN:
                 self._current_hand = token.character
             elif token.category == SymbolCategory.BAR_LINE:
+                self._check_triplet_group_not_open_at_bar_line()
                 if pending:
                     bar_type = (
                         BAR_LINE_SEQUENCES.get(token.character)
@@ -283,6 +302,11 @@ class BrailleParser:
                 self._pending_triplet_signs += 1
             # UNKNOWN — handled in later tickets
 
+        # End-of-input is, for triplet-group purposes, an implicit final
+        # bar line (S5-9): a group left mid-flight here is just as
+        # malformed as one left mid-flight at a real bar line.
+        self._check_triplet_group_not_open_at_bar_line()
+
         # Finalize the last measure (no trailing blank cell required)
         if pending:
             active = left_staff if self._current_hand == 'left' else right_staff
@@ -337,29 +361,148 @@ class BrailleParser:
 
     def _commit_pending_triplet_signs(self) -> None:
         """Turn TRIPLET_INDICATOR tokens seen since the last note/rest into
-        triplet-group state (S5-8, BANA 8.4).
+        triplet-group state (S5-8/S5-9, BANA 8.4).
 
-        One sign starts a single 3-note group (self-closing). Two or more
-        (doubled sign) open an unbounded sequence of 3-note groups — see
-        _apply_triplet_flag, which auto-refills the group counter while
-        _triplet_open_ended is True. A later single sign closes that
-        sequence after one final group.
+        One sign starts a single group, closing once its duration target is
+        reached (S5-9 — see _register_triplet_item). Two or more (doubled
+        sign) open an unbounded sequence of groups: each time a group
+        closes, _apply_triplet_flag starts a fresh one while
+        _triplet_open_ended is True. A later single sign here flips
+        _triplet_open_ended back to False, so the *next* group to close is
+        the sequence's last one.
+
+        Any sign occurrence forces a fresh group (matching S5-8's original
+        behavior) — mid-group re-declaration of the sign isn't expected in
+        well-formed BANA input and isn't specially validated here.
         """
         if self._pending_triplet_signs <= 0:
             return
         self._triplet_open_ended = self._pending_triplet_signs >= 2
-        self._triplet_group_remaining = 3
+        self._triplet_active = True
+        self._triplet_run_active = False
+        self._triplet_group_total_ticks = 0
+        self._triplet_group_smallest_ticks = None
         self._pending_triplet_signs = 0
+
+    def _check_triplet_group_not_open_at_bar_line(self) -> None:
+        """Raise if a triplet group is mid-flight at a bar line (S5-9).
+
+        A doubled-sign *block* may span a bar line — one group can close
+        at the end of a measure and a fresh one start in the next, with no
+        repeated sign needed (developer-confirmed). But an individual
+        *group*'s own notes must complete within a single measure: a
+        group that has started accumulating (_triplet_group_total_ticks >
+        0) but hasn't yet reached its target duration when a bar line is
+        reached is malformed — e.g. a quarter note in one measure and an
+        eighth note in the next cannot combine into one eighth-note-
+        triplet group, even though three eighths in one measure followed
+        by three more in the next (two separate, self-contained groups)
+        is fine.
+        """
+        if self._triplet_group_total_ticks > 0:
+            raise TripletDurationError(
+                "Triplet group left incomplete at a bar line: "
+                f"{self._triplet_group_total_ticks} of "
+                f"{self._triplet_group_smallest_ticks * 3} ticks accumulated. "
+                "A triplet group's notes must complete within a single "
+                "measure — a doubled-sign block may continue with a fresh "
+                "group in the next measure, but one group cannot itself "
+                "span a bar line."
+            )
+
+    def _provisional_triplet_ticks(self, pnote: '_PendingNote | _PendingRest') -> int:
+        """Best-effort tripleted tick value for pnote at streaming time,
+        before _resolve_measure_durations' full measure-level ambiguity
+        resolution runs (S5-9). Used only to decide triplet group/block
+        closing; the authoritative Duration objects are still built later
+        from _resolve_measure_durations' output.
+
+        Within an active triplet context, a bare base_duration==1 cell is
+        always treated as the 16th-class leader shorthand (BANA 8.4/S5-8),
+        never a whole note — a whole-note triplet doesn't occur in
+        practice, and _resolve_measure_durations' run/individual state
+        machine already resolves a leader-then-base_8 sequence to 16ths the
+        same way, so this stays consistent with the final resolution.
+        """
+        if pnote.base_duration == 4:
+            value = 4
+        elif pnote.base_duration == 8:
+            value = 16 if self._triplet_run_active else 8
+        elif pnote.base_duration == 1:
+            value = 16
+        else:  # base_duration == 2
+            value = 2
+        return Duration(value=value, is_triplet=True).duration_in_ticks()
+
+    def _register_triplet_item(self, pnote: '_PendingNote | _PendingRest', ticks: int) -> None:
+        """Duration-based triplet group/block closing (S5-9).
+
+        Updates the running group and block accumulators, marks
+        pnote.triplet_group_end when the current group's target is
+        reached, and raises TripletDurationError if adding this item
+        overshoots that target (developer-confirmed: a hard error, not a
+        warning). See the _reset_state triplet comment for the block-wide
+        vs. per-group target rule.
+        """
+        was_ambiguous = pnote.base_duration in (1, 2)
+
+        self._triplet_group_total_ticks += ticks
+        self._triplet_group_smallest_ticks = (
+            ticks if self._triplet_group_smallest_ticks is None
+            else min(self._triplet_group_smallest_ticks, ticks)
+        )
+        self._triplet_block_smallest_ticks = (
+            ticks if self._triplet_block_smallest_ticks is None
+            else min(self._triplet_block_smallest_ticks, ticks)
+        )
+        if was_ambiguous:
+            self._triplet_block_has_ambiguous = True
+
+        smallest = (
+            self._triplet_block_smallest_ticks
+            if self._triplet_block_has_ambiguous
+            else self._triplet_group_smallest_ticks
+        )
+        target = smallest * 3
+
+        if self._triplet_group_total_ticks > target:
+            raise TripletDurationError(
+                "Triplet group overshoots its target duration: "
+                f"{self._triplet_group_total_ticks} ticks accumulated but "
+                f"the target is {target} (3x the smallest note value, "
+                f"{smallest} ticks, seen so far). Check for a missing "
+                "triplet sign or an extra note in this group."
+            )
+
+        if self._triplet_group_total_ticks == target:
+            pnote.triplet_group_end = True
+            self._triplet_group_total_ticks = 0
+            self._triplet_group_smallest_ticks = None
+            self._triplet_run_active = False
+            if not self._triplet_open_ended:
+                self._triplet_block_smallest_ticks = None
+                self._triplet_block_has_ambiguous = False
 
     def _apply_triplet_flag(self, pnote: '_PendingNote | _PendingRest') -> None:
         """Mark pnote as a triplet member if a triplet group is active,
-        auto-continuing into a fresh group when a doubled sign is open-ended."""
-        if self._triplet_group_remaining <= 0:
+        closing the group by duration (S5-9) and auto-continuing into a
+        fresh group when a doubled sign is open-ended."""
+        if not self._triplet_active:
             return
         pnote.is_triplet = True
-        self._triplet_group_remaining -= 1
-        if self._triplet_group_remaining == 0 and self._triplet_open_ended:
-            self._triplet_group_remaining = 3
+        ticks = self._provisional_triplet_ticks(pnote)
+        # Update leader/continuation tracking for the *next* item before
+        # registering this one — _register_triplet_item resets it to False
+        # on group closure, which must win over a same-note base_duration==1
+        # update (a note that closes its own group isn't a leader for
+        # whatever group starts after it).
+        if pnote.base_duration == 1:
+            self._triplet_run_active = True
+        elif pnote.base_duration != 8:
+            self._triplet_run_active = False
+        self._register_triplet_item(pnote, ticks)
+        if pnote.triplet_group_end and not self._triplet_open_ended:
+            self._triplet_active = False
 
     def _handle_accidental(self, token: BrailleToken) -> None:
         self._pending_accidental = Accidental(
@@ -839,29 +982,33 @@ class BrailleParser:
         return self._group_triplets(items, pending)
 
     def _group_triplets(self, items: list, pending: list[_PendingNote]) -> list:
-        """Wrap each run of 3 consecutive triplet-flagged items in a Tuplet
-        (S5-8). A doubled-sign's multiple groups are each exactly 3 items —
-        chunk in steps of 3 rather than treating a longer consecutive
-        triplet-flagged stretch as one big group."""
+        """Wrap each triplet group into a Tuplet (S5-8/S5-9).
+
+        Group boundaries were already decided at streaming time by
+        _apply_triplet_flag/_register_triplet_item (duration-based, S5-9)
+        and are marked via pending[i].triplet_group_end — this method just
+        chunks by those markers, so groups may contain any number of
+        notes/rests, not just 3.
+
+        Every group is expected to already be closed by the time this
+        runs: _check_triplet_group_not_open_at_bar_line raises before a
+        measure boundary (or end-of-input) is ever reached with a group
+        still mid-flight, since an individual group's notes must complete
+        within one measure (developer-confirmed — only a doubled-sign
+        *block* may span a bar line, via a fresh group starting clean in
+        the next measure, not a single group's own notes).
+        """
         result: list = []
-        i = 0
-        while i < len(items):
-            if pending[i].is_triplet:
-                group = items[i:i + 3]
-                pending_group = pending[i:i + 3]
-                if len(group) == 3 and all(p.is_triplet for p in pending_group):
-                    result.append(Tuplet(items=group))
-                else:
-                    warnings.warn(
-                        "Incomplete triplet group (expected 3 notes/rests); "
-                        "leaving remaining notes ungrouped.",
-                        stacklevel=2,
-                    )
-                    result.extend(group)
-                i += len(group)
-            else:
-                result.append(items[i])
-                i += 1
+        group_items: list = []
+        for item, pnote in zip(items, pending):
+            if not pnote.is_triplet:
+                result.append(item)
+                continue
+            group_items.append(item)
+            if pnote.triplet_group_end:
+                result.append(Tuplet(items=group_items))
+                group_items = []
+
         return result
 
     def _finalize_measure(
@@ -950,11 +1097,13 @@ class BrailleParser:
         22: a dotted-8th + a single 16th completes the beat; the following
         two notes are genuine 8ths, not a continuing run).
 
-        A RUN inside an active single-cell triplet group (S5-8, BANA 8.4)
-        ends after exactly 3 notes instead — a triplet's total duration
-        (e.g. 0.5 beat for a 16th-class triplet) doesn't always align to a
-        full-beat boundary, so the note-count-based closure is checked in
-        addition to (not instead of) the beat-tick closure above.
+        A RUN inside an active single-cell triplet group (S5-8/S5-9, BANA
+        8.4) ends when its triplet group closes instead — a triplet's total
+        duration (e.g. 0.5 beat for a 16th-class triplet) doesn't always
+        align to a full-beat boundary, so pending[i].triplet_group_end
+        (set during streaming by _apply_triplet_flag — S5-9's duration-
+        based closing, not a fixed note count) is checked in addition to
+        (not instead of) the beat-tick closure above.
 
         Half/32nd (base_duration 2): count_2 * 2 > beats → all 32nd.
         Quarter (base_duration 4): always quarter.
@@ -987,9 +1136,6 @@ class BrailleParser:
         # whenever it reaches a full beat. Lets a RUN account for beat
         # space already spent by whatever preceded its leader.
         beat_progress_ticks = 0
-        # Position within the current triplet group (S5-8): 1, 2, or 3.
-        # Only meaningful while pending[i].is_triplet is True.
-        triplet_position = 0
 
         for i, n in enumerate(pending):
             next_bd = pending[i + 1].base_duration if i + 1 < len(pending) else None
@@ -1027,12 +1173,8 @@ class BrailleParser:
                 value=resolved[i], dots=pending[i].dots, is_triplet=pending[i].is_triplet
             ).duration_in_ticks()
 
-            if pending[i].is_triplet:
-                triplet_position = (triplet_position + 1) % 3
-                if triplet_position == 0 and state == "run":
-                    state = "normal"  # triplet group complete — closes regardless of beat_progress_ticks
-            else:
-                triplet_position = 0
+            if pending[i].is_triplet and pending[i].triplet_group_end and state == "run":
+                state = "normal"  # triplet group complete — closes regardless of beat_progress_ticks
 
             if beat_progress_ticks >= TICKS_PER_QUARTER:
                 beat_progress_ticks %= TICKS_PER_QUARTER
@@ -1164,12 +1306,51 @@ class BrailleParser:
         # None (no hand sign seen yet) routes to the right-hand staff, so
         # single-staff files with no hand signs behave exactly as before.
         self._current_hand: str | None = None
-        # Triplet state (S5-8, BANA 8.4). _pending_triplet_signs counts
+        # Triplet state (S5-8/S5-9, BANA 8.4). _pending_triplet_signs counts
         # TRIPLET_INDICATOR tokens seen since the last note/rest was
         # buffered (1 = single sign, 2+ = doubled sign). _triplet_open_ended
         # is True while a doubled sign's unbounded sequence of groups is
-        # active. _triplet_group_remaining counts down the notes/rests still
-        # to be flagged in the current 3-note group.
+        # active. _triplet_active is True while notes/rests should be
+        # flagged is_triplet at all.
+        #
+        # S5-9 replaced note-counting with duration-based group closing: a
+        # group's target is 3x the smallest tripleted note-duration seen so
+        # far in that group (_triplet_group_smallest_ticks), except when a
+        # doubled-sign block contains an ambiguous leader cell
+        # (base_duration 1 or 2) — then every group in that block uses one
+        # fixed target, 3x the smallest tripleted duration seen anywhere in
+        # the block so far (_triplet_block_smallest_ticks), since a local
+        # per-group target isn't reliable until ambiguity is known. This is
+        # a running/eager approximation of "smallest in the whole block"
+        # (not a full retroactive recompute if a smaller note appears very
+        # late in a long block) — see _register_triplet_item.
+        #
+        # _triplet_run_active tracks the S2-4/S5-7 leader/continuation
+        # adjacency within the current group so a base_duration==8 cell
+        # right after a base_duration==1 leader is correctly treated as a
+        # 16th-class continuation for this provisional tick math, matching
+        # how _resolve_measure_durations will actually resolve it.
+        #
+        # This provisional math (done at streaming time, before full
+        # measure-level ambiguity resolution) doesn't know augmentation
+        # dots yet (dot cells follow the note they modify) or the
+        # measure-wide half/32nd overflow rule (S5-6) — known limitations,
+        # not expected to matter for realistic triplet content.
+        #
+        # A doubled-sign *block* may span a bar line — one group can close
+        # at the end of a measure and a fresh one start in the next with
+        # no repeated sign needed (developer-confirmed) — so this state is
+        # instance-level and persists across _finalize_measure calls. But
+        # an individual *group*'s own notes must complete within one
+        # measure: _check_triplet_group_not_open_at_bar_line raises if
+        # _triplet_group_total_ticks is still nonzero (a group mid-flight)
+        # at a bar line or end-of-input, so _group_triplets never actually
+        # needs to carry a group's items across a _finalize_measure call.
         self._pending_triplet_signs: int = 0
         self._triplet_open_ended: bool = False
-        self._triplet_group_remaining: int = 0
+        self._triplet_active: bool = False
+        self._triplet_run_active: bool = False
+        self._triplet_group_total_ticks: int = 0
+        self._triplet_group_smallest_ticks: int | None = None
+        self._triplet_block_smallest_ticks: int | None = None
+        self._triplet_block_has_ambiguous: bool = False

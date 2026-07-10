@@ -508,6 +508,101 @@ def test_triplet_to_lilypond_uses_tuplet_syntax():
     assert ly == r'\tuplet 3/2 { c8 d8 e8 }'
 
 
+# --- S5-9: mixed-value notes within triplet groups (BANA 8.4) ---
+
+
+def test_mixed_value_two_note_group_closes_by_duration_not_note_count():
+    from dottednotes.models.tuplet import Tuplet
+
+    # triplet sign, C quarter, D eighth, E eighth (plain, not under the sign)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠆⠹⠑⠋')
+    assert len(notes) == 2
+    tup = notes[0]
+    assert isinstance(tup, Tuplet)
+    assert [n.duration.value for n in tup.items] == [4, 8]
+    assert [n.duration.duration_in_ticks() for n in tup.items] == [16, 8]
+    assert sum(n.duration.duration_in_ticks() for n in tup.items) == 24
+    # The larger note's duration is twice the smaller note's (developer-
+    # confirmed two-note rule).
+    ticks = [n.duration.duration_in_ticks() for n in tup.items]
+    assert ticks[0] == 2 * ticks[1]
+    # The third note was never swept into the triplet — old note-counting
+    # would have incorrectly consumed it as the group's "third" member.
+    assert not isinstance(notes[1], Tuplet)
+    assert notes[1].note_name == 'E'
+    assert notes[1].duration.is_triplet is False
+    assert notes[1].duration.value == 8
+
+
+def test_triplet_overshoot_raises_hard_error():
+    from dottednotes.parser.braille_parser import TripletDurationError
+
+    # triplet sign, C eighth, D eighth, E quarter: 8+8=16 (target 24 so
+    # far), then +16 = 32, overshooting the target implied by the
+    # smallest note (8) — developer-confirmed this is a hard error.
+    with pytest.raises(TripletDurationError):
+        _parse('⠐⠆⠙⠑⠫')
+
+
+def test_undoubled_single_sign_uses_duration_based_closing_too():
+    # Developer-confirmed: duration-based closing applies to every triplet
+    # group, not just doubled-sign blocks — the quarter+eighth example
+    # itself was under a single (undoubled) sign.
+    from dottednotes.models.tuplet import Tuplet
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠆⠹⠑')  # triplet sign, C quarter, D eighth (no 3rd note)
+    assert len(notes) == 1
+    assert isinstance(notes[0], Tuplet)
+    assert len(notes[0].items) == 2
+
+
+def test_a_single_triplet_group_cannot_span_a_bar_line():
+    # Developer-confirmed: a triplet *group*'s own notes must complete
+    # within one measure. A quarter in one measure and an eighth in the
+    # next cannot combine into one eighth-note-triplet group, even though
+    # each alone is a valid partial duration.
+    from dottednotes.parser.braille_parser import TripletDurationError
+
+    tokens = BrailleTokenizer().tokenize('⠐⠆⠹⠀⠑')  # sign, C quarter | D eighth
+    with pytest.raises(TripletDurationError):
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_triplet_block_can_span_a_bar_line_via_separate_self_contained_groups():
+    # Developer-confirmed: a doubled-sign *block* may span a bar line —
+    # three eighths in one measure, then three more in the next, marked
+    # within one triplet block, is fine, because each group is complete
+    # within its own measure (unlike the quarter+eighth case above).
+    from dottednotes.models.tuplet import Tuplet
+
+    tokens = BrailleTokenizer().tokenize('⠐⠆⠆⠙⠑⠋⠀⠛⠓⠊')  # doubled sign, CDE | FGA
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    measures = score.staves[0].measures
+    assert len(measures) == 2
+    assert len(measures[0].notes) == 1
+    assert isinstance(measures[0].notes[0], Tuplet)
+    assert [n.note_name for n in measures[0].notes[0].items] == ['C', 'D', 'E']
+    assert len(measures[1].notes) == 1
+    assert isinstance(measures[1].notes[0], Tuplet)
+    assert [n.note_name for n in measures[1].notes[0].items] == ['F', 'G', 'A']
+
+
+def test_unclosed_triplet_group_at_end_of_input_raises():
+    # End-of-input is an implicit final bar line for this purpose: a group
+    # left mid-flight there is just as malformed as at a real bar line.
+    from dottednotes.parser.braille_parser import TripletDurationError
+
+    tokens = BrailleTokenizer().tokenize('⠐⠆⠹')  # sign, C quarter — never closes
+    with pytest.raises(TripletDurationError):
+        BrailleParser(tokens=tokens).parse()
+
+
 def test_input_pipeline_read(tmp_path: Path):
     brf = tmp_path / "sample.brf"
     brf.write_text("⠀⠼⠙⠲", encoding="utf-8")

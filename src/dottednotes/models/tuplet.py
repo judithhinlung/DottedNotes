@@ -5,15 +5,21 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Tuplet:
-    """A single-cell triplet grouping (BANA 8.4, S5-8): exactly 3 notes/rests
-    in the time of 2 of their written value.
+    """A single-cell triplet grouping (BANA 8.4, S5-8/S5-9): notes/rests
+    totaling the time of 2 of the group's smallest written value — 3 notes
+    of the same value (S5-8), or a variable-length mix of values (S5-9,
+    e.g. a quarter + an eighth in an eighth-note triplet) that reach the
+    same total duration.
 
     LilyPond renders the group's notes at their plain face value inside a
     \\tuplet wrapper, which performs the 2/3 timing scale for notation —
     the individual Note/Rest durations are unadjusted for output (only
     Duration.is_triplet / duration_in_ticks() adjusts internally, for our
-    own beat-accounting). Only the 3-in-the-time-of-2 ratio is supported
-    (BANA 8.5's three-/four-cell irregular-group sign is out of scope).
+    own beat-accounting). LilyPond's \\tuplet wraps an arbitrary music
+    expression (verified against the Notation Reference, S5-9) so no fixed
+    item count is required here. Only the 3-in-the-time-of-2 ratio is
+    supported (BANA 8.5's three-/four-cell irregular-group sign is out of
+    scope).
     """
 
     items: list = field(default_factory=list)
