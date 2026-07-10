@@ -23,6 +23,7 @@ from dottednotes.bana_symbols import (
     REST_CELLS,
     SLUR_CELLS,
     TIME_SIGNATURE_CELLS,
+    TRIPLET_INDICATOR,
     SymbolCategory,
 )
 from dottednotes.parser.input_pipeline import decode_literary_braille
@@ -451,4 +452,6 @@ class BrailleTokenizer:
             return SymbolCategory.INTERVAL
         if char == END_WORD_SIGN:
             return SymbolCategory.AUGMENTATION_DOT
+        if char == TRIPLET_INDICATOR:
+            return SymbolCategory.TRIPLET_INDICATOR
         return SymbolCategory.UNKNOWN

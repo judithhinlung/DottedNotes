@@ -28,7 +28,7 @@ from ..models.chord import Chord
 from ..models.in_accord import InAccord
 from ..models.articulation import Articulation, ArticulationType
 from ..models.clef import Clef, ClefType
-from ..models.duration import Duration
+from ..models.duration import Duration, TICKS_PER_QUARTER
 from ..models.dynamic import Dynamic, DynamicLevel
 from ..models.key_signature import KeySignature
 from ..models.measure import Measure
@@ -38,6 +38,7 @@ from ..models.score import Score
 from ..models.staff import Staff
 from ..models.text_marking import TEMPO_TERMS, TextMarking, TextMarkingType
 from ..models.time_signature import TimeSignature
+from ..models.tuplet import Tuplet
 from .tokenizer import BrailleToken
 
 
@@ -146,6 +147,7 @@ class _PendingNote:
     # Each tuple: (note_name, octave, accidental_or_None)
     interval_notes: list[tuple[str, int, Accidental | None]] = field(default_factory=list)
     dots: int = 0
+    is_triplet: bool = False  # S5-8: part of a single-cell triplet group (BANA 8.4)
 
 
 @dataclass
@@ -154,6 +156,7 @@ class _PendingRest:
     base_duration: int   # 1, 2, or 4 from REST_CELLS
     raw_brl: str
     dots: int = 0
+    is_triplet: bool = False  # S5-8: part of a single-cell triplet group (BANA 8.4)
 
 
 class BrailleParser:
@@ -209,7 +212,9 @@ class BrailleParser:
                             pending[-1].slur_start = True
                         self._pending_slur_end = True
                         self._last_token_was_slur = False
+                    self._commit_pending_triplet_signs()
                     pending.append(self._buffer_note(token))
+                    self._apply_triplet_flag(pending[-1])
             elif token.category == SymbolCategory.HAND_SIGN:
                 self._current_hand = token.character
             elif token.category == SymbolCategory.BAR_LINE:
@@ -258,7 +263,9 @@ class BrailleParser:
                 self._handle_in_accord(token, pending)
                 pending = []
             elif token.category == SymbolCategory.REST:
+                self._commit_pending_triplet_signs()
                 pending.append(self._buffer_rest(token))
+                self._apply_triplet_flag(pending[-1])
             elif token.category == SymbolCategory.MEASURE_NUMBER:
                 self._handle_measure_number(token)
             elif token.category == SymbolCategory.WORD_SIGN:
@@ -272,6 +279,8 @@ class BrailleParser:
                         "Augmentation dot with no preceding note or rest; ignoring.",
                         stacklevel=2,
                     )
+            elif token.category == SymbolCategory.TRIPLET_INDICATOR:
+                self._pending_triplet_signs += 1
             # UNKNOWN — handled in later tickets
 
         # Finalize the last measure (no trailing blank cell required)
@@ -325,6 +334,32 @@ class BrailleParser:
     def _handle_octave_mark(self, token: BrailleToken) -> None:
         self._current_octave = OCTAVE_MARKS[token.character]
         self._octave_mark_pending = True
+
+    def _commit_pending_triplet_signs(self) -> None:
+        """Turn TRIPLET_INDICATOR tokens seen since the last note/rest into
+        triplet-group state (S5-8, BANA 8.4).
+
+        One sign starts a single 3-note group (self-closing). Two or more
+        (doubled sign) open an unbounded sequence of 3-note groups — see
+        _apply_triplet_flag, which auto-refills the group counter while
+        _triplet_open_ended is True. A later single sign closes that
+        sequence after one final group.
+        """
+        if self._pending_triplet_signs <= 0:
+            return
+        self._triplet_open_ended = self._pending_triplet_signs >= 2
+        self._triplet_group_remaining = 3
+        self._pending_triplet_signs = 0
+
+    def _apply_triplet_flag(self, pnote: '_PendingNote | _PendingRest') -> None:
+        """Mark pnote as a triplet member if a triplet group is active,
+        auto-continuing into a fresh group when a doubled sign is open-ended."""
+        if self._triplet_group_remaining <= 0:
+            return
+        pnote.is_triplet = True
+        self._triplet_group_remaining -= 1
+        if self._triplet_group_remaining == 0 and self._triplet_open_ended:
+            self._triplet_group_remaining = 3
 
     def _handle_accidental(self, token: BrailleToken) -> None:
         self._pending_accidental = Accidental(
@@ -751,13 +786,14 @@ class BrailleParser:
         processed independently.
         """
         resolved = self._resolve_measure_durations(pending)
+        measure_ticks = round(self._time_signature.beats_per_measure() * TICKS_PER_QUARTER)
         items: list = []
         for pnote, dur_value in zip(pending, resolved):
-            dur = Duration(value=dur_value, dots=pnote.dots)
+            dur = Duration(value=dur_value, dots=pnote.dots, is_triplet=pnote.is_triplet)
             if isinstance(pnote, _PendingRest):
                 is_full = (
                     len(pending) == 1
-                    and dur.duration_in_beats() == self._time_signature.beats_per_measure()
+                    and dur.duration_in_ticks() == measure_ticks
                 )
                 items.append(Rest(
                     dots=frozenset(),
@@ -800,7 +836,33 @@ class BrailleParser:
                 items.append(Chord(notes=chord_notes))
             else:
                 items.append(written)
-        return items
+        return self._group_triplets(items, pending)
+
+    def _group_triplets(self, items: list, pending: list[_PendingNote]) -> list:
+        """Wrap each run of 3 consecutive triplet-flagged items in a Tuplet
+        (S5-8). A doubled-sign's multiple groups are each exactly 3 items —
+        chunk in steps of 3 rather than treating a longer consecutive
+        triplet-flagged stretch as one big group."""
+        result: list = []
+        i = 0
+        while i < len(items):
+            if pending[i].is_triplet:
+                group = items[i:i + 3]
+                pending_group = pending[i:i + 3]
+                if len(group) == 3 and all(p.is_triplet for p in pending_group):
+                    result.append(Tuplet(items=group))
+                else:
+                    warnings.warn(
+                        "Incomplete triplet group (expected 3 notes/rests); "
+                        "leaving remaining notes ungrouped.",
+                        stacklevel=2,
+                    )
+                    result.extend(group)
+                i += len(group)
+            else:
+                result.append(items[i])
+                i += 1
+        return result
 
     def _finalize_measure(
         self,
@@ -876,19 +938,23 @@ class BrailleParser:
         that follows them is a genuine 8th note, never a run continuation.
 
         A RUN ends once it completes the current beat (S5-7): a running
-        beat-position counter (reset to 0 whenever it reaches a whole
-        number) tracks how much of the current beat has been consumed,
-        including by whatever preceded the run's leader. Once a RUN cell
-        brings that counter to exactly 1.0, the run ends (state returns to
-        NORMAL) — a base_8 cell right after is a genuine 8th unless a fresh
-        base_1 leader starts a new run. This lets a run preceded by a
-        dotted note (which already consumed part of the beat) correctly
-        stop after fewer than 4 notes, matching BANA's actual grouping
-        (confirmed against children_s_piece.brf measure 22: a dotted-8th +
-        a single 16th completes the beat; the following two notes are
-        genuine 8ths, not a continuing run). Triplet (6-note) runs are not
-        handled here — Duration has no tuplet concept yet; see the S5-7
-        Senior note.
+        tick counter (reset to 0 whenever it reaches a full beat,
+        `TICKS_PER_QUARTER`) tracks how much of the current beat has been
+        consumed, including by whatever preceded the run's leader. Once a
+        RUN cell brings that counter to a full beat, the run ends (state
+        returns to NORMAL) — a base_8 cell right after is a genuine 8th
+        unless a fresh base_1 leader starts a new run. This lets a run
+        preceded by a dotted note (which already consumed part of the
+        beat) correctly stop after fewer than 4 notes, matching BANA's
+        actual grouping (confirmed against children_s_piece.brf measure
+        22: a dotted-8th + a single 16th completes the beat; the following
+        two notes are genuine 8ths, not a continuing run).
+
+        A RUN inside an active single-cell triplet group (S5-8, BANA 8.4)
+        ends after exactly 3 notes instead — a triplet's total duration
+        (e.g. 0.5 beat for a 16th-class triplet) doesn't always align to a
+        full-beat boundary, so the note-count-based closure is checked in
+        addition to (not instead of) the beat-tick closure above.
 
         Half/32nd (base_duration 2): count_2 * 2 > beats → all 32nd.
         Quarter (base_duration 4): always quarter.
@@ -900,10 +966,15 @@ class BrailleParser:
         dots) overflows, that cell is re-resolved as a 16th instead. This
         only affects standalone ambiguous cells — the run/individual
         adjacency detection above is unchanged.
+
+        All beat-budget math is done in integer ticks (S5-8,
+        TICKS_PER_QUARTER, quarter note = 24) rather than float beats, so
+        triplet thirds (and everything else) compare exactly — no
+        float-tolerance epsilon needed.
         """
-        beats = self._time_signature.beats_per_measure()
+        beats_ticks = round(self._time_signature.beats_per_measure() * TICKS_PER_QUARTER)
         count_2 = sum(1 for n in pending if n.base_duration == 2)
-        resolve_2 = 32 if count_2 * 2.0 > beats else 2
+        resolve_2 = 32 if count_2 * 2.0 > self._time_signature.beats_per_measure() else 2
 
         resolved = [0] * len(pending)
         state = "normal"  # "normal" | "run" | "individual"
@@ -912,11 +983,13 @@ class BrailleParser:
         # convention, so these are re-checked against the measure's beat
         # budget afterward (Bug B).
         whole_candidates: list[int] = []
-        # Fraction of the current beat consumed so far (S5-7); reset to 0
-        # whenever it reaches a whole number. Lets a RUN account for beat
+        # Ticks consumed so far in the current beat (S5-7); reset to 0
+        # whenever it reaches a full beat. Lets a RUN account for beat
         # space already spent by whatever preceded its leader.
-        beat_progress = 0.0
-        EPSILON = 1e-9
+        beat_progress_ticks = 0
+        # Position within the current triplet group (S5-8): 1, 2, or 3.
+        # Only meaningful while pending[i].is_triplet is True.
+        triplet_position = 0
 
         for i, n in enumerate(pending):
             next_bd = pending[i + 1].base_duration if i + 1 < len(pending) else None
@@ -950,53 +1023,70 @@ class BrailleParser:
                 resolved[i] = 4
                 state = "normal"
 
-            beat_progress += Duration(
-                value=resolved[i], dots=pending[i].dots
-            ).duration_in_beats()
-            if beat_progress >= 1.0 - EPSILON:
-                beat_progress %= 1.0
-                if beat_progress < EPSILON:
-                    beat_progress = 0.0
+            beat_progress_ticks += Duration(
+                value=resolved[i], dots=pending[i].dots, is_triplet=pending[i].is_triplet
+            ).duration_in_ticks()
+
+            if pending[i].is_triplet:
+                triplet_position = (triplet_position + 1) % 3
+                if triplet_position == 0 and state == "run":
+                    state = "normal"  # triplet group complete — closes regardless of beat_progress_ticks
+            else:
+                triplet_position = 0
+
+            if beat_progress_ticks >= TICKS_PER_QUARTER:
+                beat_progress_ticks %= TICKS_PER_QUARTER
                 if state == "run":
                     state = "normal"  # beat complete — a fresh leader is needed to continue
 
         if whole_candidates:
-            total = sum(
-                Duration(value=resolved[i], dots=pending[i].dots).duration_in_beats()
+            total_ticks = sum(
+                Duration(
+                    value=resolved[i], dots=pending[i].dots, is_triplet=pending[i].is_triplet
+                ).duration_in_ticks()
                 for i in range(len(pending))
             )
             for idx in whole_candidates:
-                if total <= beats:
+                if total_ticks <= beats_ticks:
                     break
                 # A whole note here would overflow the measure — it must
                 # actually be a 16th note (context-based disambiguation).
-                old = Duration(value=1, dots=pending[idx].dots).duration_in_beats()
-                new = Duration(value=16, dots=pending[idx].dots).duration_in_beats()
+                old_ticks = Duration(value=1, dots=pending[idx].dots).duration_in_ticks()
+                new_ticks = Duration(value=16, dots=pending[idx].dots).duration_in_ticks()
                 resolved[idx] = 16
-                total += new - old
+                total_ticks += new_ticks - old_ticks
 
         return resolved
 
     def _validate_measure_beat_count(self, measure: Measure) -> None:
-        """Warn (plain text) if resolved beat count doesn't match the time signature."""
-        beats_expected = self._time_signature.beats_per_measure()
-        beats_actual = 0.0
+        """Warn (plain text) if resolved beat count doesn't match the time signature.
+
+        Compares in integer ticks (S5-8, TICKS_PER_QUARTER) for an exact
+        match — no float-tolerance needed — but the warning message still
+        shows beat-equivalent numbers (ticks / TICKS_PER_QUARTER) since
+        that's the unit performers and the developer think in.
+        """
+        expected_ticks = round(self._time_signature.beats_per_measure() * TICKS_PER_QUARTER)
+        actual_ticks = 0
         for item in measure.notes:
             if isinstance(item, InAccord):
                 # An in-accord's voices all cover the same span (BANA 11.1/11.1.2
                 # require equal note value per side); use the longest voice so a
                 # malformed voice mismatch doesn't silently understate the count.
                 if item.parts:
-                    beats_actual += max(
-                        sum(n.duration.duration_in_beats() for n in part)
+                    actual_ticks += max(
+                        sum(n.duration.duration_in_ticks() for n in part)
                         for part in item.parts
                     )
+            elif isinstance(item, Tuplet):
+                actual_ticks += sum(sub.duration.duration_in_ticks() for sub in item.items)
             else:
-                beats_actual += item.duration.duration_in_beats()
-        if beats_actual != beats_expected:
+                actual_ticks += item.duration.duration_in_ticks()
+        if actual_ticks != expected_ticks:
             warnings.warn(
-                f"Measure {measure.number}: expected {beats_expected} beats "
-                f"but counted {beats_actual}. "
+                f"Measure {measure.number}: expected "
+                f"{expected_ticks / TICKS_PER_QUARTER} beats but counted "
+                f"{actual_ticks / TICKS_PER_QUARTER}. "
                 f"Check for notation ambiguity or missing/extra notes.",
                 stacklevel=2,
             )
@@ -1074,3 +1164,12 @@ class BrailleParser:
         # None (no hand sign seen yet) routes to the right-hand staff, so
         # single-staff files with no hand signs behave exactly as before.
         self._current_hand: str | None = None
+        # Triplet state (S5-8, BANA 8.4). _pending_triplet_signs counts
+        # TRIPLET_INDICATOR tokens seen since the last note/rest was
+        # buffered (1 = single sign, 2+ = doubled sign). _triplet_open_ended
+        # is True while a doubled sign's unbounded sequence of groups is
+        # active. _triplet_group_remaining counts down the notes/rests still
+        # to be flagged in the current 3-note group.
+        self._pending_triplet_signs: int = 0
+        self._triplet_open_ended: bool = False
+        self._triplet_group_remaining: int = 0

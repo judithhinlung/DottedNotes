@@ -85,28 +85,44 @@ def test_invalid_dot_count_raises():
         Duration(value=4, dots=3)
 
 
-def test_duration_in_beats_quarter():
-    assert Duration(value=4).duration_in_beats() == 1.0
+def test_duration_in_ticks_quarter():
+    assert Duration(value=4).duration_in_ticks() == 24
 
 
-def test_duration_in_beats_dotted_quarter():
-    assert Duration(value=4, dots=1).duration_in_beats() == 1.5
+def test_duration_in_ticks_dotted_quarter():
+    assert Duration(value=4, dots=1).duration_in_ticks() == 36
 
 
-def test_duration_in_beats_half():
-    assert Duration(value=2).duration_in_beats() == 2.0
+def test_duration_in_ticks_half():
+    assert Duration(value=2).duration_in_ticks() == 48
 
 
-def test_duration_in_beats_whole():
-    assert Duration(value=1).duration_in_beats() == 4.0
+def test_duration_in_ticks_whole():
+    assert Duration(value=1).duration_in_ticks() == 96
 
 
-def test_duration_in_beats_eighth():
-    assert Duration(value=8).duration_in_beats() == 0.5
+def test_duration_in_ticks_eighth():
+    assert Duration(value=8).duration_in_ticks() == 12
 
 
-def test_duration_in_beats_double_dotted():
-    assert Duration(value=4, dots=2).duration_in_beats() == 1.75
+def test_duration_in_ticks_double_dotted():
+    assert Duration(value=4, dots=2).duration_in_ticks() == 42
+
+
+def test_duration_in_ticks_sixteenth():
+    assert Duration(value=16).duration_in_ticks() == 6
+
+
+def test_duration_in_ticks_triplet_eighth():
+    assert Duration(value=8, is_triplet=True).duration_in_ticks() == 8
+
+
+def test_duration_in_ticks_triplet_quarter():
+    assert Duration(value=4, is_triplet=True).duration_in_ticks() == 16
+
+
+def test_duration_in_ticks_triplet_sixteenth():
+    assert Duration(value=16, is_triplet=True).duration_in_ticks() == 4
 
 
 def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None,

@@ -420,6 +420,94 @@ def test_standalone_whole_note_exactly_filling_measure_is_unaffected():
     assert not caught
 
 
+# --- S5-8: single-cell triplet sign (BANA 8.4) ---
+
+
+def test_tokenizer_classifies_triplet_indicator():
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠆')  # octave4, C quarter, triplet sign
+    assert tokens[-1].category == SymbolCategory.TRIPLET_INDICATOR
+    assert tokens[-1].character == '⠆'
+
+
+def test_eighth_triplet_totals_one_beat():
+    from dottednotes.models.tuplet import Tuplet
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠆⠙⠑⠋')  # triplet sign, C D E eighths
+    assert len(notes) == 1
+    tup = notes[0]
+    assert isinstance(tup, Tuplet)
+    assert [n.duration.value for n in tup.items] == [8, 8, 8]
+    assert all(n.duration.is_triplet for n in tup.items)
+    assert [n.duration.duration_in_ticks() for n in tup.items] == [8, 8, 8]
+    assert sum(n.duration.duration_in_ticks() for n in tup.items) == 24  # 1 beat
+
+
+def test_quarter_triplet_totals_two_beats():
+    from dottednotes.models.tuplet import Tuplet
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠆⠹⠫⠱')  # triplet sign, C E D quarters
+    tup = notes[0]
+    assert isinstance(tup, Tuplet)
+    assert [n.duration.value for n in tup.items] == [4, 4, 4]
+    assert [n.duration.duration_in_ticks() for n in tup.items] == [16, 16, 16]
+    assert sum(n.duration.duration_in_ticks() for n in tup.items) == 48  # 2 beats
+
+
+def test_16th_class_triplet_via_leader_and_continuations():
+    # A 16th-class triplet reuses the same leader (base_1) + continuation
+    # (base_8) cells as a normal run (S2-4/S5-7), but the group is exactly
+    # 3 notes long, not beat-bounded — the confirmed interaction from S5-8.
+    from dottednotes.models.tuplet import Tuplet
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠆⠷⠙⠑')  # triplet sign, G(ambiguous 16th) C D (continuations)
+    tup = notes[0]
+    assert isinstance(tup, Tuplet)
+    assert [n.duration.value for n in tup.items] == [16, 16, 16]
+    assert [n.duration.duration_in_ticks() for n in tup.items] == [4, 4, 4]
+    assert sum(n.duration.duration_in_ticks() for n in tup.items) == 12  # 0.5 beat
+
+
+def test_doubled_triplet_sign_opens_unbounded_groups_until_single_sign_closes():
+    # Doubled sign -> two auto-continuing groups of 3 (no repeated sign
+    # needed) -> a single sign marks the final group -> a plain note after
+    # that is not a triplet.
+    from dottednotes.models.tuplet import Tuplet
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠆⠆⠙⠑⠋⠛⠓⠊⠆⠚⠙⠑⠋')
+    assert len(notes) == 4
+    assert isinstance(notes[0], Tuplet)
+    assert [n.note_name for n in notes[0].items] == ['C', 'D', 'E']
+    assert isinstance(notes[1], Tuplet)
+    assert [n.note_name for n in notes[1].items] == ['F', 'G', 'A']
+    assert isinstance(notes[2], Tuplet)
+    assert [n.note_name for n in notes[2].items] == ['B', 'C', 'D']
+    assert all(n.duration.is_triplet for group in notes[:3] for n in group.items)
+    assert not isinstance(notes[3], Tuplet)
+    assert notes[3].note_name == 'E'
+    assert notes[3].duration.is_triplet is False
+    assert notes[3].duration.value == 8
+
+
+def test_triplet_to_lilypond_uses_tuplet_syntax():
+    from dottednotes.models.tuplet import Tuplet
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠆⠙⠑⠋')
+    tup = notes[0]
+    assert isinstance(tup, Tuplet)
+    ly, _ = tup.to_relative_lilypond(60)
+    assert ly == r'\tuplet 3/2 { c8 d8 e8 }'
+
+
 def test_input_pipeline_read(tmp_path: Path):
     brf = tmp_path / "sample.brf"
     brf.write_text("⠀⠼⠙⠲", encoding="utf-8")

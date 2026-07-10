@@ -3473,6 +3473,170 @@ them. Triplet/tuplet support (the "6 notes = 1 beat" case) needs a real
 
 ---
 
+### [ ] S5-8: Implement single-cell triplet sign (BANA 8.4)
+
+**Why:** `Duration` has no tuplet concept — a "16th" is hard-coded to 1/4
+beat, an "eighth" to 1/2 beat, etc. (flagged as a gap in S5-7's Senior
+note). Real braille music marks triplets (3 notes in the time of 2) with a
+dedicated single-cell sign, confirmed by fetching *Music Braille Code,
+2015* (BANA), Section 8.4, page 71:
+
+> "The single-cell sign is generally used to indicate a triplet of any
+> value. The sign may be doubled for four or more successive triplets of
+> the same value. The braille note-grouping procedure may be employed
+> when the notes of the triplet are all of the same value."
+
+**Confirmed dot pattern:** dots 2-3 (⠆, U+2806, ASCII `'2'` in
+`ASCII_TO_DOTS`) — confirmed directly by the developer, cross-referenced
+against `ASCII_TO_DOTS` in `input_pipeline.py`.
+
+**Scope boundary (per developer direction — no multi-cell groupings):**
+explicitly excludes BANA 8.5 / 8.5.1 / 8.5.2 (the three-/four-cell sign for
+irregular groups of any size other than three, including a three-cell
+sign used for a triplet nested within another irregular group) and 8.6's
+numeral-adding rule as it applies to that three-cell sign. Relevant from
+8.6: the single-cell sign itself never carries an explicit numeral ("the
+presence or absence of a print numeral is not shown in braille" for
+triplets using the single-cell sign) — unlike the three-cell sign, which
+always requires one. This means the tokenizer needs no numeral-cell
+lookahead for this sign.
+
+**Confirmed duration rule:** a triplet's three notes always total the
+duration of *two* notes of that face value — 3 eighth-note-shaped cells
+total 1 beat (not 1.5), 3 quarter-note-shaped cells total 2 beats, 3
+16th-note-shaped cells total 0.5 beat. (Standard 3-in-the-time-of-2
+tuplet math; developer-confirmed with these exact worked examples.)
+
+**Confirmed interaction with leader/continuation runs (S2-4/S5-7):** a
+triplet whose face value is 16th-class is written using the *same*
+ambiguous-leader (`base_duration==1`) + continuation (`base_duration==8`)
+cells as a normal run — e.g. a 16th-note-class leader followed by two
+`base_8` continuation cells are all three 16ths, and together form one
+triplet group. The difference from a normal run is the *termination
+condition*: a plain run (S5-7) ends when it completes a full beat (needing
+4 16ths); a triplet-context run always ends after exactly 3 notes,
+regardless of beat completion, since the triplet's total duration (0.5
+beat for 16th-class) is fixed by the triplet marker itself, not by the
+surrounding beat structure.
+
+**Confirmed doubled-sign semantics:** doubling the sign (writing it twice)
+opens an unbounded sequence of triplet groups — every subsequent group of
+three notes is a triplet, with no repeated sign needed between groups.
+This continues until a **single** (undoubled) sign appears; the three
+notes immediately following that single sign are the *final* triplet
+group, and triplet treatment ends after that group's third note (whether
+or not another sign follows immediately after).
+
+**Duration model change — integer ticks, not float beats:** to avoid
+float-rounding errors inherent to thirds (e.g. `1/3` isn't exact in binary
+floating point — the exact problem a triplet feature would otherwise hit),
+switch the duration model from `duration_in_beats()`'s current float
+(quarter = `1.0`) to an integer-tick system, matching MusicXML's
+`divisions` convention: **quarter note = 24 ticks.** Developer-confirmed
+values: 16th = 6, triplet-8th = 8, plain 8th = 12, quarter = 24 (so
+half=48, whole=96, 32nd=3, and augmentation dots scale as usual: dotted
+quarter=36, double-dotted quarter=42, dotted 8th=18, etc.). This is a
+cross-cutting change, not isolated to the new triplet code — every place
+that currently calls `duration_in_beats()` needs updating:
+- `models/duration.py`: add `TICKS_PER_QUARTER = 24`; replace (or add
+  alongside, to be decided during implementation)
+  `duration_in_beats()`'s float arithmetic with integer-tick arithmetic;
+  apply the triplet's ×2/3 factor here (always exact in ticks — e.g.
+  `12 * 2 // 3 == 8`, no rounding).
+- `parser/braille_parser.py`: `_resolve_measure_durations`'s S5-6
+  whole-note-overflow check and S5-7's `beat_progress` tracking both
+  currently use `duration_in_beats()` floats with an `EPSILON` tolerance
+  for equality checks — switching to integer ticks makes these exact
+  comparisons and **removes the need for `EPSILON` entirely**.
+  `_validate_measure_beat_count` also sums `duration_in_beats()`; needs
+  the same conversion. Decide (and confirm with the developer) whether its
+  warning message keeps showing beat-like numbers for readability (e.g.
+  `ticks / TICKS_PER_QUARTER`) or switches to showing ticks directly —
+  don't silently pick one.
+- `tests/test_models.py` and `tests/test_parser.py`: every existing
+  assertion on `duration_in_beats()` float values (e.g. `== 1.75`) needs
+  updating to the equivalent tick integer (e.g. `== 42`).
+
+**Known precision limitation (flagging, not blocking):** 24 ticks per
+quarter keeps every currently-used value/dot/triplet combination exact
+except double-dotted 16th (10.5), any dotted or double-dotted 32nd (4.5 /
+5.25), and 64th notes at all (1.5 undotted). None of these are currently
+produced by the resolver or exercised by any test (`base_duration==4`
+never resolves to 64th, and no existing test uses dots with 32nd/64th), so
+this doesn't block the current scope — but note it if 64th-note or
+heavily-dotted small-value support is ever added later; a higher
+resolution (e.g. 48 or 96 ticks/quarter) would be needed then.
+
+**Steps:**
+1. Add `SymbolCategory.TRIPLET_INDICATOR` and the confirmed cell (`⠆`,
+   dots 2-3) to `bana_symbols.py`.
+2. Add tokenizer classification for `⠆` (no numeral lookahead needed —
+   see Scope boundary).
+3. Add `TICKS_PER_QUARTER = 24` and integer-tick duration arithmetic to
+   `Duration` (`models/duration.py`), per "Duration model change" above.
+   Add `is_triplet: bool = False`, applying the confirmed ×2/3 factor.
+4. Update `to_lilypond()` to wrap triplet groups in LilyPond's tuplet
+   syntax — fetch the LilyPond Notation Reference's tuplet section first
+   (per `CLAUDE.md`) to confirm current syntax (e.g. `\tuplet 3/2 { ... }`)
+   before implementing.
+5. Update `_resolve_measure_durations` (Bug B / S5-6) and its
+   `beat_progress` tracking (S5-7) to use integer ticks instead of float
+   `duration_in_beats()` + `EPSILON`; update `_validate_measure_beat_count`
+   the same way (see the display-format question above — confirm before
+   implementing).
+6. In `BrailleParser`, when a `TRIPLET_INDICATOR` token appears: mark a
+   triplet context active. If doubled, it stays active across unlimited
+   groups of three until a single (undoubled) sign appears, whose
+   following three notes are the last group (see "Confirmed doubled-sign
+   semantics"). Within an active triplet context, the leader/continuation
+   adjacency rule (S2-4/S5-7) still determines *which* cells are 16ths,
+   but the group always closes after exactly 3 notes, not at beat
+   completion (see "Confirmed interaction with leader/continuation runs").
+   Apply the ×2/3 tick adjustment to all three notes/rests in each group.
+   Confirm with the developer how to handle a triplet whose three notes
+   are *not* all the same face value (8.4's note-grouping shorthand only
+   applies "when the notes of the triplet are all of the same value" — a
+   mixed-value triplet may need different handling; don't assume, ask).
+7. Write unit tests: tokenizer classifies `⠆` as `TRIPLET_INDICATOR`;
+   three eighth-notes marked as a triplet total exactly 24 ticks (1 beat),
+   each note 8 ticks; a triplet of quarters totals 48 ticks, each note 16
+   ticks; a 16th-class triplet (leader + 2 continuations) totals 12 ticks
+   (0.5 beat), each note 4 ticks; a doubled-sign passage of two triplet
+   groups followed by a single-sign final group correctly closes after
+   the single sign's third note; `to_lilypond()` output matches confirmed
+   LilyPond tuplet syntax; all existing `duration_in_beats()`-based tests
+   updated to ticks and still passing; `pytest tests/` passes with no
+   regressions.
+
+**Definition of Done:**
+- [ ] `TRIPLET_INDICATOR` category and `⠆` tokenizer classification added
+- [ ] `Duration` uses integer ticks (`TICKS_PER_QUARTER = 24`) throughout;
+      all call sites (`_resolve_measure_durations`, `beat_progress`,
+      `_validate_measure_beat_count`) converted from float beats to ticks;
+      `EPSILON`-based float comparisons removed
+- [ ] `Duration` supports the triplet ratio (×2/3, exact in ticks); both
+      `duration_in_beats()`/ticks method and `to_lilypond()` updated and
+      the latter verified against the LilyPond Notation Reference
+- [ ] `BrailleParser` correctly groups triplets (single and doubled-sign
+      multi-group forms) per the confirmed semantics above, reusing but
+      not duplicating the leader/continuation adjacency logic
+- [ ] Three-/four-cell irregular-group signs (BANA 8.5, 8.6) remain
+      unimplemented — explicitly out of scope for this ticket
+- [ ] All new and updated unit tests pass; `pytest tests/` passes with no
+      regressions
+
+**Senior note:** Scope is deliberately narrow per the developer's explicit
+direction: only the single-cell sign (BANA 8.4), covering triplets of any
+note *value* but always a 3-in-the-time-of-2 grouping. Three-/four-cell
+irregular-group signs (8.5) and nested/mixed-value irregular groupings are
+explicitly deferred — do not expand scope to cover them without a
+follow-up ticket. The integer-tick duration model is a prerequisite change
+touching already-shipped S5-6/S5-7 code, not an isolated addition — budget
+time accordingly and re-run the full suite after the conversion, before
+adding triplet-specific logic on top.
+
+---
+
 # Sprint 5b: Orchestral Score Support
 
 Estimated time: 1.5–2 weeks.

@@ -58,6 +58,7 @@ class SymbolCategory(Enum):
     HAND_SIGN = auto()
     WORD_SIGN = auto()
     AUGMENTATION_DOT = auto()
+    TRIPLET_INDICATOR = auto()
     UNKNOWN = auto()
 
 
@@ -318,6 +319,16 @@ BAR_LINE_SEQUENCES: dict[str, str] = {
 
 WORD_SIGN: str = '⠜'    # dots 3,4,5 = U+281C
 END_WORD_SIGN: str = '⠄' # dot 3     = U+2804
+
+# ---------------------------------------------------------------------------
+# Single-cell triplet sign (S5-8, BANA Music Braille Code 2015, Sec. 8.4)
+# Dots 2-3 (ASCII '2' in ASCII_TO_DOTS), developer-confirmed. Precedes a
+# triplet of any note value (3 notes in the time of 2). Doubled for four or
+# more successive triplets of the same value; see BrailleParser's triplet
+# state handling for the single-vs-doubled semantics.
+# ---------------------------------------------------------------------------
+
+TRIPLET_INDICATOR: str = '⠆'  # dots 2,3 = U+2806
 
 # ---------------------------------------------------------------------------
 # Dynamic cells

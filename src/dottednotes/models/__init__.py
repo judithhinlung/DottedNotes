@@ -14,6 +14,7 @@ from .score import Score
 from .staff import Staff
 from .text_marking import TextMarking, TextMarkingType, TEMPO_TERMS
 from .time_signature import TimeSignature, VALID_DENOMINATORS
+from .tuplet import Tuplet
 
 __all__ = [
     "Accidental",
@@ -44,5 +45,6 @@ __all__ = [
     "TextMarking",
     "TextMarkingType",
     "TimeSignature",
+    "Tuplet",
     "VALID_DENOMINATORS",
 ]
