@@ -32,6 +32,7 @@ from ..models.duration import Duration, TICKS_PER_QUARTER
 from ..models.dynamic import Dynamic, DynamicLevel
 from ..models.key_signature import KeySignature
 from ..models.measure import Measure
+from ..models.measure_repeat import MeasureRepeat
 from ..models.note import Note, Rest
 from ..models.ornament import GraceNote, Ornament, OrnamentType
 from ..models.score import Score
@@ -49,6 +50,16 @@ class TripletDurationError(ValueError):
     ambiguous leader cell, 3x the smallest seen across the whole block).
     This is treated as malformed BANA input, not something to silently
     reinterpret or merely warn about.
+    """
+
+
+class MeasureRepeatError(ValueError):
+    """Raised when a whole-measure repeat sign (S5b-2, BANA 18.2) has no
+    previous measure on the same staff to repeat. Per BANA 18.2.3(a), the
+    braille repeat sign may never represent the first measure of a
+    segment, section, or piece — there is nothing for it to expand to, so
+    this is malformed input rather than something to reinterpret or
+    silently drop.
     """
 
 
@@ -237,7 +248,7 @@ class BrailleParser:
                 self._current_hand = token.character
             elif token.category == SymbolCategory.BAR_LINE:
                 self._check_triplet_group_not_open_at_bar_line()
-                if pending:
+                if pending or self._pending_repeat_count > 0:
                     bar_type = (
                         BAR_LINE_SEQUENCES.get(token.character)
                         or BAR_LINE_CELLS.get(token.character, 'measure_separator')
@@ -248,6 +259,8 @@ class BrailleParser:
                             pending,
                             self._next_measure_number_for(active, right_staff, left_staff),
                             bar_type,
+                            staff=active,
+                            line=token.line,
                         )
                     )
                     pending = []
@@ -255,6 +268,10 @@ class BrailleParser:
                     if bar_type in ('final_double_bar', 'section_double_bar'):
                         self._active_intervals.clear()
                         self._last_interval_seen = None
+            elif token.category == SymbolCategory.REPEAT:
+                self._pending_repeat_count += 1
+                if self._pending_repeat_line is None:
+                    self._pending_repeat_line = token.line
             elif token.category == SymbolCategory.KEY_SIGNATURE:
                 self._handle_key_signature(token)
             elif token.category == SymbolCategory.TIME_SIGNATURE:
@@ -308,11 +325,14 @@ class BrailleParser:
         self._check_triplet_group_not_open_at_bar_line()
 
         # Finalize the last measure (no trailing blank cell required)
-        if pending:
+        if pending or self._pending_repeat_count > 0:
             active = left_staff if self._current_hand == 'left' else right_staff
             active.add_measure(
                 self._finalize_measure(
-                    pending, self._next_measure_number_for(active, right_staff, left_staff)
+                    pending,
+                    self._next_measure_number_for(active, right_staff, left_staff),
+                    staff=active,
+                    line=self._tokens[-1].line if self._tokens else 0,
                 )
             )
 
@@ -1016,10 +1036,17 @@ class BrailleParser:
         pending: list[_PendingNote],
         number: int,
         bar_line_type: str = 'measure_separator',
+        staff: Staff | None = None,
+        line: int = 0,
     ) -> Measure:
         text_markings = list(self._pending_text_markings)
         self._pending_text_markings = []
-        measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings)
+        measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings, line=line)
+
+        if self._pending_repeat_count > 0:
+            self._finalize_repeat_measure(measure, pending, staff)
+            self._validate_measure_beat_count(measure)
+            return measure
 
         if self._in_accord_sections or self._current_section_parts:
             # Part-measure in-accord (BANA 11.1.2): close the final section
@@ -1052,6 +1079,48 @@ class BrailleParser:
 
         self._validate_measure_beat_count(measure)
         return measure
+
+    def _finalize_repeat_measure(
+        self,
+        measure: Measure,
+        pending: list[_PendingNote],
+        staff: Staff | None,
+    ) -> None:
+        """Populate `measure` from a measure/part-measure repeat sign (S5b-2,
+        BANA Table 18, Pars. 18.1-18.4), consuming and clearing the pending
+        repeat-sign count/line tracked on `self`.
+
+        Whole-measure repeat (18.2): `pending` is empty — the repeat
+        sign(s) are this measure's entire content. Each occurrence repeats
+        the previous measure *on the same staff* once (18.2.1), so `count`
+        signs expand to `count` copies of the previous measure's notes.
+
+        Part-measure repeat (18.3): `pending` holds the material already
+        written before the sign(s) — the original statement, kept once —
+        and each sign repeats that same material again (18.3.1), so
+        `count` signs add `count` further copies after it.
+        """
+        repeat = MeasureRepeat(count=self._pending_repeat_count, line=self._pending_repeat_line)
+        self._pending_repeat_count = 0
+        self._pending_repeat_line = None
+
+        if not pending:
+            if staff is None or not staff.measures:
+                raise MeasureRepeatError(
+                    f"Measure {measure.number}: whole-measure repeat sign has "
+                    "no previous measure on this staff to repeat. BANA "
+                    "18.2.3(a): the repeat sign may never represent the "
+                    "first measure of a segment, section, or piece."
+                )
+            previous = staff.measures[-1]
+            for item in repeat.expand(previous.notes, source_line=previous.line):
+                measure.add_note(item)
+        else:
+            original_items = self._finalize_voice_part(pending)
+            for item in original_items:
+                measure.add_note(item)
+            for item in repeat.expand(original_items):
+                measure.add_note(item)
 
     def _resolve_measure_durations(
         self, pending: list[_PendingNote]
@@ -1306,6 +1375,11 @@ class BrailleParser:
         # None (no hand sign seen yet) routes to the right-hand staff, so
         # single-staff files with no hand signs behave exactly as before.
         self._current_hand: str | None = None
+        # Measure repeat state (S5b-2, BANA Table 18). Counts consecutive
+        # REPEAT tokens seen since the last bar line; 0 means no repeat
+        # sign is pending for the measure currently being buffered.
+        self._pending_repeat_count: int = 0
+        self._pending_repeat_line: int | None = None
         # Triplet state (S5-8/S5-9, BANA 8.4). _pending_triplet_signs counts
         # TRIPLET_INDICATOR tokens seen since the last note/rest was
         # buffered (1 = single sign, 2+ = doubled sign). _triplet_open_ended

@@ -298,6 +298,24 @@ BAR_LINE_SEQUENCES: dict[str, str] = {
 }
 
 # ---------------------------------------------------------------------------
+# Measure repeat sign (S5b-2, BANA Music Braille Code 2015, Table 18 / Pars.
+# 18.1-18.4, ASCII '7' — dots 2,3,5,6 — confirmed by developer).
+#
+# A bare cell means "repeat the immediately preceding measure or part of a
+# measure" (Par. 18.1). It is context-sensitive, same as several other cells
+# in this module:
+#   - Preceded by the bar-line prefix ⠣, it forms ⠣⠶ (forward_repeat, a
+#     BAR_LINE_SEQUENCES entry) instead — that 2-cell lookahead already runs
+#     before a bare ⠶ would be classified, so there is no tokenizer conflict.
+#   - The same cell is LOWER_DIGIT_CELLS['⠶'] = 7, but that table is only
+#     consulted by the separate §33.2 instrument-list parser
+#     (parser/instrument_list.py), never by BrailleTokenizer, so there is no
+#     runtime ambiguity either.
+# ---------------------------------------------------------------------------
+
+MEASURE_REPEAT_CELL: str = '⠶'  # dots 2,3,5,6 = U+2836
+
+# ---------------------------------------------------------------------------
 # Articulation cells
 # All articulations are 2-cell sequences whose second cell is ⠦ (dots 2,3,6),
 # except staccato (single cell ⠦) and swell (⠤⠄).

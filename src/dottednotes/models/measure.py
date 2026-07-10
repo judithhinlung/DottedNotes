@@ -31,6 +31,11 @@ class Measure:
     clef: str = "treble"
     bar_line_type: str = 'measure_separator'
     text_markings: list[TextMarking] = field(default_factory=list)
+    # Braille line this measure's closing bar line was read from. Used only
+    # to validate BANA 33.4.3's same-braille-line requirement when a
+    # following measure is a whole-measure repeat (S5b-2). 0 = not tracked
+    # (e.g. measures built directly in tests, not through BrailleParser).
+    line: int = 0
 
     def add_note(self, note: MeasureItem) -> None:
         self.notes.append(note)

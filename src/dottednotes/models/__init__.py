@@ -9,6 +9,7 @@ from .in_accord import InAccord
 from .instrument import InstrumentInfo
 from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
+from .measure_repeat import MeasureRepeat
 from .note import Note, Rest
 from .ornament import GraceNote, Ornament, OrnamentType, ORNAMENT_TO_LILYPOND
 from .score import Score
@@ -35,6 +36,7 @@ __all__ = [
     "KEY_TO_LILYPOND",
     "KeySignature",
     "Measure",
+    "MeasureRepeat",
     "Note",
     "Rest",
     "GraceNote",

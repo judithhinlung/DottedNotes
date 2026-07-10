@@ -17,6 +17,7 @@ from dottednotes.bana_symbols import (
     LITERARY_DIGITS,
     KEY_SIGNATURE_CELLS,
     LITERARY_PERIOD,
+    MEASURE_REPEAT_CELL,
     NOTE_CELLS,
     OCTAVE_MARKS,
     ORNAMENT_CELLS,
@@ -454,4 +455,6 @@ class BrailleTokenizer:
             return SymbolCategory.AUGMENTATION_DOT
         if char == TRIPLET_INDICATOR:
             return SymbolCategory.TRIPLET_INDICATOR
+        if char == MEASURE_REPEAT_CELL:
+            return SymbolCategory.REPEAT
         return SymbolCategory.UNKNOWN

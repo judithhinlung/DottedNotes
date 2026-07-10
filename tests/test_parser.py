@@ -764,8 +764,8 @@ def test_tokenizer_unknown_cell():
 
 def test_tokenizer_unknown_does_not_raise():
     # Any unrecognized cell must produce UNKNOWN, never raise.
-    # ⠶ (dots 2,3,5,6) is not in any symbol table.
-    tokens = BrailleTokenizer().tokenize('⠶')
+    # ⠭ (dots 1,3,4,6) is not in any symbol table.
+    tokens = BrailleTokenizer().tokenize('⠭')
     assert len(tokens) == 1
     assert tokens[0].category == SymbolCategory.UNKNOWN
 
@@ -945,6 +945,52 @@ def test_bar_line_sequences_dict_has_all_four_types():
     assert 'final_double_bar' in BAR_LINE_SEQUENCES.values()
     assert 'forward_repeat' in BAR_LINE_SEQUENCES.values()
     assert 'end_repeat' in BAR_LINE_SEQUENCES.values()
+
+
+# --- S5b-2: measure repeat (BANA Table 18, dots 2,3,5,6) ---
+
+def test_tokenizer_classifies_measure_repeat_sign():
+    tokens = BrailleTokenizer().tokenize('⠶')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.REPEAT
+
+
+def test_whole_measure_repeat_expands_previous_measure():
+    # octave4, C D E F quarters (one full 4/4 measure), bar, single repeat sign
+    measures = _parse_measures('⠐⠹⠱⠫⠻⠀⠶')
+    assert [n.note_name for n in measures[1].notes] == ['C', 'D', 'E', 'F']
+    assert [n.duration.value for n in measures[1].notes] == [4, 4, 4, 4]
+    # A materialized copy, not the same objects as the original measure.
+    assert measures[1].notes[0] is not measures[0].notes[0]
+
+
+def test_whole_measure_repeat_sign_twice_duplicates_original_twice():
+    # Two repeat signs together in the same measure: each one independently
+    # repeats the *original* previous measure (BANA 18.2.1), not a cascading
+    # repeat-of-a-repeat, so this is 2 copies of the 4-note original (8
+    # notes), not a growing chain.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # 8 beats in a 4/4 measure — expected here
+        measures = _parse_measures('⠐⠹⠱⠫⠻⠀⠶⠶')
+    assert [n.note_name for n in measures[1].notes] == \
+        ['C', 'D', 'E', 'F', 'C', 'D', 'E', 'F']
+
+
+def test_part_measure_repeat_three_signs_totals_four_statements():
+    # octave4, C8 D8 (1 beat) + 3 repeat signs, default 4/4: the pair is
+    # played a total of 4 times (original + 3 repeats) to fill 4 beats.
+    notes = _parse('⠐⠙⠑⠶⠶⠶')
+    assert [n.note_name for n in notes] == ['C', 'D'] * 4
+    assert all(n.duration.value == 8 for n in notes)
+    assert len(notes) == 8
+
+
+def test_whole_measure_repeat_with_no_previous_measure_raises():
+    from dottednotes.parser.braille_parser import MeasureRepeatError
+
+    tokens = BrailleTokenizer().tokenize('⠶')
+    with pytest.raises(MeasureRepeatError):
+        BrailleParser(tokens=tokens).parse()
 
 
 # --- S2-6: integration test — parse simple_melody.brf ---
