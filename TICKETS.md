@@ -3849,7 +3849,7 @@ implementing" rule. Section/page citations below refer to this edition.
   ground-truth test case in the suite"). Its inline part abbreviations
   (`>VNI'`, `>VNII'`, `>VA'`, `>VC'`, `>BA'`) already match Table 29(A)'s
   Violin I / Violin II / Viola / Violoncello / Double bass entries.
-- `Bartok_Romanian_Folk_Dances_orch_named.brf` — full orchestra, has a
+- `Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl` — full orchestra, has a
   literal §33.2 instrument-list header (Piccolo, Flutes I/II, Clarinets
   I/II in B-flat, Bassoons I/II, Horns in F I/II, Violins I, Violins II,
   Violas, Violoncellos, Double Basses) — not developer-verified, useful as
@@ -4327,9 +4327,10 @@ brf` grounded S5-6/S5-7's regression tests.
 
 **Fixture status (per `tests/fixtures/README.md`):** only
 `fengyang_flower_drum.brf` is developer-verified ground truth for this
-sprint. `Bartok_Romanian_Folk_Dances_orch_named.brf`, `Beethoven_Ludwig_
-Van_String_Quartet_No_1-1.brf`, and `Faure_Gabriel_Morceau_de_Concours.
-brf` are real-world scores from IMSLP/braillemuse.net but **not**
+sprint. `Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl` (auto-transcribed
+by Sao Mai Braille software), `Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf`,
+and `Faure_Gabriel_Morceau_de_Concours.brf` (both from IMSLP/braillemuse.net)
+are real-world scores but **not**
 developer-verified — same status Beethoven/Fauré already have in S5-6/
 S5-7's Senior notes for the solo-piano sprints. Treat them as smoke-test/
 warning-count-tracking fixtures only, not exact-output assertions, unless
