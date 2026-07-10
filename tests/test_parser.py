@@ -3,9 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory
+from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory, TABLE_29_ENGLISH
 from dottednotes.models import Articulation, ArticulationType, Clef, ClefType, Dynamic, DynamicLevel, KeySignature, Ornament, OrnamentType, Score, TimeSignature
-from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline
+from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline, parse_instrument_list, resolve_abbreviation
+from dottednotes.parser.instrument_list import _decode_abbreviation
 
 
 def test_braille_parser_returns_score():
@@ -3841,3 +3842,110 @@ def test_16th_run_without_fresh_leader_does_not_continue_past_a_beat():
         warnings.simplefilter("ignore")
         notes = _parse('⠐⠽⠙⠙⠙⠙⠙⠙⠙')  # 1 leader + 7 continuations
     assert [n.duration.value for n in notes] == [16, 16, 16, 16, 8, 8, 8, 8]
+
+
+# ---------------------------------------------------------------------------
+# S5b-1: instrument abbreviation lookup table and §33.2 header parsing
+# ---------------------------------------------------------------------------
+
+def test_table_29_english_matches_bana_manual():
+    # Spot-check against Music_Braille_Code_2015.pdf Table 29(A), p.28.
+    assert TABLE_29_ENGLISH['Flute'] == 'fl'
+    assert TABLE_29_ENGLISH['Violin I'] == 'v1'
+    assert TABLE_29_ENGLISH['Violin II'] == 'v2'
+    assert TABLE_29_ENGLISH['Viola'] == 'vl'
+    assert TABLE_29_ENGLISH['Violoncello'] == 'vc'
+    assert TABLE_29_ENGLISH['Double bass'] == 'db'
+    assert TABLE_29_ENGLISH['Bassoon'] == 'b'
+
+
+def test_decode_abbreviation_simple():
+    # "fl" — no §33.2.2 numbering.
+    cells = BRLInputPipeline()._ascii_to_unicode('FL')
+    assert _decode_abbreviation(cells) == ('fl', None, None)
+
+
+def test_decode_abbreviation_with_part_number():
+    # "v1" — Violin I, §33.2.2 lower-cell numbering digit.
+    cells = BRLInputPipeline()._ascii_to_unicode('V1')
+    assert _decode_abbreviation(cells) == ('v', '1', None)
+
+
+def test_decode_abbreviation_with_sub_number():
+    # "v1a" — a further-divided part (e.g. "Violins I-1"), §33.2.2's
+    # upper-cell digit after the lower-cell part number.
+    cells = BRLInputPipeline()._ascii_to_unicode('V1A')
+    assert _decode_abbreviation(cells) == ('v', '1', '1')
+
+
+def test_parse_instrument_list_synthetic():
+    pipeline = BRLInputPipeline()
+    raw = (
+        ',GLOCKENSPIEL """"""  >GLO\'\n'
+        ",VIOLIN ,I    >V1'\n"
+        ",VIOLIN ,,II  >V2'\n"
+    )
+    text = pipeline._ascii_to_unicode(raw)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        entries = parse_instrument_list(text)
+    assert [e.name for e in entries] == ['Glockenspiel', 'Violin I', 'Violin II']
+    assert [e.abbreviation for e in entries] == ['glo', 'v', 'v']
+    assert [e.part_number for e in entries] == [None, '1', '2']
+    # Glockenspiel isn't in Table 29 (transcriber-devised abbreviation, §33.2.1)
+    # so no mismatch check applies to it; the Violin I/II entries match exactly.
+    assert caught == []
+
+
+def test_parse_instrument_list_warns_on_table_29_mismatch():
+    pipeline = BRLInputPipeline()
+    raw = ',FLUTE """""  >FLT\'\n'  # wrong abbreviation for a Table 29 instrument
+    text = pipeline._ascii_to_unicode(raw)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        entries = parse_instrument_list(text)
+    assert entries[0].abbreviation == 'flt'
+    assert any("does not match Table 29" in str(w.message) for w in caught)
+
+
+def test_parse_instrument_list_skips_non_header_lines():
+    pipeline = BRLInputPipeline()
+    raw = (
+        "             ,FENGYANG ,FLOWER ,DRUM\n"
+        ',FLUTE """""  >FL\'\n'
+        "              ALLEGRO <<<#D4\n"
+    )
+    text = pipeline._ascii_to_unicode(raw)
+    entries = parse_instrument_list(text)
+    # The title and tempo lines have no WORD_SIGN...END_WORD_SIGN abbreviation
+    # and are skipped rather than misparsed.
+    assert [e.name for e in entries] == ['Flute']
+
+
+def test_parse_instrument_list_fengyang_real_header():
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'fengyang_flower_drum.brf')
+    header_lines = text.splitlines()[1:7]  # instrument-list block: title above, tempo below
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        entries = parse_instrument_list('\n'.join(header_lines))
+    assert [e.name for e in entries] == [
+        'Flute', 'Violin I', 'Violin II', 'Viola', 'Violoncello', 'Double bass',
+    ]
+    assert [e.abbreviation for e in entries] == ['fl', 'v', 'v', 'vl', 'vc', 'db']
+    assert [e.part_number for e in entries] == [None, '1', '2', None, None, None]
+    # Every entry's own abbreviation matches Table 29(A) exactly.
+    assert caught == []
+
+
+def test_resolve_abbreviation_table_29():
+    assert resolve_abbreviation('Flute') == 'fl'
+
+
+def test_resolve_abbreviation_override():
+    assert resolve_abbreviation('Glockenspiel', overrides={'Glockenspiel': 'glo'}) == 'glo'
+
+
+def test_resolve_abbreviation_raises_without_override():
+    with pytest.raises(ValueError, match="Glockenspiel"):
+        resolve_abbreviation('Glockenspiel')

@@ -3382,7 +3382,7 @@ that reasoning in mind if extending this further.
 
 ---
 
-### [ ] S5-7: Fix 16th-note run state not resetting at beat boundaries
+### [x] S5-7: Fix 16th-note run state not resetting at beat boundaries
 
 **Why:** While validating S5-6's beat-budget fix, a scan of every 16th-note
 run resolved by `_resolve_measure_durations` across all `.brf` fixtures
@@ -3454,14 +3454,14 @@ the run/individual adjacency detection itself is otherwise unchanged.
    actually *improved* (79 → 58).
 
 **Definition of Done:**
-- [ ] `children_s_piece.brf` measure 22 (left hand) resolves to
+- [x] `children_s_piece.brf` measure 22 (left hand) resolves to
       `[8, 16, 8, 8, 4]`; the fixture's last remaining
       `_validate_measure_beat_count` warning (from S5-6) is gone
-- [ ] Developer has confirmed the general multi-beat grouping rule before
+- [x] Developer has confirmed the general multi-beat grouping rule before
       it's applied beyond the `children_s_piece.brf` case
-- [ ] `_resolve_measure_durations` resets 16th-note runs at the confirmed
+- [x] `_resolve_measure_durations` resets 16th-note runs at the confirmed
       boundary instead of running unbounded
-- [ ] All new unit tests pass; `pytest tests/` passes with no regressions
+- [x] All new unit tests pass; `pytest tests/` passes with no regressions
 - [ ] `children_s_piece.brf` re-scan shows zero anomalous run lengths
 
 **Senior note:** The core defect is now confirmed with real developer
@@ -3473,7 +3473,7 @@ them. Triplet/tuplet support (the "6 notes = 1 beat" case) needs a real
 
 ---
 
-### [ ] S5-8: Implement single-cell triplet sign (BANA 8.4)
+### [x] S5-8: Implement single-cell triplet sign (BANA 8.4)
 
 **Why:** `Duration` has no tuplet concept — a "16th" is hard-coded to 1/4
 beat, an "eighth" to 1/2 beat, etc. (flagged as a gap in S5-7's Senior
@@ -3609,20 +3609,20 @@ resolution (e.g. 48 or 96 ticks/quarter) would be needed then.
    regressions.
 
 **Definition of Done:**
-- [ ] `TRIPLET_INDICATOR` category and `⠆` tokenizer classification added
-- [ ] `Duration` uses integer ticks (`TICKS_PER_QUARTER = 24`) throughout;
+- [x] `TRIPLET_INDICATOR` category and `⠆` tokenizer classification added
+- [x] `Duration` uses integer ticks (`TICKS_PER_QUARTER = 24`) throughout;
       all call sites (`_resolve_measure_durations`, `beat_progress`,
       `_validate_measure_beat_count`) converted from float beats to ticks;
       `EPSILON`-based float comparisons removed
-- [ ] `Duration` supports the triplet ratio (×2/3, exact in ticks); both
+- [x] `Duration` supports the triplet ratio (×2/3, exact in ticks); both
       `duration_in_beats()`/ticks method and `to_lilypond()` updated and
       the latter verified against the LilyPond Notation Reference
-- [ ] `BrailleParser` correctly groups triplets (single and doubled-sign
+- [x] `BrailleParser` correctly groups triplets (single and doubled-sign
       multi-group forms) per the confirmed semantics above, reusing but
       not duplicating the leader/continuation adjacency logic
-- [ ] Three-/four-cell irregular-group signs (BANA 8.5, 8.6) remain
+- [x] Three-/four-cell irregular-group signs (BANA 8.5, 8.6) remain
       unimplemented — explicitly out of scope for this ticket
-- [ ] All new and updated unit tests pass; `pytest tests/` passes with no
+- [x] All new and updated unit tests pass; `pytest tests/` passes with no
       regressions
 
 **Senior note:** Scope is deliberately narrow per the developer's explicit
@@ -3637,20 +3637,734 @@ adding triplet-specific logic on top.
 
 ---
 
+### [x] S5-9: Support mixed-value notes within triplet groups (extends S5-8, BANA 8.4)
+
+**Why:** S5-8 implemented the single-cell triplet sign but explicitly
+deferred one question: "Confirm with the developer how to handle a triplet
+whose three notes are not all the same face value... don't assume, ask"
+(see S5-8 Step 6). Today `_apply_triplet_flag`/`_triplet_group_remaining`
+(`braille_parser.py` ~338-362) closes every group after exactly 3 notes
+with no duration tracking at all — that only works for BANA 8.4's
+"same value" case. This ticket answers the deferred question: groups can
+mix note values (e.g. a quarter + an eighth inside an eighth-note
+triplet), so completion must be tracked by cumulative duration instead of
+note count.
+
+**Confirmed tick model:** Reuses S5-8's existing `TICKS_PER_QUARTER = 24`
+and the `×2/3` triplet factor in `Duration.duration_in_ticks()`
+(`duration.py` ~47-48) unchanged — no new tick constant. A tripleted
+quarter is 16 ticks, a tripleted eighth is 8 ticks, matching what the code
+already produces for `is_triplet=True`.
+
+**Confirmed two-note rule:** in a 2-note group, the larger note's duration
+is twice the smaller note's tripleted duration (quarter = 2×8 = 16), and
+the group's total is 3× the smaller note's duration (3×8 = 24 — a full
+eighth-note-triplet beat). Worked example: quarter(16) + eighth(8) = 24,
+matching a plain 3-eighth triplet's total.
+
+**Confirmed general group-closing rule:** target = 3× the smallest
+tripleted note-duration seen so far in the *current* group (recomputed as
+new notes arrive); the group closes once the running total reaches that
+target. This applies to every triplet group, single (undoubled) sign or
+doubled-sign block alike — developer-confirmed the quarter+eighth example
+was not under a doubled sign. This replaces `_triplet_group_remaining`'s
+current always-exactly-3-notes closing entirely, not just for doubled-sign
+blocks. No fixed upper bound on group size: as many notes as it takes to
+reach the target.
+
+**Confirmed overshoot handling:** if adding a note would push the running
+total past the target implied by the smallest note seen so far (e.g.
+eighth+eighth+quarter = 8+8+16 = 32 vs. a target of 24), raise a hard
+error rather than silently reinterpreting or warning — treat this as
+malformed BANA input, developer-confirmed.
+
+**Confirmed doubled-sign + ambiguous-value rule:** reuses S5-8's existing
+doubled-sign mechanism (`_triplet_open_ended`) — no new BANA symbol. When
+ambiguous leader cells (the existing whole/16th, half/8th, quarter/32nd
+ambiguity from S5-6/S5-7, `_resolve_measure_durations`) appear within a
+doubled-sign block, the target unit is 3× the smallest note value across
+the *entire block* (not just the current group), because local per-group
+resolution isn't available until the ambiguity resolves.
+
+**Confirmed bar-line rule (corrected after initial implementation):** a
+doubled-sign *block* may span a bar line — one group can close at the end
+of a measure and a fresh one start in the next with no repeated sign
+needed. But an individual *group*'s own notes must complete within a
+single measure: e.g. three eighths in one measure followed by three more
+in the next, marked within one triplet block, is fine (two separate,
+self-contained groups); a quarter note in one measure completed by an
+eighth note in the next is **not** — that would be one group's notes
+straddling the bar line, which is malformed and raises a hard error
+(`TripletDurationError`) at the bar line (or at end-of-input, treated as
+an implicit final bar line for this purpose). The first implementation
+pass got this wrong — it let an individual group's carried-over items
+span a bar line (see `_group_triplets`' original carry-over design) —
+corrected once the developer caught it against these two worked examples.
+
+**Confirmed LilyPond rendering:** verified against the LilyPond Notation
+Reference (Rhythms → Tuplets, `writing-rhythms#tuplets`): `\tuplet 3/2
+{ ... }` wraps an arbitrary music expression — LilyPond does not require a
+fixed note count inside the braces, so `\tuplet 3/2 { c4 c8 }` is valid
+syntax for a 2-note group. `Tuplet.to_relative_lilypond` (`tuplet.py`
+~22-33) already just joins whatever is in `self.items`, so no logic
+change is needed there — only its docstring's "exactly 3 notes/rests"
+claim (`tuplet.py:8`) needs correcting to reflect variable-length groups.
+
+**Implemented:** Group/block closing moved entirely into the streaming
+pass (`_apply_triplet_flag`, `braille_parser.py` ~470-490) rather than a
+post-resolution pass, to avoid a circularity: closing decisions need
+resolved tick values, but `_resolve_measure_durations`' own run/individual
+state machine (for 16th-class leader/continuation triplets) needs to know
+where a triplet group ends *while resolving*. Resolved:
+- `_provisional_triplet_ticks` computes a tripleted tick value at
+  streaming time from each note/rest's raw `base_duration` (1/2/4/8) —
+  exact for base_duration 4 and unambiguous base_duration 8, and a
+  documented simplifying assumption for base_duration 1 (always treated
+  as the BANA 8.4 16th-class leader shorthand, never a whole note — a
+  whole-note triplet doesn't occur in practice, and this matches how
+  `_resolve_measure_durations` actually resolves a leader-then-base_8
+  sequence, so the two stay consistent).
+- `_register_triplet_item` runs the confirmed closing rule (target = 3×
+  smallest tripleted duration in the group, or block-wide when an
+  ambiguous cell — base_duration 1 or 2 — has been seen in the current
+  doubled-sign block) and raises `TripletDurationError` on overshoot.
+  Group boundaries are recorded via a new `triplet_group_end` flag on
+  `_PendingNote`/`_PendingRest`, set the moment a group closes.
+- `_resolve_measure_durations`' triplet-aware RUN-closing (S5-8) now
+  checks `pending[i].triplet_group_end` instead of counting to 3 —
+  simpler than before, and correct for variable-length groups since the
+  flag is already known by resolution time.
+- `_group_triplets` (`braille_parser.py` ~915-940) purely chunks by
+  `triplet_group_end` markers (no duration math of its own) — every group
+  it sees is already closed, since `_check_triplet_group_not_open_at_bar_line`
+  raises `TripletDurationError` at a bar line (or end-of-input) if a group
+  is still mid-flight (`_triplet_group_total_ticks > 0`). **Correction
+  after initial implementation:** the first pass let an individual group's
+  items carry across `_finalize_measure` calls so a group *itself* could
+  span a bar line — the developer caught this against two worked
+  examples (three eighths, then three more in the next measure, within
+  one doubled-sign block: fine, two self-contained groups; a quarter in
+  one measure completed by an eighth in the next: not allowed, one
+  group's notes can't straddle a bar line) and it was corrected to the
+  hard-error behavior described above. Only the doubled-sign *block*
+  (`_triplet_active`/`_triplet_open_ended`/the block-wide accumulators)
+  persists across bar lines now — never an individual group's own
+  accumulating ticks. This also meant `_finalize_measure`'s
+  `_validate_measure_beat_count` skip (added for the incorrect carry-
+  over case) was removed — no longer needed, since every measure's
+  triplet content is now always fully self-contained.
+- **Known simplification (flagging, not blocking):** the block-wide
+  smallest-value rule is an eager running minimum, not a fully
+  retroactive one — if a doubled-sign block's smallest note only appears
+  in a *later* group, earlier already-closed groups in that block keep
+  whatever target they closed with rather than being reopened. For
+  realistic BANA input this doesn't matter (BANA 8.4's doubled sign is
+  specifically for successive triplets of the *same* value, so a block's
+  smallest value is consistent throughout in practice); a genuinely
+  divergent block would need the fully deferred/two-pass design discussed
+  and set aside during scoping.
+- **Known simplification (flagging, not blocking):** the streaming-time
+  provisional tick calculation doesn't know augmentation dots yet (dot
+  cells follow the note they modify) or the measure-wide half/32nd
+  overflow rule (S5-6), so a dotted note or a half-note-class ambiguous
+  cell inside a triplet group uses its plain face value for the closing
+  decision. Not exercised by any current test or real fixture.
+
+**Steps:**
+1. ~~Replace `_triplet_group_remaining`'s note-count closing in
+   `_apply_triplet_flag`/`_commit_pending_triplet_signs`~~ — done, see
+   Implemented above.
+2. ~~Extend the doubled-sign path to buffer notes across the whole block
+   when ambiguous leader cells are present~~ — done via the block-wide
+   `_triplet_block_smallest_ticks`/`_triplet_block_has_ambiguous`
+   accumulators (running, not fully retroactive — see Known
+   simplification above).
+3. ~~Update `Tuplet`'s docstring~~ — done (`tuplet.py`).
+4. ~~Update comments describing `is_triplet` groups as same-value~~ —
+   done (`_PendingNote`/`_PendingRest` field comments).
+5. ~~Write unit tests~~ — done (`tests/test_parser.py`, "S5-9: mixed-value
+   notes within triplet groups" section): quarter+eighth 2-note group at
+   24 ticks; the two-note rule (larger = 2× smaller); overshoot raises
+   `TripletDurationError`; an undoubled single sign closes by duration;
+   a single group cannot span a bar line (raises `TripletDurationError`);
+   a doubled-sign block *can* span a bar line via two separate self-
+   contained groups (three eighths, then three more); an unclosed group
+   at end-of-input raises the same error. All 526 pre-existing tests plus
+   6 new ones pass (532 total); the `children_s_piece.brf` /
+   `fengyang_flower_drum.brf` fixture regression tests are unaffected.
+
+**Definition of Done:**
+- [x] `_apply_triplet_flag`/group-closing is duration-based (target = 3×
+      smallest note seen in the current group), not note-count-based, for
+      all triplet groups — single-sign and doubled-sign alike
+- [x] Overshooting a group's implied target raises a hard error
+- [x] Doubled-sign blocks with ambiguous leader cells use a block-wide
+      smallest-note unit; the block may span a bar line via separate
+      self-contained groups, but no individual group's own notes may
+      straddle a bar line (hard error if one is left mid-flight there)
+- [x] `Tuplet`/`to_lilypond()` docstring corrected; rendering verified
+      against the LilyPond Notation Reference for variable-length groups
+- [x] All new and existing tests pass; `pytest tests/` passes with no
+      regressions
+
+**Senior note:** Direct follow-up to S5-8's deferred "mixed-value
+triplet" question, confirmed with the developer via worked examples
+(quarter+eighth = 24 ticks) rather than assumed. The rule generalizes
+cleanly: target = 3× the smallest tripleted note-duration currently known
+for the group (block-wide instead of per-group specifically when
+ambiguous leader cells are involved under a doubled sign). This removes
+the note-counting shortcut S5-8 relied on and is a real behavior change to
+`_apply_triplet_flag`, not an additive one — the full S5-8 test suite
+was re-run after this change since every existing same-value-triplet test
+now exercises the new duration-based closing path instead of the old
+counter (all still pass unchanged). The two "known simplification" notes
+above (non-retroactive block-wide minimum; dots/half-note ambiguity not
+factored into the streaming-time closing decision) are deliberate scope
+boundaries given real BANA input doesn't seem to exercise them — flagged
+rather than silently assumed, per the project's own convention; revisit
+if a real fixture ever hits them. One correction happened after the
+initial pass: the first implementation let an individual triplet
+*group*'s notes span a bar line (conflating it with the *block*-can-span-
+a-bar-line rule) — the developer caught this with two worked examples and
+it's now a hard error, per the "Confirmed bar-line rule (corrected...)"
+note above.
+
+---
+
 # Sprint 5b: Orchestral Score Support
 
 Estimated time: 1.5–2 weeks.
 
-### [ ] S5b-1: Implement instrument abbreviation lookup table
+**Research basis for this sprint:** BANA *Music Braille Code, 2015*, Section
+33 "Instrumental Ensemble Scores" (print pp. 270-288, §§33.1-33.7.1) and
+Table 29 "Abbreviations for Instrument Names" (print pp. 28-31), plus the
+LilyPond Learning Manual v2.26, §4.4.5 "Scores and Parts". Both fetched and
+read in full before drafting these tickets, per `CLAUDE.md`'s "fetch before
+implementing" rule. Section/page citations below refer to this edition.
+
+**Real fixtures already in the repo** (`tests/fixtures/`, see
+`tests/fixtures/README.md`) directly relevant to this sprint:
+- `fengyang_flower_drum.brf` — flute and strings, developer-authored,
+  **developer-verified ground truth** (per `CLAUDE.md`: "the most reliable
+  ground-truth test case in the suite"). Its inline part abbreviations
+  (`>VNI'`, `>VNII'`, `>VA'`, `>VC'`, `>BA'`) already match Table 29(A)'s
+  Violin I / Violin II / Viola / Violoncello / Double bass entries.
+- `Bartok_Romanian_Folk_Dances_orch_named.brf` — full orchestra, has a
+  literal §33.2 instrument-list header (Piccolo, Flutes I/II, Clarinets
+  I/II in B-flat, Bassoons I/II, Horns in F I/II, Violins I, Violins II,
+  Violas, Violoncellos, Double Basses) — not developer-verified, useful as
+  a stress-test/smoke-test fixture only (same status as Beethoven/Fauré in
+  S5-6/S5-7's Senior notes).
+- `Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf` (string quartet) and
+  `Faure_Gabriel_Morceau_de_Concours.brf` (flute and piano) — also
+  not-yet-developer-verified, per the fixtures README.
+
+**Known codebase gap this sprint must close:** `Score.to_lilypond()`
+(`models/score.py` ~19-27) currently hard-codes exactly one staff (plain
+`\relative` block) or exactly two staves (`\new PianoStaff`, the Sprint
+4/5 piano-hands case) — its own docstring says "More than two staves is
+not yet supported." `Staff.name` (`models/staff.py`) is currently just an
+ad hoc string ("right hand" / "left hand"), with no instrument-abbreviation
+or ensemble concept at all. Every ticket below either builds toward or
+depends on removing this ≤2-staff ceiling (S5b-7 is where it's actually
+removed).
+
+**Open question flagged across this sprint (ask before starting S5b-1):**
+Table 29's abbreviation cells and §33.2.2's numbering-digit signs were only
+visible in the BANA PDF as braille glyph images, not extractable as literal
+text by this research pass. Per `CLAUDE.md`, dot patterns must never be
+guessed from a scan — they need to be cross-referenced against
+`ASCII_TO_DOTS` in `input_pipeline.py` (or `bana_symbols.py` directly) or
+confirmed with the developer before any ticket below writes dot-pattern
+constants.
+
+### [x] S5b-1: Implement instrument abbreviation lookup table
+
+**Why:** §33.2 "List of Instruments" (p. 270-271): immediately after the
+title, an ensemble score has a two-column table — full instrument names
+(column 1, in the print score's original order, including transposing-
+instrument keys and any info given on the print score's first page) and
+abbreviations (column 2, left-aligned 2 cells beyond the longest name). No
+existing code parses this header or has any instrument-name/abbreviation
+concept — `Staff.name` is just a free string today.
+
+**Research (§33.2, Table 29):**
+- (a) No contractions are employed in the names.
+- (b) UEB accidental/letter-modifier signs are used when English is the
+  score's language; accented letters in a foreign-language score use that
+  language's own characters.
+- (c) An overflow name line is indented to cell 3, or cell 5 if there are
+  two or more same-named instruments on separate staves.
+- (d) Two or more dot-5 guide dots fill the gap when a name ends 3+ cells
+  before the abbreviation column.
+- (e) If title + instrument table + music heading + first parallel don't
+  fit on page 1, the heading and first parallel move to page 2 together.
+- §33.2.1: Table 29 gives English/Italian/French/German abbreviations for
+  the standard orchestral roster (piccolo, flute, oboe, English horn,
+  clarinet, bass clarinet, bassoon, double bassoon, horn, trumpet,
+  trombone, tuba, timpani, cymbals, triangle, snare/bass drum, harp L/R
+  hand, piano L/R hand, violin I/II, viola, violoncello, double bass).
+  Instruments absent from Table 29 need a transcriber-devised 2-3 letter
+  abbreviation "conveying an immediate suggestion of the name" (BANA's own
+  examples: "glo" for glockenspiel, "tt" for tam-tam) — this needs to be
+  overridable/suppliable, not silently invented per input.
+- §33.2.2: multiple like instruments (e.g. "Violins I/II") get their
+  number as a lower-cell digit, no numeric indicator, immediately before
+  the abbreviation's closing dot-3; when combined on one staff, numbered
+  lowest-to-highest matching interval/in-accord order (ties into S5b-3).
+  A further-divided part (e.g. "Violins I-1" / "Violins I-2") adds a
+  *second*, upper-cell digit before the dot-3.
+- §33.2.3: a multi-staff instrument (piano, organ, harp) has each hand
+  treated as its own separate named "instrument" line in the ensemble
+  parallel — the Sprint 4/5 two-hand-only keyboard rules do not apply
+  here.
+
+**Steps:**
+1. Confirm Table 29's dot patterns and §33.2.2's numbering-digit signs
+   with the developer / against `ASCII_TO_DOTS` (see the sprint-level open
+   question above) before adding any constants.
+2. Add an instrument name→abbreviation lookup (English at minimum; decide
+   with the developer whether Italian/French/German are in scope for this
+   ticket or a later one — Table 29 has all four, but no fixture currently
+   needs anything but English).
+3. Parse the §33.2 two-column instrument-list header into an ordered list
+   of (full_name, abbreviation, part_number) entries, applying §33.2.2's
+   numbering and §33.2.3's per-hand splitting for multi-staff instruments.
+4. Implement the transcriber-abbreviation fallback path for instruments
+   outside Table 29 (explicit, visible in output — not a silent guess).
+5. Unit tests against a synthetic instrument-list input and against
+   `Fengyang_Flower_Drum.brf`'s real header.
+
+**Definition of Done:**
+- [x] Table 29 abbreviations available as a lookup (at least English)
+- [x] §33.2 instrument-list header parses into ordered (name, abbreviation,
+      number) entries, including §33.2.2 numbering and §33.2.3 per-hand
+      splitting for piano/organ/harp
+- [x] Fallback abbreviation path for instruments outside Table 29
+- [x] All dot patterns confirmed against `bana_symbols.py`/developer, not
+      guessed from the BANA PDF scan
+- [x] Tests pass against synthetic input and the Fengyang fixture header
+
+**Senior note:** This ticket is the foundation every other S5b ticket
+depends on (an instrument name/abbreviation is needed before staves can be
+labeled, grouped, or transposed). Do not guess at Table 29's braille cells
+from the PDF scan — confirm first.
+
+---
+
 ### [ ] S5b-2: Implement MeasureRepeat class with expand() method
+
+**Why:** `CLAUDE.md`'s BANA key facts already flag this: "Measure repeat:
+Specific dot combination means 'repeat previous measure.' Must be expanded
+(not passed through) in the output." §33.4.3 "Braille Repeats" (p. 276)
+confirms this is specifically relevant to ensemble scores, not just solo
+music: "Very obvious measure or part-measure repeats may be used when they
+occur on the same braille line as the original passage." The same
+paragraph also scopes this ticket:
+- Braille **numeral** repeats (§19) **may not be used** in ensemble
+  scores — explicitly out of scope here, even though they exist elsewhere
+  in BANA.
+- Da capo and dal segno (§20) may be used for extensive repetitions "when
+  all details of the affected passages are identical" — a distinct,
+  larger-scale repeat mechanism, not this ticket's `MeasureRepeat`.
+
+**Steps:**
+1. Confirm the measure-repeat cell's dot pattern against
+   `bana_symbols.py`/`ASCII_TO_DOTS` (not yet in the codebase — do not
+   guess; the developer has not yet supplied this pattern per the
+   existing `bana_symbols.py` convention).
+2. Add `SymbolCategory`/tokenizer classification for the sign.
+3. Implement a `MeasureRepeat` model with an `expand(previous_measure)`
+   method that materializes a full copy of the previous measure's notes —
+   per §33.4.3, only valid when the repeat sign is on the *same braille
+   line* as the measure being repeated; flag/warn if that adjacency
+   doesn't hold rather than silently expanding the wrong measure.
+4. Wire into `BrailleParser`/`_finalize_measure` so the expansion happens
+   before a `Measure` is added to a `Staff` — downstream code (LilyPond
+   rendering, beat-count validation) should never see an unexpanded
+   repeat marker.
+5. Unit tests: single measure repeat expands correctly; part-measure
+   repeat (§18.3) expands only the repeated portion; numeral-repeat cells
+   are explicitly rejected/unsupported in this scope, not silently
+   mis-parsed as a measure repeat.
+
+**Definition of Done:**
+- [ ] Measure-repeat dot pattern confirmed with the developer, not guessed
+- [ ] `MeasureRepeat.expand()` materializes the previous measure's notes,
+      validated against §33.4.3's same-line requirement
+- [ ] Numeral repeats remain unsupported/out of scope, per §33.4.3
+- [ ] Tests pass; `pytest tests/` no regressions
+
+**Senior note:** Needed before S5b-8's integration tests, since condensed
+ensemble parallels lean on measure repeats heavily (§33.4.3) — most real
+orchestral parts are mostly repeats and rests, not fresh notes every bar.
+
+---
+
 ### [ ] S5b-3: Implement interval shorthand detection and voice reconstruction
+
+**Why:** `CLAUDE.md`'s BANA key facts already flag interval shorthand as
+"common in orchestral scores." §33.4.2 "Intervals and In-Accords" (p. 275)
+adds an ensemble-specific constraint not covered by the general interval
+rules: "Intervals and in-accords are read upward in all parts. The braille
+interval signs should be used freely, **except in divisi parts for string
+instruments**. In string music, braille intervals must be reserved for
+double, triple or quadruple stops; the only exception to this restriction
+is a divisi passage in octaves." Example 33.4.2-1 (Bassoons/Cellos, an
+octave interval) and 33.4.2-2 (Flutes/Violins, `div.` marking) illustrate
+both sides of this rule.
+
+**What this means for implementation:** the existing interval-shorthand
+reconstruction (built for chords in earlier sprints — see
+`BrailleParser._handle_interval`/`_apply_interval`) needs a *staff-type-
+aware* branch for ensemble scores: on a string-instrument staff, an
+interval sign normally means "this is a stop on the same instrument" (a
+`Chord`, one performer), **not** "reconstruct a second independent voice"
+— unless the passage is explicitly marked divisi in octaves, in which case
+it *is* a second voice/staff, same as on a non-string instrument. This
+needs to know "is this staff a string instrument," which depends on
+S5b-1's instrument table.
+
+**Steps:**
+1. Confirm with the developer whether "divisi in octaves" is detected from
+   an explicit print marking already captured as a word-sign expression
+   (`div.` per Example 33.4.2-2) or needs a dedicated signal — don't guess.
+2. Add a staff-instrument-family concept (string vs. not) sourced from
+   S5b-1's instrument table.
+3. On string staves, default interval signs to chord/stop reconstruction;
+   only reconstruct a second voice when the divisi-in-octaves condition
+   from Step 1 is detected.
+4. On non-string staves, keep the existing (non-ensemble) interval
+   handling — this ticket only adds the string-specific carve-out.
+5. Unit tests reproducing Examples 33.4.2-1 (octave divisi, allowed as a
+   second voice) and 33.4.2-2 (plain string interval, must resolve as a
+   stop/chord, not a second voice).
+
+**Definition of Done:**
+- [ ] String-instrument staves default interval signs to stop/chord
+      reconstruction, not second-voice reconstruction
+- [ ] Divisi-in-octaves is detected and reconstructs a second voice, per
+      §33.4.2's stated exception
+- [ ] Non-string staves' existing interval handling is unaffected
+- [ ] Tests pass against Examples 33.4.2-1/33.4.2-2 patterns
+
+**Senior note:** This is a correctness trap, not a missing feature — using
+the existing (non-string-aware) interval logic unmodified on an ensemble
+string part would silently misread double-stops as two separate melodic
+lines. Don't skip the staff-family check to save time.
+
+---
+
 ### [ ] S5b-4: Implement staff grouping and bracket markers
+
+**Research finding — likely scope correction needed:** §33.1-§33.7 (read
+in full for this sprint) describe the condensed bar-over-bar parallel
+format as **an ordered, flat list of instrument lines** — "each parallel
+containing only the music of the instruments that have music to play in
+those measures" (§33.1) — with no braille sign anywhere in Section 33 for
+a visual bracket/brace grouping instrument families (strings, winds,
+brass) the way a *print* orchestral score groups staves. §33.2's
+instrument-list header is a plain two-column table, not a bracketed tree.
+The only place §33 groups staves at all is §33.2.3 (a keyboard/harp/
+organ's hands are adjacent lines, no special bracket sign either).
+
+**This means:** "staff grouping and bracket markers" as originally titled
+may not be a BANA-parsing concern at all — it may really be a *LilyPond
+output* decision (e.g. wrapping a `\new StaffGroup { ... }` or
+`\new PianoStaff { ... }` around related instruments in the generated
+`.ly`/PDF for readability), inferred from instrument family (via S5b-1's
+table) rather than parsed from the braille input. **Flag to the developer
+before starting:** confirm whether this ticket should be rescoped to
+"LilyPond output staff grouping" (cosmetic, PDF-readability only, no BANA
+parsing involved) or dropped/merged into S5b-7 (`OrchestraScore`), since
+there may be no braille signal to parse here at all.
+
+**Steps (pending the scope confirmation above):**
+1. Confirm rescoping with the developer.
+2. If proceeding: define instrument-family groupings (strings/winds/
+   brass/percussion/keyboard) from S5b-1's table.
+3. Emit `\new StaffGroup` (or nested groups, e.g. strings as one group,
+   with the piano/organ hands already grouped via `\new PianoStaff` per
+   S5b-1 §33.2.3) around family-adjacent instruments in
+   `OrchestraScore.to_lilypond()` (S5b-7) — fetch the LilyPond Notation
+   Reference's staff-grouping section first, per `CLAUDE.md`'s mandate,
+   before writing the syntax.
+4. Tests: Bartók fixture (has all five families) renders valid LilyPond
+   with the expected group structure.
+
+**Definition of Done:**
+- [ ] Scope confirmed with developer (BANA-driven vs. output-only)
+- [ ] If output-only: instrument-family grouping emits correct
+      `\new StaffGroup`/`\new PianoStaff` LilyPond, verified against the
+      Notation Reference
+- [ ] Tests pass against the Bartók fixture
+
+**Senior note:** Don't build a BANA-side bracket parser without first
+confirming this scope correction — nothing found in §33 supports one, and
+building unused parsing code would be wasted effort in the wrong
+direction.
+
+---
+
 ### [ ] S5b-5: Implement tacet and multi-measure rest parsing
+
+**Why:** §33.1 states the core mechanic directly: "each parallel
+contain[s] only the music of the instruments that have music to play in
+those measures. An instrument that has only rests in those measures is
+omitted from the parallel." This means a resting instrument doesn't get an
+explicit multi-measure rest sign in the condensed braille at all in the
+general case — it's represented by *absence* from however many parallels
+cover its silent measures. The parser needs to track, per instrument,
+which measures it's absent from, and reconstruct the correct total rest
+duration for those gaps when materializing that instrument's full part
+(needed for `OrchestraScore`/S5b-7's per-staff `Measure` list, where every
+staff needs *something* — a note or a rest — in every measure, unlike the
+condensed input).
+
+**Cross-reference to LilyPond side (Learning Manual §4.4.5):** the
+Learning Manual's own multi-measure-rest guidance is directly relevant to
+the *output* half of this ticket — a resting instrument's reconstructed
+gap should render as LilyPond's multi-measure rest syntax
+(`R2*3`-style: `R` + duration + `*` + count), and `\compressMMRests { … }`
+is the documented way to compress that in a formatted individual part
+(relevant if/when individual-part extraction is ever built, per that same
+Learning Manual section's overall workflow — not required for this ticket,
+but the reason to keep the reconstructed-rest data explicit rather than
+just "not present").
+
+**Not yet researched — fetch before implementing:** BANA §5.3
+"Multiple-Measure Rests" (print p. 58) describes the *explicit* braille
+sign for a multi-measure rest (used when a print score does show one, as
+opposed to §33.1's implicit-by-omission case) — this session's reading was
+scoped to §33 only, so §5.3 needs its own fetch-and-confirm pass (per
+`CLAUDE.md`'s mandate) before this ticket is implemented, to know whether
+this ticket is only the implicit/omission case or also the explicit sign.
+
+**Steps:**
+1. Fetch and read BANA §5.3 before starting (see above).
+2. Track, per instrument in an `OrchestraScore` parse, which measure
+   numbers it's present vs. absent for (§33.1's omission rule).
+3. Reconstruct a multi-measure `Rest` (or a run of per-measure rests) for
+   each gap, sized to that instrument's own time signature if it differs
+   per part (ties to S5b-7's per-part key/time signature handling).
+4. If §5.3 turns up an explicit sign distinct from the omission case,
+   implement that too and confirm its dot pattern before use.
+5. Unit tests: an instrument absent for several consecutive parallels in
+   a synthetic ensemble input gets a correctly-sized rest run in its
+   reconstructed part.
+
+**Definition of Done:**
+- [ ] BANA §5.3 fetched and cross-referenced (not assumed)
+- [ ] Per-instrument presence/absence tracked correctly across parallels
+- [ ] Reconstructed rests are correctly sized and placed for §33.1's
+      implicit-omission case
+- [ ] Tests pass
+
+**Senior note:** This is a quiet but load-bearing ticket — get it wrong
+and every instrument's part in `OrchestraScore` silently loses whichever
+measures it wasn't mentioned in.
+
+---
+
 ### [ ] S5b-6: Implement transposing instrument table and concert pitch flag
+
+**Why:** `CLAUDE.md`'s existing Key Design Decision #4 already commits to
+this: "Concert pitch: Default to concert pitch output; transposing
+instrument support added in Sprint 5b." §33.2 confirms what BANA itself
+does with transposing instruments: the instrument-name column "includes
+all of the information that is given on the first page of the printed
+music, **including the keys of transposing instruments**" — i.e. BANA
+preserves the instrument's key as *text* (e.g. "Clarinet in B♭"), but the
+note cells themselves encode **written pitch** (what the performer reads),
+not concert pitch. BANA does not transpose; DottedNotes has to, to honor
+Decision #4's concert-pitch default.
+
+**LilyPond mechanism (Learning Manual §4.4.5):** the documented approach
+is exactly `\transpose f c' \hornNotes` — wrapping a written-pitch music
+expression in `\transpose <written-key> <concert-key>` to sound at concert
+pitch. This maps directly onto this ticket: parse the instrument's key
+from the §33.2 name text already captured by S5b-1 (e.g. "Horn in F",
+"Clarinet in B♭"), look up its transposition interval, and wrap that
+staff's `to_lilypond()` output in the corresponding `\transpose` call —
+controlled by a concert-pitch flag, so a future "written pitch" output
+mode (useful for generating individual parts, per the same Learning
+Manual section) can skip the wrap.
+
+**Steps:**
+1. Build a transposing-instrument name/key → transposition-interval table
+   (standard orchestral transpositions: clarinet in B♭/A, horn in F,
+   trumpet in B♭/C, English horn in F, etc.) — verify each interval
+   against a reliable source rather than assuming from memory (these are
+   easy to get backwards — confirm direction, e.g. "Horn in F sounds a
+   perfect fifth *below* written," before encoding).
+2. Parse the instrument key text captured by S5b-1's §33.2 name column.
+3. Add the concert-pitch flag (per Decision #4, concert pitch is the
+   default) and wrap transposing staves' output in `\transpose`,
+   confirming exact syntax against the LilyPond Notation Reference (not
+   just the Learning Manual example) before implementing, per
+   `CLAUDE.md`'s mandate.
+4. Unit tests: a synthetic "Horn in F" and "Clarinet in B♭" part transpose
+   correctly in both concert-pitch and written-pitch output modes.
+
+**Definition of Done:**
+- [ ] Transposition interval table built and each interval verified (not
+      assumed from memory)
+- [ ] Instrument key parsed from the §33.2 name text
+- [ ] Concert-pitch flag controls whether `\transpose` is applied,
+      defaulting to concert pitch per Decision #4
+- [ ] `\transpose` syntax verified against the LilyPond Notation Reference
+- [ ] Tests pass for at least horn and clarinet transpositions
+
+**Senior note:** Get the transposition direction and interval verified,
+not assumed — a backwards transposition is a silent musical error, not a
+crash, and would be easy to miss without a developer with perfect pitch
+or a reference score checking the output.
+
+---
+
 ### [ ] S5b-7: Implement OrchestraScore class
+
+**Why:** `Score.to_lilypond()` (`models/score.py` ~19-27) currently only
+handles exactly one staff or exactly two (the Sprint 4/5 piano-hands
+case) — its own docstring says "More than two staves is not yet
+supported." This ticket is where that ceiling is actually removed for
+ensembles, bringing together S5b-1 through S5b-6.
+
+**Research grounding this model (§33.3-§33.7):**
+- §33.3 Page Layout: every parallel must complete on the page it begins,
+  unless there are too many parts to fit, in which case it may split
+  across a left/right page pair at a natural instrument-group boundary
+  with roughly equal line counts on each side.
+- §33.4 The Parallel: each line begins with the instrument abbreviation
+  (plus a per-part key signature if parts differ — §33.4.1); the first
+  signs of every measure are vertically aligned across *all* parts in the
+  parallel, with guide dots for gaps over six cells.
+- §33.4.1 Key Signatures: a shared signature goes in the music heading
+  only if *every* part has the same one; otherwise it's omitted from the
+  heading and appended per-line after each instrument's abbreviation.
+- §33.4.5 Placing Longer Expressions: an expression can apply to (a) all
+  parts, (b) one line, or (c) a successive subset of parts — each with
+  its own placement/abbreviation-listing convention. `OrchestraScore`
+  needs to preserve which of these three scopes an expression had.
+- §33.4.6 Measure Numbers and Rehearsal References: a new parallel must
+  start wherever a rehearsal mark or measure number appears in the print
+  score.
+- §33.4.7 Run-over Lines: a single line whose one-measure content is too
+  long for the parallel's width continues on an indented run-over line.
+- §33.5 Dividing a Measure between Parallels: a too-long measure splits
+  at the same rhythmic point in every part, using the music hyphen or
+  measure-division sign, continuing in the next parallel.
+- §33.6 Parallel Movement: a melody doubled at the unison/octave by other
+  instruments can be written once and referenced via the parallel-
+  movement sign in the doubling parts (with rules for when instruments
+  are score-adjacent vs. distant, and for restating the reference vs.
+  letting it continue).
+- §33.7 Consolidating Identical Parts: two or more same-instrument parts
+  that stay in unison for a whole parallel can be combined onto one
+  braille line, showing all their numbers in the line's abbreviation
+  (ties to S5b-1 §33.2.2's numbering rule) — including §33.7.1's "a2"
+  wind convention, shown once as a word-sign expression rather than
+  repeated every system.
+
+**What this means for the data model:** unlike today's `Staff`/`Measure`
+(where every staff has a `Measure` for every bar), an `OrchestraScore`'s
+source parallels are inherently *sparse* per measure (§33.1) — unlike a
+"full score" concept where every part has something (a note or a rest,
+via S5b-5) in every measure. `OrchestraScore` needs to reconcile these:
+parse the sparse parallel structure faithfully, but still be able to
+materialize a complete, gap-free per-instrument part for
+`to_lilypond()`.
+
+**Steps:**
+1. Design `OrchestraScore` (new file, `models/orchestra_score.py` or
+   similar) as an ordered list of named instrument parts (from S5b-1),
+   each with its own optional key signature (§33.4.1) and a measure list
+   reconciled via S5b-5's rest reconstruction for the instrument's silent
+   measures.
+2. Parse the sparse §33.4 parallel structure in `BrailleParser` (or a
+   dedicated ensemble parser path) into this model, including run-over
+   lines (§33.4.7) and mid-measure division (§33.5).
+3. Implement §33.6 parallel-movement doubling and §33.7 identical-part
+   consolidation, both as ways to *avoid re-parsing* the same music twice
+   internally (mirrors the Learning Manual §4.4.5 shared-variable
+   philosophy — reuse the already-parsed music object for a doubling/
+   consolidated part rather than re-deriving it).
+4. Extend `to_lilypond()` to emit each instrument as its own `\new Staff`
+   (wrapped per S5b-4's grouping decision, transposed per S5b-6's flag),
+   removing the current ≤2-staff limitation.
+5. Unit tests building up from small synthetic parallels to the full
+   Fengyang and Bartók fixtures (S5b-8).
+
+**Definition of Done:**
+- [ ] `OrchestraScore` models an ordered list of named, independently-
+      keyed instrument parts with gap-free per-instrument measure lists
+- [ ] §33.4's parallel structure (vertical alignment, run-over lines,
+      mid-measure division) parses correctly
+- [ ] §33.6 parallel movement and §33.7 consolidated parts avoid
+      duplicating already-parsed music
+- [ ] `to_lilypond()` emits an arbitrary number of staves, removing
+      `Score`'s current 1-or-2-staff ceiling
+- [ ] Tests pass, building up to the fixtures in S5b-8
+
+**Senior note:** This is the sprint's centerpiece and by far its largest
+ticket — budget accordingly, and expect it to surface refinements needed
+in S5b-1 through S5b-6 as real parsing is attempted against the Bartók
+fixture's full orchestral roster.
+
+---
+
 ### [ ] S5b-8: Integration test using Fengyang orchestral score
 
-*Detailed steps to be written when Sprint 5 is complete.*
+**Why:** `fengyang_flower_drum.brf` (flute and strings) is already in the
+repo (`tests/fixtures/`, also `examples/`) and is, per `CLAUDE.md`, "the
+primary integration test fixture... the developer arranged it and knows
+the expected LilyPond output exactly... the most reliable ground-truth
+test case in the suite." Its inline abbreviations (`>VNI'`, `>VNII'`,
+`>VA'`, `>VC'`, `>BA'`) already match Table 29(A)'s Violin I/II, Viola,
+Violoncello, and Double bass entries — real, concrete validation for
+S5b-1 through S5b-7 together, exactly analogous to how `children_s_piece.
+brf` grounded S5-6/S5-7's regression tests.
+
+**Fixture status (per `tests/fixtures/README.md`):** only
+`fengyang_flower_drum.brf` is developer-verified ground truth for this
+sprint. `Bartok_Romanian_Folk_Dances_orch_named.brf`, `Beethoven_Ludwig_
+Van_String_Quartet_No_1-1.brf`, and `Faure_Gabriel_Morceau_de_Concours.
+brf` are real-world scores from IMSLP/braillemuse.net but **not**
+developer-verified — same status Beethoven/Fauré already have in S5-6/
+S5-7's Senior notes for the solo-piano sprints. Treat them as smoke-test/
+warning-count-tracking fixtures only, not exact-output assertions, unless
+the developer verifies specific measures against a reference score (as
+was done for `children_s_piece.brf` measures 1 and 22 in S5-6/S5-7).
+
+**Steps:**
+1. Parse `fengyang_flower_drum.brf` end-to-end through `OrchestraScore`
+   (S5b-7) and assert the resulting LilyPond output matches the
+   developer's known-correct expectation, at least measure-by-measure for
+   a representative sample (mirroring S5-7's
+   `test_children_s_piece_measure1_matches_lilypond_ground_truth` pattern)
+   — confirm the exact expected output with the developer rather than
+   assuming it from this fixture's braille alone.
+2. Confirm zero unexpected `_validate_measure_beat_count`-style warnings
+   on this fixture, matching the "zero remaining warnings" bar set by
+   `test_children_s_piece_has_no_remaining_warnings` in S5-7.
+3. Add smoke tests (parses without crashing, warning counts tracked but
+   not required to be zero) for the Bartók/Beethoven/Fauré fixtures,
+   flagging their warning counts as a baseline to watch for regressions,
+   not a pass/fail bar — same treatment as Beethoven/Fauré already get in
+   S5-6/S5-7.
+
+**Definition of Done:**
+- [ ] `fengyang_flower_drum.brf` parses through `OrchestraScore` and
+      matches developer-confirmed LilyPond output for its representative
+      sample measures
+- [ ] Zero unexpected beat-count warnings on `fengyang_flower_drum.brf`
+- [ ] Bartók/Beethoven/Fauré smoke tests pass (no crash) with warning
+      counts recorded as a regression baseline
+
+**Senior note:** This ticket is the sprint's acceptance test, not new
+parsing logic — it should mostly be assembling S5b-1 through S5b-7's
+pieces against real input and confirming output with the developer, the
+same role `children_s_piece.brf`'s tests played across S5-6/S5-7.
 
 ---
 

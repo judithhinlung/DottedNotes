@@ -321,6 +321,81 @@ WORD_SIGN: str = '⠜'    # dots 3,4,5 = U+281C
 END_WORD_SIGN: str = '⠄' # dot 3     = U+2804
 
 # ---------------------------------------------------------------------------
+# Instrument abbreviations (S5b-1, BANA Music Braille Code 2015, Sec. 33.2,
+# Table 29). Fetched directly from the BANA PDF per CLAUDE.md's
+# "fetch before implementing" rule (Music_Braille_Code_2015.pdf pp. 27-28).
+#
+# In the §33.2 instrument-list header and inline part labels, an abbreviation
+# is written as WORD_SIGN (⠜, reused here as the "abbreviation lead-in", same
+# cell as the dynamics/clef prefix — disambiguated by the two-column header
+# structure, not by cell content) + lowercase letters + optional numbering
+# (§33.2.2) + END_WORD_SIGN (⠄, dot 3, same cell used elsewhere as a dynamic
+# terminator) closing the abbreviation.
+#
+# Table 29(A), English. Keys match the instrument name exactly as it decodes
+# from a BANA-conformant §33.2 header (only the first letter of each newly
+# capitalized word is uppercase — see Example 33.2.1-1/33.2.2-1 in the
+# manual). Values are the literal lowercase ASCII-braille abbreviation text.
+# ---------------------------------------------------------------------------
+
+TABLE_29_ENGLISH: dict[str, str] = {
+    'Piccolo': 'pc',
+    'Flute': 'fl',
+    'Oboe': 'o',
+    'English horn': 'eh',
+    'Clarinet': 'cl',
+    'Bass clarinet': 'bcl',
+    'Bassoon': 'b',
+    'Double bassoon': 'bb',
+    'Horn': 'hn',
+    'Trumpet': 'tp',
+    'Trombone': 'tb',
+    'Tuba': 'tu',
+    'Kettledrums': 'dr',
+    'Cymbals': 'cym',
+    'Triangle': 'tri',
+    'Snare drum': 'sdr',
+    'Bass drum': 'bdr',
+    'Harp right hand': 'hr',
+    'Harp left hand': 'hl',
+    'Piano right hand': 'pr',
+    'Piano left hand': 'pl',
+    'Violin I': 'v1',
+    'Violin II': 'v2',
+    'Viola': 'vl',
+    'Violoncello': 'vc',
+    'Double bass': 'db',
+}
+
+# ---------------------------------------------------------------------------
+# Lower-cell digits (§33.2.2's numbering-digit sign, and the same cells
+# already confirmed elsewhere in this table for other purposes — e.g. '⠲'
+# as a time-signature denominator digit, '⠆' as TRIPLET_INDICATOR/ASCII '2').
+# Each cell is literary digit-shifted-down-one-row, i.e. identical to
+# ASCII_TO_DOTS['1'..'9','0'] (input_pipeline.py) — the same "lower digit"
+# scheme documented under TIME_SIGNATURE_CELLS above.
+#
+# Only 1 and 2 are exercised by a real fixture so far (Fengyang's
+# Violin I / Violin II). 3-9/0 are mechanically derived from the same
+# verified ASCII_TO_DOTS shift, not independently developer-confirmed —
+# treat with the same caution as any un-exercised entry until a fixture
+# using them turns up.
+# ---------------------------------------------------------------------------
+
+LOWER_DIGIT_CELLS: dict[str, int] = {
+    '⠂': 1,  # dot 2         — ASCII '1'  — confirmed (Fengyang Violin I)
+    '⠆': 2,  # dots 2,3      — ASCII '2'  — confirmed (Fengyang Violin II)
+    '⠒': 3,  # dots 2,5      — ASCII '3'  — derived, not yet exercised
+    '⠲': 4,  # dots 2,5,6    — ASCII '4'  — derived, not yet exercised
+    '⠢': 5,  # dots 2,6      — ASCII '5'  — derived, not yet exercised
+    '⠖': 6,  # dots 2,3,5    — ASCII '6'  — derived, not yet exercised
+    '⠶': 7,  # dots 2,3,5,6  — ASCII '7'  — derived, not yet exercised
+    '⠦': 8,  # dots 2,3,6    — ASCII '8'  — derived, not yet exercised
+    '⠔': 9,  # dots 3,5      — ASCII '9'  — derived, not yet exercised
+    '⠴': 0,  # dots 3,5,6    — ASCII '0'  — derived, not yet exercised
+}
+
+# ---------------------------------------------------------------------------
 # Single-cell triplet sign (S5-8, BANA Music Braille Code 2015, Sec. 8.4)
 # Dots 2-3 (ASCII '2' in ASCII_TO_DOTS), developer-confirmed. Precedes a
 # triplet of any note value (3 notes in the time of 2). Doubled for four or

@@ -6,6 +6,7 @@ from .clef import Clef, ClefType, CLEF_TO_LILYPOND
 from .duration import Duration
 from .dynamic import Dynamic, DynamicLevel
 from .in_accord import InAccord
+from .instrument import InstrumentInfo
 from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
 from .note import Note, Rest
@@ -30,6 +31,7 @@ __all__ = [
     "Dynamic",
     "DynamicLevel",
     "InAccord",
+    "InstrumentInfo",
     "KEY_TO_LILYPOND",
     "KeySignature",
     "Measure",
