@@ -224,6 +224,21 @@ class BrailleTokenizer:
                         i += 3
                         header_active = False
                         continue
+
+                    # Check for multi-measure rest: ⠼ followed by literary digits followed by ⠍
+                    j = i + 1
+                    while j < len(text) and text[j] in LITERARY_DIGITS:
+                        j += 1
+                    if j > i + 1 and j < len(text) and text[j] == '⠍':
+                        next_char = text[j+1] if j+1 < len(text) else ''
+                        if next_char in (' ', '⠀', '\n', '\r', '\t', ''):
+                            seq = text[i:j + 1]
+                            tokens.append(BrailleToken(seq, SymbolCategory.MULTI_MEASURE_REST, i, line))
+                            i = j + 1
+                            at_measure_start = False
+                            header_active = False
+                            continue
+
                     # Unrecognized number-sign sequence at measure boundary
                     tokens.append(BrailleToken(char, SymbolCategory.UNKNOWN, i, line))
                     i += 1
@@ -419,6 +434,25 @@ class BrailleTokenizer:
                 decoded_text = ''.join(text_chars).strip()
                 tokens.append(BrailleToken(decoded_text, SymbolCategory.WORD_SIGN, start_pos, line))
                 continue
+
+            # --- multi-measure rests ⠍⠍, ⠍⠍⠍ at measure start ---
+            if at_measure_start:
+                if text[i:i+3] == '⠍⠍⠍':
+                    next_char = text[i+3] if i+3 < len(text) else ''
+                    if next_char in (' ', '⠀', '\n', '\r', '\t', ''):
+                        tokens.append(BrailleToken('⠍⠍⠍', SymbolCategory.MULTI_MEASURE_REST, i, line))
+                        i += 3
+                        at_measure_start = False
+                        header_active = False
+                        continue
+                elif text[i:i+2] == '⠍⠍':
+                    next_char = text[i+2] if i+2 < len(text) else ''
+                    if next_char in (' ', '⠀', '\n', '\r', '\t', ''):
+                        tokens.append(BrailleToken('⠍⠍', SymbolCategory.MULTI_MEASURE_REST, i, line))
+                        i += 2
+                        at_measure_start = False
+                        header_active = False
+                        continue
 
             # --- general single-cell classification ---
             cat = self._classify(char)

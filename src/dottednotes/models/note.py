@@ -184,10 +184,13 @@ class Rest(BrailleSymbol):
     """A rest (silence) of a given duration."""
     duration: Duration
     is_full_measure: bool = False  # True for whole-measure rests (R1 in LilyPond)
+    multi_measure_count: int = 1   # Number of measures for a multi-measure rest
 
     def to_lilypond(self) -> str:
-        """Return LilyPond rest string e.g. 'r4', 'R1', 'r2.'"""
+        """Return LilyPond rest string e.g. 'r4', 'R1', 'r2.', 'R1*4'"""
         if self.is_full_measure:
+            if self.multi_measure_count > 1:
+                return f"R{self.duration.to_lilypond()}*{self.multi_measure_count}"
             return f"R{self.duration.to_lilypond()}"
         return f"r{self.duration.to_lilypond()}"
 

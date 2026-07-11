@@ -922,3 +922,77 @@ def test_note_no_grace_note_no_prefix():
     note = _make_note('F', 4, 4)
     assert not note.to_lilypond().startswith(r'\grace')
     assert not note.to_lilypond().startswith(r'\appoggiatura')
+
+
+def test_instrument_family_resolution():
+    from dottednotes.models.instrument import get_instrument_family, InstrumentFamily, InstrumentInfo
+
+    # Exact match from Table 29
+    assert get_instrument_family('Piccolo') == InstrumentFamily.WOODWIND
+    assert get_instrument_family('Trumpet') == InstrumentFamily.BRASS
+    assert get_instrument_family('Kettledrums') == InstrumentFamily.PERCUSSION
+    assert get_instrument_family('Piano right hand') == InstrumentFamily.KEYBOARD_HARP
+    assert get_instrument_family('Violoncello') == InstrumentFamily.STRING
+
+    # Fallback/case-insensitive matching
+    assert get_instrument_family('  violin iii  ') == InstrumentFamily.STRING
+    assert get_instrument_family('Alto Flute') == InstrumentFamily.WOODWIND
+    assert get_instrument_family('Tenor Trombone') == InstrumentFamily.BRASS
+    assert get_instrument_family('Conga Drum') == InstrumentFamily.PERCUSSION
+    assert get_instrument_family('Harpsichord') == InstrumentFamily.KEYBOARD_HARP
+
+    # Unknown instrument
+    assert get_instrument_family('Synthesizer') is None
+
+    # InstrumentInfo property
+    info = InstrumentInfo(name="Violin I", abbreviation="v1")
+    assert info.family == InstrumentFamily.STRING
+
+
+def test_score_staff_grouping():
+    # Helper to build a basic staff with a single C4 note
+    def make_staff(name):
+        staff = Staff(name=name)
+        m = Measure(number=1)
+        m.add_note(_make_note('C', 4, 4))
+        staff.add_measure(m)
+        return staff
+
+    # 1. Single staff: no grouping
+    score1 = Score()
+    score1.add_staff(make_staff("Violin"))
+    ly1 = score1.to_lilypond()
+    assert r'\new StaffGroup' not in ly1
+    assert r'\new Staff' not in ly1  # Single staff is wrapped in \relative c' directly
+    assert r"\relative c' {" in ly1
+
+    # 2. Grouped strings (Violin I and Violin II)
+    score2 = Score()
+    score2.add_staff(make_staff("Violin I"))
+    score2.add_staff(make_staff("Violin II"))
+    ly2 = score2.to_lilypond()
+    assert r'\new StaffGroup <<' in ly2
+    assert ly2.count(r'\new Staff {') == 2
+    assert r'<<' in ly2
+    assert r'>>' in ly2
+
+    # 3. Piano right/left hands
+    score3 = Score()
+    score3.add_staff(make_staff("right hand"))
+    score3.add_staff(make_staff("left hand"))
+    ly3 = score3.to_lilypond()
+    assert r'\new PianoStaff <<' in ly3
+    assert ly3.count(r'\new Staff {') == 2
+
+    # 4. Mixed: Flute (Woodwind, length 1) and Violins (String, length 2)
+    score4 = Score()
+    score4.add_staff(make_staff("Flute"))
+    score4.add_staff(make_staff("Violin I"))
+    score4.add_staff(make_staff("Violin II"))
+    ly4 = score4.to_lilypond()
+    # Should have a global << >> wrapping the single Flute staff and the String StaffGroup
+    assert ly4.strip().startswith('\\version "2.24.0"\n<<')
+    assert r'\new Staff {' in ly4
+    assert r'\new StaffGroup <<' in ly4
+    assert ly4.count(r'\new Staff {') == 3
+

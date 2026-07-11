@@ -40,3 +40,18 @@ class TimeSignature(BrailleSymbol):
     def as_tuple(self) -> tuple[int, int]:
         """Return (numerator, denominator) for legacy-code compatibility."""
         return (self.numerator, self.denominator)
+
+    def get_full_measure_duration(self) -> "Duration":
+        """Return the Duration object corresponding to a full measure of this time signature."""
+        from .duration import Duration
+        if self.numerator == 3 and self.denominator == 4:
+            return Duration(value=2, dots=1)  # dotted half
+        if self.numerator == 6 and self.denominator == 8:
+            return Duration(value=2, dots=1)  # dotted half
+        if self.numerator == 2 and self.denominator == 4:
+            return Duration(value=2)          # half
+        if self.numerator == 4 and self.denominator == 4:
+            return Duration(value=1)          # whole
+        if self.numerator == 2 and self.denominator == 2:
+            return Duration(value=1)          # whole
+        return Duration(value=1)

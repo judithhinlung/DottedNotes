@@ -50,11 +50,62 @@ class Staff:
         if clef_ly is not None:
             header.append('    ' + clef_ly)
 
+        from .note import Rest
+
         prev_midi = start_midi
         measure_lines: list[str] = []
-        for measure in self.measures:
-            ly_str, prev_midi = measure.to_lilypond(prev_midi=prev_midi)
-            measure_lines.append('    ' + ly_str)
+
+        i = 0
+        while i < len(self.measures):
+            # Look ahead to see if we can start/continue a run of rests
+            run = []
+            j = i
+            while j < len(self.measures):
+                m = self.measures[j]
+                is_simple_rest = (
+                    len(m.notes) == 1 and
+                    isinstance(m.notes[0], Rest) and
+                    m.notes[0].is_full_measure and
+                    not m.text_markings
+                )
+                if not is_simple_rest:
+                    break
+
+                if run and m.notes[0].duration != run[0].notes[0].duration:
+                    break
+
+                run.append(m)
+                if m.bar_line_type != 'measure_separator':
+                    j += 1
+                    break
+                j += 1
+
+            if len(run) >= 2:
+                first_rest = run[0].notes[0]
+                count = len(run)
+                compressed_rest = Rest(
+                    dots=first_rest.dots,
+                    category=first_rest.category,
+                    raw_brl=first_rest.raw_brl,
+                    duration=first_rest.duration,
+                    is_full_measure=True,
+                    multi_measure_count=count,
+                )
+                ly_str = compressed_rest.to_lilypond()
+                last_m = run[-1]
+                if last_m.bar_line_type != 'measure_separator':
+                    from .measure import _BAR_LINE_TO_LY
+                    bar_ly = _BAR_LINE_TO_LY.get(last_m.bar_line_type, '|')
+                    ly_str += f" {bar_ly}"
+                else:
+                    ly_str += " |"
+                measure_lines.append('    ' + ly_str)
+                i = j
+            else:
+                m = self.measures[i]
+                ly_str, prev_midi = m.to_lilypond(prev_midi=prev_midi)
+                measure_lines.append('    ' + ly_str)
+                i += 1
 
         return '\n'.join(header + measure_lines)
 

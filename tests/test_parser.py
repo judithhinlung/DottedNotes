@@ -3223,6 +3223,131 @@ def test_bass_clef_sixth_above_e2():
     assert chord.notes[1].octave == 3
 
 
+# --- S5b-3: ensemble scores read intervals upward regardless of clef ---
+
+from dottednotes.models.instrument import InstrumentInfo
+
+
+def _parse_chords_ensemble(text: str, instruments=None) -> list:
+    """Like _parse_chords, but supplies an instrument list (BANA §33.2
+    header) so BrailleParser treats the piece as an ensemble score."""
+    from dottednotes.parser import BrailleParser, BrailleTokenizer
+    if instruments is None:
+        instruments = [InstrumentInfo(name='Violin I', abbreviation='vln', part_number='1')]
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens, instruments=instruments).parse()
+    return score.staves[0].measures[0].notes
+
+
+def test_no_instruments_keeps_clef_based_direction():
+    """Regression: an empty/omitted instrument list must not change
+    existing (non-ensemble) behavior — same input as
+    test_third_below_c4_treble_is_a3, still 3rd *below* C4 = A3."""
+    items = _parse_chords_ensemble('⠐⠹⠬', instruments=[])
+    chord = items[0]
+    assert chord.notes[1].note_name == 'A'
+    assert chord.notes[1].octave == 3
+
+
+def test_ensemble_treble_clef_interval_reads_upward():
+    """BANA 33.4.2: with an instrument list present, intervals read upward
+    in every part — treble clef no longer means "downward." Same input as
+    test_third_below_c4_treble_is_a3 (3rd below C4 = A3 there); here the
+    3rd above C4 = E4."""
+    items = _parse_chords_ensemble('⠐⠹⠬')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'E'
+    assert chord.notes[1].octave == 4
+
+
+def test_ensemble_alto_clef_interval_reads_upward():
+    """Alto clef would normally also read downward (like treble); an
+    ensemble score overrides that too."""
+    # ⠜⠬⠇ = alto clef; ⠐⠹ = C4 quarter; ⠬ = 3rd interval
+    items = _parse_chords_ensemble('⠜⠬⠇⠐⠹⠬')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'E'
+    assert chord.notes[1].octave == 4
+
+
+def test_ensemble_bass_clef_interval_still_reads_upward():
+    """Bass clef already reads upward outside ensembles (BANA general
+    rule); an ensemble score must not flip that to downward. Same
+    expectation as test_bass_clef_third_above_e2."""
+    items = _parse_chords_ensemble('⠜⠼⠇⠼⠙⠲⠘⠫⠬')
+    chord = items[0]
+    assert chord.notes[1].note_name == 'G'
+    assert chord.notes[1].octave == 2
+
+
+# --- S5b-3: divisi-in-octaves voice reconstruction (BANA 33.4.2) ---
+#
+# Trigger confirmed against the real BANA Example 33.4.2-2 (decoded via
+# the tokenizer from the manual's own braille-ASCII text): a WORD_SIGN
+# "div" token, followed by a note, followed by a doubled octave-interval
+# (⠤⠤) sign. That doubling already activates ordinary interval carry
+# (S5-... interval doubling) — S5b-3 only changes what the carry produces
+# once "div" was seen: two independent voices instead of a chord per note.
+#
+# ⠜⠙⠊⠧⠄ = word sign + d + i + v + end word sign ("div")
+# ⠐⠹⠤⠤  = octave4, C4 quarter, doubled 8th (octave) interval -> divisi trigger
+# ⠱⠫⠻   = D4, E4, F4 quarters (carried divisi voice; completes measure 1)
+# ⠀      = bar line (carry must survive this, per BANA 33.4.2/existing carry rules)
+# ⠳⠪    = G4, A4 quarters (still carried divisi voice, in measure 2)
+# ⠤      = single terminating octave sign (clears carry, no new voice note)
+# ⠺⠨⠹   = B4 quarter, octave5 C5 quarter (plain notes, divisi already ended)
+
+def _divisi_measures(text: str):
+    from dottednotes.parser import BrailleParser, BrailleTokenizer
+    instruments = [InstrumentInfo(name='Violin I', abbreviation='vln', part_number='1')]
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens, instruments=instruments).parse()
+    return score.staves[0].measures
+
+
+def test_divisi_octave_reconstructs_two_voices_spanning_a_bar_line():
+    measures = _divisi_measures('⠜⠙⠊⠧⠄⠐⠹⠤⠤⠱⠫⠻⠀⠳⠪⠤⠺⠨⠹')
+
+    m1 = measures[0]
+    assert len(m1.notes) == 1
+    voice = m1.notes[0]
+    assert isinstance(voice, InAccord)
+    assert voice.in_accord_type == 'divisi_octave'
+    # Treble clef (default, no explicit clef cell) -> highest voice first.
+    higher, lower = voice.parts
+    assert [n.note_name for n in lower] == ['C', 'D', 'E', 'F']
+    assert [n.octave for n in lower] == [4, 4, 4, 4]
+    assert [n.note_name for n in higher] == ['C', 'D', 'E', 'F']
+    assert [n.octave for n in higher] == [5, 5, 5, 5]
+
+    m2 = measures[1]
+    # Divisi voice continues from measure 1 (G4/A4), then terminates and
+    # B4/C5 are plain notes, not part of any InAccord.
+    assert len(m2.notes) == 3
+    voice2 = m2.notes[0]
+    assert isinstance(voice2, InAccord)
+    higher2, lower2 = voice2.parts
+    assert [n.note_name for n in lower2] == ['G', 'A']
+    assert [n.note_name for n in higher2] == ['G', 'A']
+    assert [n.octave for n in higher2] == [5, 5]
+    assert m2.notes[1].note_name == 'B' and m2.notes[1].octave == 4
+    assert m2.notes[2].note_name == 'C' and m2.notes[2].octave == 5
+
+
+def test_octave_doubling_without_div_marking_still_builds_chords():
+    """Control: the same doubled-octave-interval pattern without a
+    preceding 'div' word-sign must keep today's behavior (a Chord per
+    note via ordinary interval-carry), matching Example 33.4.2-1's plain
+    double/octave stops — 'div' is what makes it a voice split, not the
+    doubled sign alone."""
+    from dottednotes.models import Chord
+    measures = _divisi_measures('⠐⠹⠤⠤⠱⠫⠻⠀⠳⠪⠤⠺⠨⠹')
+    m1 = measures[0]
+    assert all(isinstance(item, Chord) for item in m1.notes)
+    assert [c.notes[0].note_name for c in m1.notes] == ['C', 'D', 'E', 'F']
+    assert [c.notes[1].octave for c in m1.notes] == [5, 5, 5, 5]
+
+
 # --- LilyPond rendering ---
 
 def test_chord_lilypond_format():
@@ -3995,3 +4120,75 @@ def test_resolve_abbreviation_override():
 def test_resolve_abbreviation_raises_without_override():
     with pytest.raises(ValueError, match="Glockenspiel"):
         resolve_abbreviation('Glockenspiel')
+
+
+def test_multi_measure_rest_parsing():
+    from dottednotes.parser.tokenizer import BrailleTokenizer
+    from dottednotes.parser.braille_parser import BrailleParser
+
+    pipeline = BRLInputPipeline()
+
+    # 1. Two-measure rest (⠍⠍)
+    text1 = pipeline._ascii_to_unicode('MM')
+    tokens1 = BrailleTokenizer().tokenize(text1)
+    score1 = BrailleParser(tokens=tokens1).parse()
+    assert len(score1.staves[0].measures) == 2
+    # Verification of compressed LilyPond output
+    ly1 = score1.to_lilypond()
+    assert 'R1*2' in ly1
+
+    # 2. Three-measure rest (⠍⠍⠍)
+    text2 = pipeline._ascii_to_unicode('MMM')
+    tokens2 = BrailleTokenizer().tokenize(text2)
+    score2 = BrailleParser(tokens=tokens2).parse()
+    assert len(score2.staves[0].measures) == 3
+    ly2 = score2.to_lilypond()
+    assert 'R1*3' in ly2
+
+    # 3. Four-measure rest (⠼⠙⠍)
+    text3 = pipeline._ascii_to_unicode('#DM')
+    tokens3 = BrailleTokenizer().tokenize(text3)
+    score3 = BrailleParser(tokens=tokens3).parse()
+    assert len(score3.staves[0].measures) == 4
+    ly3 = score3.to_lilypond()
+    assert 'R1*4' in ly3
+
+    # 4. Multi-measure rest in non-default time signature (3/4 time signature)
+    # Time sig = #C4 (3/4), followed by space, followed by #DM (4-measure rest)
+    text4 = pipeline._ascii_to_unicode('#C4 #DM')
+    tokens4 = BrailleTokenizer().tokenize(text4)
+    score4 = BrailleParser(tokens=tokens4).parse()
+    assert len(score4.staves[0].measures) == 4
+    ly4 = score4.to_lilypond()
+    # 3/4 full-measure rest in LilyPond is R2.
+    assert 'R2.*4' in ly4
+
+
+def test_ensemble_omission_rest_reconstruction():
+    from dottednotes.parser.tokenizer import BrailleTokenizer
+    from dottednotes.parser.braille_parser import BrailleParser
+    from dottednotes.models.instrument import InstrumentInfo
+
+    # Create two parts: flute and violin
+    # Measure 1: both play. Measure 2: only flute plays (violin is omitted).
+    # Since ensemble=True (or instruments are supplied), violin should get a reconstructed rest for Measure 2.
+    raw = (
+        '⠨⠜⠐⠹⠱⠫⠻⠀⠐⠹⠱⠫⠻\n'  # 2 measures for flute/right hand
+        '⠸⠜⠸⠳⠪⠺⠹\n'             # Only 1 measure for violin/left hand
+    )
+    tokens = BrailleTokenizer().tokenize(raw)
+    
+    # Enable ensemble mode explicitly
+    score = BrailleParser(tokens=tokens, ensemble=True).parse()
+    
+    assert len(score.staves) == 2
+    # Both staves should now have exactly 2 measures
+    assert len(score.staves[0].measures) == 2
+    assert len(score.staves[1].measures) == 2
+    
+    # Staff 1 Measure 2 should have notes/pitch
+    assert len(score.staves[0].measures[1].notes) == 4  # C D E F
+    # Staff 2 Measure 2 should have been reconstructed as a full-measure rest
+    assert len(score.staves[1].measures[1].notes) == 1
+    assert score.staves[1].measures[1].notes[0].is_full_measure
+

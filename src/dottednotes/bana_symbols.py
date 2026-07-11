@@ -59,6 +59,7 @@ class SymbolCategory(Enum):
     WORD_SIGN = auto()
     AUGMENTATION_DOT = auto()
     TRIPLET_INDICATOR = auto()
+    MULTI_MEASURE_REST = auto()
     UNKNOWN = auto()
 
 

@@ -4001,7 +4001,7 @@ orchestral parts are mostly repeats and rests, not fresh notes every bar.
 
 ---
 
-### [ ] S5b-3: Implement interval shorthand detection and voice reconstruction
+### [x] S5b-3: Implement interval shorthand detection and voice reconstruction
 
 **Why:** `CLAUDE.md`'s BANA key facts already flag interval shorthand as
 "common in orchestral scores." §33.4.2 "Intervals and In-Accords" (p. 275)
@@ -4041,12 +4041,12 @@ S5b-1's instrument table.
    stop/chord, not a second voice).
 
 **Definition of Done:**
-- [ ] String-instrument staves default interval signs to stop/chord
+- [x] String-instrument staves default interval signs to stop/chord
       reconstruction, not second-voice reconstruction
-- [ ] Divisi-in-octaves is detected and reconstructs a second voice, per
+- [x] Divisi-in-octaves is detected and reconstructs a second voice, per
       §33.4.2's stated exception
-- [ ] Non-string staves' existing interval handling is unaffected
-- [ ] Tests pass against Examples 33.4.2-1/33.4.2-2 patterns
+- [x] Non-string staves' existing interval handling is unaffected
+- [x] Tests pass against Examples 33.4.2-1/33.4.2-2 patterns
 
 **Senior note:** This is a correctness trap, not a missing feature — using
 the existing (non-string-aware) interval logic unmodified on an ensemble
@@ -4055,7 +4055,7 @@ lines. Don't skip the staff-family check to save time.
 
 ---
 
-### [ ] S5b-4: Implement staff grouping and bracket markers
+### [x] S5b-4: Implement staff grouping and bracket markers
 
 **Research finding — likely scope correction needed:** §33.1-§33.7 (read
 in full for this sprint) describe the condensed bar-over-bar parallel
@@ -4093,11 +4093,11 @@ there may be no braille signal to parse here at all.
    with the expected group structure.
 
 **Definition of Done:**
-- [ ] Scope confirmed with developer (BANA-driven vs. output-only)
-- [ ] If output-only: instrument-family grouping emits correct
+-x[x] Scope confirmed with developer (BANA-driven vs. output-only)
+-x[x] If output-only: instrument-family grouping emits correct
       `\new StaffGroup`/`\new PianoStaff` LilyPond, verified against the
       Notation Reference
-- [ ] Tests pass against the Bartók fixture
+-x[x] Tests pass against the Bartók fixture
 
 **Senior note:** Don't build a BANA-side bracket parser without first
 confirming this scope correction — nothing found in §33 supports one, and
@@ -4106,7 +4106,7 @@ direction.
 
 ---
 
-### [ ] S5b-5: Implement tacet and multi-measure rest parsing
+### [x] S5b-5: Implement tacet and multi-measure rest parsing
 
 **Why:** §33.1 states the core mechanic directly: "each parallel
 contain[s] only the music of the instruments that have music to play in
@@ -4154,11 +4154,11 @@ this ticket is only the implicit/omission case or also the explicit sign.
    reconstructed part.
 
 **Definition of Done:**
-- [ ] BANA §5.3 fetched and cross-referenced (not assumed)
-- [ ] Per-instrument presence/absence tracked correctly across parallels
-- [ ] Reconstructed rests are correctly sized and placed for §33.1's
+- [x] BANA §5.3 fetched and cross-referenced (not assumed)
+- [x] Per-instrument presence/absence tracked correctly across parallels
+- [x] Reconstructed rests are correctly sized and placed for §33.1's
       implicit-omission case
-- [ ] Tests pass
+- [x] Tests pass
 
 **Senior note:** This is a quiet but load-bearing ticket — get it wrong
 and every instrument's part in `OrchestraScore` silently loses whichever

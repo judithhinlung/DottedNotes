@@ -15,6 +15,7 @@ from ..bana_symbols import (
     IN_ACCORD_CELLS,
     INTERVAL_CELLS,
     KEY_SIGNATURE_CELLS,
+    LITERARY_DIGITS,
     NOTE_CELLS,
     OCTAVE_MARKS,
     ORNAMENT_CELLS,
@@ -27,6 +28,7 @@ from ..models.accidental import Accidental, AccidentalType
 from ..models.chord import Chord
 from ..models.in_accord import InAccord
 from ..models.articulation import Articulation, ArticulationType
+from ..models.instrument import InstrumentInfo
 from ..models.clef import Clef, ClefType
 from ..models.duration import Duration, TICKS_PER_QUARTER
 from ..models.dynamic import Dynamic, DynamicLevel
@@ -174,6 +176,10 @@ class _PendingNote:
     triplet_group_end: bool = False  # S5-9: True on the last note/rest of
     # its triplet group (the one whose duration completes the group's
     # target); set during streaming by _apply_triplet_flag.
+    is_divisi_octave: bool = False  # S5b-3: True while a BANA 33.4.2
+    # divisi-in-octaves passage is active on a string part (word-sign
+    # "div" followed by a doubled octave-interval sign). Set during
+    # streaming; see BrailleParser._handle_interval/_buffer_note.
 
 
 @dataclass
@@ -186,6 +192,9 @@ class _PendingRest:
     # (BANA 8.4). Groups may mix note values (S5-9) — no longer necessarily
     # 3 same-value notes.
     triplet_group_end: bool = False  # S5-9: see _PendingNote.triplet_group_end
+    is_divisi_octave: bool = False  # S5b-3: always False — rests are never
+    # part of a divisi-in-octaves passage — kept only so _group_triplets
+    # can check this attribute uniformly across notes and rests.
 
 
 class BrailleParser:
@@ -208,8 +217,22 @@ class BrailleParser:
     State is reset at the start of each parse() call.
     """
 
-    def __init__(self, tokens: list[BrailleToken]) -> None:
+    def __init__(
+        self,
+        tokens: list[BrailleToken],
+        instruments: list[InstrumentInfo] | None = None,
+        ensemble: bool = False,
+    ) -> None:
         self._tokens = tokens
+        # S5b-3 / BANA 33.4.2: "Intervals and in-accords are read upward in
+        # all parts" in ensemble scores, overriding the clef-based direction
+        # used otherwise. The caller (not BrailleParser) isolates and parses
+        # the §33.2 instrument-list header via parse_instrument_list() —
+        # wiring that isolation into BrailleParser itself is S5b-7's job —
+        # so ensemble-ness here is just "was a non-empty instrument list
+        # supplied," not something detected from raw text.
+        self._instruments = instruments or []
+        self._ensemble_opt = ensemble
 
     def parse(self) -> Score:
         self._reset_state()
@@ -268,6 +291,8 @@ class BrailleParser:
                     if bar_type in ('final_double_bar', 'section_double_bar'):
                         self._active_intervals.clear()
                         self._last_interval_seen = None
+                        self._divisi_octave_active = False
+                        self._divisi_marking_pending = False
             elif token.category == SymbolCategory.REPEAT:
                 self._pending_repeat_count += 1
                 if self._pending_repeat_line is None:
@@ -302,6 +327,44 @@ class BrailleParser:
                 self._commit_pending_triplet_signs()
                 pending.append(self._buffer_rest(token))
                 self._apply_triplet_flag(pending[-1])
+            elif token.category == SymbolCategory.MULTI_MEASURE_REST:
+                self._commit_pending_triplet_signs()
+                active = left_staff if self._current_hand == 'left' else right_staff
+                if pending:
+                    active.add_measure(
+                        self._finalize_measure(
+                            pending,
+                            self._next_measure_number_for(active, right_staff, left_staff),
+                            staff=active,
+                            line=token.line,
+                        )
+                    )
+                    pending = []
+                count = 1
+                if token.character == '⠍⠍':
+                    count = 2
+                elif token.character == '⠍⠍⠍':
+                    count = 3
+                else:
+                    digits = []
+                    for c in token.character:
+                        if c in LITERARY_DIGITS:
+                            digits.append(str(LITERARY_DIGITS[c]))
+                    if digits:
+                        count = int(''.join(digits))
+                for _ in range(count):
+                    m_num = self._next_measure_number_for(active, right_staff, left_staff)
+                    dur = self._time_signature.get_full_measure_duration()
+                    rest_obj = Rest(
+                        dots=frozenset(),
+                        category=SymbolCategory.REST,
+                        raw_brl='⠍',
+                        duration=dur,
+                        is_full_measure=True,
+                    )
+                    m = Measure(number=m_num)
+                    m.add_note(rest_obj)
+                    active.add_measure(m)
             elif token.category == SymbolCategory.MEASURE_NUMBER:
                 self._handle_measure_number(token)
             elif token.category == SymbolCategory.WORD_SIGN:
@@ -368,6 +431,9 @@ class BrailleParser:
         for hand_staff in (right_staff, left_staff):
             if hand_staff.measures:
                 score.add_staff(hand_staff)
+
+        if self._is_ensemble:
+            score.reconstruct_omitted_rests()
 
         return score
 
@@ -608,6 +674,7 @@ class BrailleParser:
             # Terminator: clear all active doublings simultaneously (BANA 9.3.3).
             self._active_intervals.clear()
             self._last_interval_seen = None
+            self._divisi_octave_active = False
             return
 
         # Case 2: doubled sign detected (same sign seen twice, no note between).
@@ -615,6 +682,17 @@ class BrailleParser:
             # Activate carry; first-note application will happen in _buffer_note.
             self._active_intervals[interval_number] = None
             self._last_interval_seen = None
+            # BANA 33.4.2: a pending "div" word-sign plus a doubled *octave*
+            # sign is the divisi-in-octaves trigger. The note right before
+            # this doubled sign already received the interval via Case 3's
+            # single-application call a moment ago — retroactively flag it
+            # so _finalize_voice_part reconstructs a second voice for it
+            # instead of a chord.
+            if interval_number == 8 and self._divisi_marking_pending:
+                self._divisi_marking_pending = False
+                self._divisi_octave_active = True
+                if pending:
+                    pending[-1].is_divisi_octave = True
             return
 
         # Case 3: first occurrence of this sign — could be single or first of doubled.
@@ -631,8 +709,13 @@ class BrailleParser:
         pnote: '_PendingNote',
     ) -> None:
         """Compute the interval note's pitch and append it to pnote.interval_notes."""
-        clef_str = self._clef.clef_type.name  # 'TREBLE', 'BASS', 'ALTO', 'TENOR'
-        descending = clef_str in ('TREBLE', 'ALTO')
+        if self._is_ensemble:
+            # BANA 33.4.2: "Intervals and in-accords are read upward in all
+            # parts" in ensemble scores — clef no longer decides direction.
+            descending = False
+        else:
+            clef_str = self._clef.clef_type.name  # 'TREBLE', 'BASS', 'ALTO', 'TENOR'
+            descending = clef_str in ('TREBLE', 'ALTO')
         iname, ioctave = _interval_pitch(
             pnote.note_name, pnote.octave, interval_number, descending
         )
@@ -801,6 +884,12 @@ class BrailleParser:
         for interval_number in sorted(self._active_intervals):
             self._apply_interval(interval_number, pnote)
 
+        # S5b-3: while a divisi-in-octaves passage is active (see
+        # _handle_interval), every note carried by the octave interval is
+        # part of the reconstructed second voice, not a chord.
+        if self._divisi_octave_active:
+            pnote.is_divisi_octave = True
+
         # A note resets doubled-sign detection for intervals.
         self._last_interval_seen = None
 
@@ -841,6 +930,12 @@ class BrailleParser:
         piece_started: bool,
     ) -> None:
         text = token.character  # already decoded to a plain string by the tokenizer
+        if text.strip().lower() == 'div':
+            # BANA 33.4.2 divisi-in-octaves signal (Example 33.4.2-2): a
+            # structural trigger for the next octave-interval doubled sign,
+            # not a rendered text marking.
+            self._divisi_marking_pending = True
+            return
         marking_type = (
             TextMarkingType.TEMPO
             if text.lower() in TEMPO_TERMS
@@ -951,6 +1046,12 @@ class BrailleParser:
         resolved = self._resolve_measure_durations(pending)
         measure_ticks = round(self._time_signature.beats_per_measure() * TICKS_PER_QUARTER)
         items: list = []
+        # S5b-3: parallel to `items`, one entry per pending note/rest — the
+        # divisi-octave "second voice" Note for notes where
+        # pnote.is_divisi_octave is True, else None. Kept separate from
+        # `items` (rather than merged into a Chord) so _group_triplets can
+        # reconstruct two independent voices instead of stacked notes.
+        divisi_partners: list = []
         for pnote, dur_value in zip(pending, resolved):
             dur = Duration(value=dur_value, dots=pnote.dots, is_triplet=pnote.is_triplet)
             if isinstance(pnote, _PendingRest):
@@ -965,6 +1066,7 @@ class BrailleParser:
                     duration=dur,
                     is_full_measure=is_full,
                 ))
+                divisi_partners.append(None)
                 continue
             written = Note(
                 dots=frozenset(),
@@ -984,7 +1086,23 @@ class BrailleParser:
                 slur_bracket_open=pnote.slur_bracket_open,
                 slur_bracket_close=pnote.slur_bracket_close,
             )
-            if pnote.interval_notes:
+            if pnote.is_divisi_octave and pnote.interval_notes:
+                # Divisi-in-octaves (BANA 33.4.2): the octave partner is a
+                # second voice, not a chord tone. Only the octave interval
+                # is expected to be active during a divisi passage, so the
+                # first interval_notes entry is the partner.
+                iname, ioctave, iacc = pnote.interval_notes[0]
+                items.append(written)
+                divisi_partners.append(Note(
+                    dots=frozenset(),
+                    category=SymbolCategory.NOTE,
+                    raw_brl='',
+                    note_name=iname,
+                    octave=ioctave,
+                    duration=dur,
+                    accidental=iacc,
+                ))
+            elif pnote.interval_notes:
                 chord_notes = [written]
                 for iname, ioctave, iacc in pnote.interval_notes:
                     chord_notes.append(Note(
@@ -997,12 +1115,17 @@ class BrailleParser:
                         accidental=iacc,
                     ))
                 items.append(Chord(notes=chord_notes))
+                divisi_partners.append(None)
             else:
                 items.append(written)
-        return self._group_triplets(items, pending)
+                divisi_partners.append(None)
+        return self._group_triplets(items, pending, divisi_partners)
 
-    def _group_triplets(self, items: list, pending: list[_PendingNote]) -> list:
-        """Wrap each triplet group into a Tuplet (S5-8/S5-9).
+    def _group_triplets(
+        self, items: list, pending: list[_PendingNote], divisi_partners: list | None = None
+    ) -> list:
+        """Wrap each triplet group into a Tuplet (S5-8/S5-9), and each
+        divisi-in-octaves run into a 2-voice InAccord (S5b-3).
 
         Group boundaries were already decided at streaming time by
         _apply_triplet_flag/_register_triplet_item (duration-based, S5-9)
@@ -1010,17 +1133,63 @@ class BrailleParser:
         chunks by those markers, so groups may contain any number of
         notes/rests, not just 3.
 
-        Every group is expected to already be closed by the time this
-        runs: _check_triplet_group_not_open_at_bar_line raises before a
-        measure boundary (or end-of-input) is ever reached with a group
+        Every triplet group is expected to already be closed by the time
+        this runs: _check_triplet_group_not_open_at_bar_line raises before
+        a measure boundary (or end-of-input) is ever reached with a group
         still mid-flight, since an individual group's notes must complete
         within one measure (developer-confirmed — only a doubled-sign
         *block* may span a bar line, via a fresh group starting clean in
         the next measure, not a single group's own notes).
+
+        Divisi runs are different: pending[i].is_divisi_octave tracks the
+        same octave-interval carry used for chords elsewhere (see
+        _handle_interval/_buffer_note), which is allowed to span bar
+        lines — so a run open at either end of this measure's `pending`
+        is simply grouped as far as it goes *within this measure*; the
+        next/previous measure's own _group_triplets call independently
+        groups its own share of the same overall passage. Consecutive
+        per-measure InAccords with consistent voice ordering render as one
+        continuous pair of voices across the bar line in LilyPond, with no
+        need for a data structure spanning multiple Measure objects.
+
+        Divisi and triplet grouping are assumed mutually exclusive — no
+        pending item is expected to have both flags set — so a single
+        left-to-right pass can track both without index-alignment issues.
         """
+        divisi_partners = divisi_partners or [None] * len(pending)
+        clef_str = self._clef.clef_type.name
+        # BANA in-accord convention (models/in_accord.py): treble/alto
+        # clef lists the highest voice first; bass/tenor lists the lowest
+        # first. Ensemble intervals always read upward (S5b-3), so the
+        # divisi partner is always the higher of the pair.
+        highest_first = clef_str in ('TREBLE', 'ALTO')
+
         result: list = []
         group_items: list = []
-        for item, pnote in zip(items, pending):
+        divisi_written: list = []
+        divisi_derived: list = []
+
+        def flush_divisi() -> None:
+            if not divisi_written:
+                return
+            # Copy: the InAccord must own its own lists, not the same
+            # objects `divisi_written`/`divisi_derived` go on to accumulate
+            # into for the *next* run after clear() below.
+            parts = (
+                [list(divisi_derived), list(divisi_written)]
+                if highest_first
+                else [list(divisi_written), list(divisi_derived)]
+            )
+            result.append(InAccord(parts=parts, in_accord_type='divisi_octave'))
+            divisi_written.clear()
+            divisi_derived.clear()
+
+        for item, pnote, partner in zip(items, pending, divisi_partners):
+            if pnote.is_divisi_octave:
+                divisi_written.append(item)
+                divisi_derived.append(partner)
+                continue
+            flush_divisi()
             if not pnote.is_triplet:
                 result.append(item)
                 continue
@@ -1028,6 +1197,7 @@ class BrailleParser:
             if pnote.triplet_group_end:
                 result.append(Tuplet(items=group_items))
                 group_items = []
+        flush_divisi()
 
         return result
 
@@ -1307,6 +1477,10 @@ class BrailleParser:
     # ------------------------------------------------------------------
 
     def _reset_state(self) -> None:
+        # BANA 33.4.2: any supplied instrument list means this is an
+        # ensemble score, which reads intervals upward in every part
+        # regardless of clef (see _apply_interval).
+        self._is_ensemble: bool = self._ensemble_opt or bool(self._instruments)
         self._current_octave: int = 4
         self._key_signature: KeySignature = KeySignature(
             dots=frozenset(),
@@ -1355,6 +1529,18 @@ class BrailleParser:
         self._last_interval_seen: int | None = None
         self._interval_octave_override: int | None = None
         self._octave_mark_pending: bool = False
+        # S5b-3 / BANA 33.4.2 divisi-in-octaves state. _divisi_marking_pending
+        # is set by a "div" word-sign expression and consumed the moment the
+        # very next octave-interval (8th) doubled sign activates carry —
+        # that pairing (word-sign "div" immediately followed by a note then
+        # a doubled octave sign) is the actual trigger, per the developer.
+        # _divisi_octave_active stays True for as long as that octave carry
+        # itself stays active (same termination rules as any other interval
+        # carry — a single terminating sign, or a final/section double bar),
+        # which lets the reconstructed second voice continue across regular
+        # bar lines exactly like the underlying carry already does.
+        self._divisi_marking_pending: bool = False
+        self._divisi_octave_active: bool = False
         # In-accord state
         self._in_accord_parts: list[list] = []
         self._in_accord_type: str = 'full'
