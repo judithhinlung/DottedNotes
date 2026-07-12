@@ -6,6 +6,7 @@ import tempfile
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
+from .exceptions import DottedNotesError, LilyPondCompileError
 from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, has_ensemble_header
 from .parser.tokenizer import BrailleTokenizer
@@ -25,16 +26,15 @@ def _parse_score(text: str):
 
 def _compile_with_lilypond(ly_path: Path) -> None:
     """Invoke the `lilypond` binary on `ly_path`, writing PDF/MIDI output
-    next to it. Exits with a plain-text error message (no traceback) if
-    the binary is missing or compilation fails.
+    next to it. Raises LilyPondCompileError (caught centrally in main())
+    if the binary is missing or compilation fails -- never exits directly,
+    so callers other than the CLI (e.g. tests) can handle the failure too.
     """
     if shutil.which("lilypond") is None:
-        print(
-            "Error: the 'lilypond' program is not installed or not on your "
-            "PATH. Install LilyPond to use --compile.",
-            file=sys.stderr,
+        raise LilyPondCompileError(
+            "the 'lilypond' program is not installed or not on your PATH. "
+            "Install LilyPond to use --compile."
         )
-        sys.exit(1)
 
     output_basename = ly_path.with_suffix("")
     result = subprocess.run(
@@ -43,8 +43,7 @@ def _compile_with_lilypond(ly_path: Path) -> None:
         text=True,
     )
     if result.returncode != 0:
-        print(f"Error: lilypond compilation failed:\n{result.stderr}", file=sys.stderr)
-        sys.exit(1)
+        raise LilyPondCompileError("lilypond compilation failed", stderr=result.stderr)
 
     print(
         f"Compiled {output_basename}.pdf and {output_basename}.midi",
@@ -102,7 +101,16 @@ def main() -> None:
     convert_parser.set_defaults(func=_run_convert)
 
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except DottedNotesError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        if isinstance(e, LilyPondCompileError) and e.stderr:
+            print(e.stderr, file=sys.stderr)
+        sys.exit(1)
+    except OSError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

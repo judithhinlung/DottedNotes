@@ -1,5 +1,12 @@
+from pathlib import Path
 from dottednotes.models import Score, Staff
 from dottednotes.renderers import LilyPondFormatter, FormattingSettings
+from dottednotes.parser.input_pipeline import BRLInputPipeline
+from dottednotes.parser.tokenizer import BrailleTokenizer
+from dottednotes.parser.braille_parser import BrailleParser
+from dottednotes.parser.ensemble_parser import EnsembleParser
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 def test_formatter_defaults_exist():
     formatter = LilyPondFormatter()
@@ -22,48 +29,45 @@ def test_formatter_override():
     assert settings.staff_size == 22.2
     assert settings.margin_mm == 15.0
 
-def test_formatter_detects_solo_piano():
+def test_formatter_detects_solo_piano_fixture():
+    # Use fingering_melody.brf for Solo Piano testing
     formatter = LilyPondFormatter()
+    text = BRLInputPipeline().load(FIXTURES / "fingering_melody.brf")
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
     
-    # Empty score defaults to Solo Piano
-    assert formatter.get_settings(Score()).category == "Solo Piano"
-    
-    # 1 Keyboard staff
-    score1 = Score()
-    score1.add_staff(Staff(name="Piano"))
-    assert formatter.get_settings(score1).category == "Solo Piano"
+    assert formatter.detect_category(score) == "Solo Piano"
+    settings = formatter.get_settings(score)
+    assert settings.category == "Solo Piano"
+    assert settings.staff_size == 20.0
 
-    # 2 Keyboard staves
-    score2 = Score()
-    score2.add_staff(Staff(name="rh"))
-    score2.add_staff(Staff(name="lh"))
-    assert formatter.get_settings(score2).category == "Solo Piano"
-
-def test_formatter_detects_art_song():
+def test_formatter_detects_chamber_fixture():
+    # Use fengyang_flower_drum.brf for Chamber testing
     formatter = LilyPondFormatter()
+    text = BRLInputPipeline().load(FIXTURES / "fengyang_flower_drum.brf")
+    score = EnsembleParser().parse(text)
     
-    # 1 Vocal staff + 1 Keyboard staff
+    assert formatter.detect_category(score) == "Chamber"
+    settings = formatter.get_settings(score)
+    assert settings.category == "Chamber"
+    assert settings.staff_size == 22.2
+
+def test_formatter_detects_orchestral_bartok():
+    # Use instruments from Bartok Romanian Folk Dances for Orchestral testing
+    formatter = LilyPondFormatter()
     score = Score()
-    score.add_staff(Staff(name="Soprano"))
-    score.add_staff(Staff(name="Piano"))
-    assert formatter.get_settings(score).category == "Art Song"
-
-def test_formatter_detects_chamber():
-    formatter = LilyPondFormatter()
+    score.add_staff(Staff(name="Piccolo"))
+    score.add_staff(Staff(name="Flutes I&II"))
+    score.add_staff(Staff(name="Clarinets I&II in B-flat"))
+    score.add_staff(Staff(name="Bassoons I&II"))
+    score.add_staff(Staff(name="Horns in F I&II"))
+    score.add_staff(Staff(name="Violins I"))
+    score.add_staff(Staff(name="Violins II"))
+    score.add_staff(Staff(name="Violas"))
+    score.add_staff(Staff(name="Violoncellos"))
+    score.add_staff(Staff(name="Double Basses"))
     
-    # 4 staves (string quartet)
-    score = Score()
-    score.add_staff(Staff(name="Violin I"))
-    score.add_staff(Staff(name="Violin II"))
-    score.add_staff(Staff(name="Viola"))
-    score.add_staff(Staff(name="Cello"))
-    assert formatter.get_settings(score).category == "Chamber"
-
-def test_formatter_detects_orchestral():
-    formatter = LilyPondFormatter()
-    
-    # > 6 staves
-    score = Score()
-    for i in range(7):
-        score.add_staff(Staff(name=f"Instrument {i}"))
-    assert formatter.get_settings(score).category == "Orchestral"
+    assert formatter.detect_category(score) == "Orchestral"
+    settings = formatter.get_settings(score)
+    assert settings.category == "Orchestral"
+    assert settings.staff_size == 21.0

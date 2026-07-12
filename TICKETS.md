@@ -4742,7 +4742,7 @@ silently broken.
 
 ---
 
-### [ ] S7-3: Add error handling and meaningful plain-text error messages
+### [x] S7-3: Add error handling and meaningful plain-text error messages
 
 **Why:** For accessibility, especially for blind composers using
 VoiceOver, all error messages must be plain text and meaningful. Right now
@@ -4773,13 +4773,13 @@ unhandled Python exception with a full traceback dumped to the terminal.
    message text and exit code.
 
 **Definition of Done:**
-- [ ] `exceptions.py` defines `DottedNotesError` and at least
+- [x] `exceptions.py` defines `DottedNotesError` and at least
       `BrailleParseError`, `LilyPondCompileError`
-- [ ] Parser-reachable failure paths raise these instead of bare built-in
+- [x] Parser-reachable failure paths raise these instead of bare built-in
       exceptions
-- [ ] CLI catches them and prints a single plain-text line to `stderr`, no
+- [x] CLI catches them and prints a single plain-text line to `stderr`, no
       traceback, non-zero exit code
-- [ ] Unit tests verify both the message and exit code for at least one
+- [x] Unit tests verify both the message and exit code for at least one
       parser failure and one missing-file case
 
 **Senior note:** Don't wrap `main()`'s body in a bare `except Exception`.
@@ -5164,6 +5164,50 @@ happens to do.
       introduced in S7b-2 through S7b-6
 - [ ] Each default cites its source evidence
 - [ ] Referenced from `CLAUDE.md`'s docs/ listing
+
+---
+
+### [ ] S7b-9: Implement Vocal Support and Art Song Rendering
+
+**Why:** The `LilyPondFormatter` layout templates include `"Art Song"` (voice +
+piano), but the codebase currently lacks any domain concept or parsing rules
+for vocals or lyrics. We need to introduce a vocal family/instrument category,
+add parser/model support for lyrics and vocal parts, and verify this using a
+real vocal test fixture.
+
+**Steps:**
+1. Add `VOCAL = "Vocal"` to `InstrumentFamily` in
+   `src/dottednotes/models/instrument.py`.
+2. Register common vocal parts (e.g., "Soprano", "Alto", "Tenor", "Bass",
+   "Voice", "Vocal") in `_NAME_TO_FAMILY` in
+   `src/dottednotes/models/instrument.py` mapping to `InstrumentFamily.VOCAL`.
+3. Add a new test fixture `tests/fixtures/vocal_test.brf` containing a simple
+   vocal line with lyrics and a piano accompaniment (art song format). Also add
+   `tests/fixtures/vocal_test.ly` as the ground-truth LilyPond target.
+4. Extend the parser (`BrailleParser` or a new vocal/lyrics parser module) to
+   recognize literary braille lyric text cells in the BRF stream and attach them
+   as lyric syllables/texts to the corresponding note elements.
+5. Update `Staff` or `Score` rendering logic to format vocal staves with
+   aligned `\addlyrics` blocks containing the parsed lyric syllables, and
+   ensure the vocal staff is properly paired alongside the keyboard (or other
+   instrumental) accompaniment in the generated LilyPond score context.
+6. Write integration tests in `tests/test_vocal.py` ensuring that
+   `vocal_test.brf` parses successfully, correctly groups vocal staves under
+   `InstrumentFamily.VOCAL`, associates the lyrics with notes, and renders valid
+   LilyPond code matching `vocal_test.ly`.
+
+**Definition of Done:**
+- [ ] `InstrumentFamily.VOCAL` is added and integrated into instrument family
+      matching
+- [ ] Vocal parts (Soprano, Alto, Tenor, Bass, Voice) are recognized as `VOCAL`
+- [ ] `vocal_test.brf` and `vocal_test.ly` fixtures are added to
+      `tests/fixtures/`
+- [ ] Parser extracts lyrics from the braille stream and associates them with
+      Note objects
+- [ ] `to_lilypond()` outputs `\addlyrics` blocks for vocal staves, correctly
+      aligned and paired with the accompaniment staves
+- [ ] Integration tests verify the end-to-end translation of `vocal_test.brf`
+      to the correct LilyPond art song structure
 
 ---
 

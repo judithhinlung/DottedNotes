@@ -80,6 +80,39 @@ def test_convert_missing_lilypond_binary_reports_plain_text_error(
     assert "Traceback" not in captured.err
 
 
+# --- S7-3: error handling -- plain text, non-zero exit, no traceback ---
+
+
+def test_convert_missing_input_file_reports_plain_text_error(monkeypatch, tmp_path, capsys):
+    missing = tmp_path / "does_not_exist.brf"
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(missing)])
+    assert exc_info.value.code != 0
+
+    captured = capsys.readouterr()
+    assert "Error:" in captured.err
+    assert str(missing) in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_convert_malformed_input_reports_plain_text_parse_error(monkeypatch, tmp_path, capsys):
+    # A whole-measure repeat sign with no previous measure to repeat is
+    # malformed per BANA 18.2.3(a) -- MeasureRepeatError (a BrailleParseError).
+    brf = tmp_path / "malformed.brf"
+    brf.write_text('⠶', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf)])
+    assert exc_info.value.code != 0
+
+    captured = capsys.readouterr()
+    assert "Error:" in captured.err
+    assert "repeat sign" in captured.err
+    assert "Traceback" not in captured.err
+    assert captured.out == ""
+
+
 # --- Regression: real fixtures, both ends of the ensemble/solo dispatch ---
 
 

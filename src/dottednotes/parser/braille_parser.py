@@ -47,10 +47,11 @@ from ..models.staff import Staff
 from ..models.text_marking import TEMPO_TERMS, TextMarking, TextMarkingType
 from ..models.time_signature import TimeSignature
 from ..models.tuplet import Tuplet
+from ..exceptions import BrailleParseError
 from .tokenizer import BrailleToken
 
 
-class TripletDurationError(ValueError):
+class TripletDurationError(BrailleParseError):
     """Raised when a triplet group's notes/rests overshoot the group's
     implied target duration (S5-9): 3x the smallest tripleted note
     duration seen in the group (or, when a doubled-sign block contains an
@@ -60,7 +61,7 @@ class TripletDurationError(ValueError):
     """
 
 
-class MeasureRepeatError(ValueError):
+class MeasureRepeatError(BrailleParseError):
     """Raised when a whole-measure repeat sign (S5b-2, BANA 18.2) has no
     previous measure on the same staff to repeat. Per BANA 18.2.3(a), the
     braille repeat sign may never represent the first measure of a

@@ -10,6 +10,7 @@ from ..bana_symbols import (
     LITERARY_DIGITS,
     NUMBER_SIGN,
 )
+from ..exceptions import BrailleParseError
 from ..models.instrument import InstrumentInfo
 from ..models.orchestra_score import OrchestraScore
 from ..models.staff import Staff
@@ -311,7 +312,7 @@ class EnsembleParser:
             i += 1
 
         if not inst_lines:
-            raise ValueError("No instrument list header found in ensemble score.")
+            raise BrailleParseError("No instrument list header found in ensemble score.")
 
         instruments = parse_instrument_list("\n".join(inst_lines))
 
@@ -365,7 +366,7 @@ class EnsembleParser:
                     current_system.add_line(line)
 
         if not systems:
-            raise ValueError("No parallel systems found in ensemble score.")
+            raise BrailleParseError("No parallel systems found in ensemble score.")
 
         systems.sort(key=lambda s: s.measure_number)
 
@@ -488,7 +489,7 @@ class EnsembleParser:
                 return resolved_measures[state_key]
 
             if state_key in resolving:
-                raise ValueError(f"Circular parallel movement dependency for {inst_name} at measure {m_num}")
+                raise BrailleParseError(f"Circular parallel movement dependency for {inst_name} at measure {m_num}")
             resolving.add(state_key)
 
             res_type, val1, val2 = resolutions[inst_name][m_num]
@@ -509,7 +510,7 @@ class EnsembleParser:
                 inst_info = next(i for i in instruments if i.name == inst_name)
                 source_inst = find_instrument_by_abbrev(source_abbrev, instruments, inst_info)
                 if source_inst is None:
-                    raise ValueError(f"Source instrument for parallel movement not found for {inst_name} at measure {m_num}")
+                    raise BrailleParseError(f"Source instrument for parallel movement not found for {inst_name} at measure {m_num}")
 
                 source_measure = get_resolved_measure(source_inst.name, m_num)
 

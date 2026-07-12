@@ -314,6 +314,19 @@ def test_ensemble_parser_raises_clear_error_on_hand_sign_only_text():
     # With no genuine instrument-list header, EnsembleParser.parse() must
     # still fail -- but with the clear, specific message, not a confusing
     # downstream failure from bogus inst_lines slipping through.
+    from dottednotes.exceptions import BrailleParseError
+
     hand_sign_only = '⠀⠀⠀⠸⠜⠄⠹⠅⠱⠂⠫⠇⠻⠃⠀⠽⠅⠬⠇⠔⠁⠣⠅\n'
-    with pytest.raises(ValueError, match="No instrument list header found"):
+    with pytest.raises(BrailleParseError, match="No instrument list header found"):
         EnsembleParser().parse(hand_sign_only)
+
+
+def test_ensemble_parser_raises_braille_parse_error_when_header_has_no_measures():
+    # S7-3: a genuine instrument-list header with no measure content after
+    # it (e.g. a truncated transcription) is malformed input, not an
+    # internal bug -- must raise BrailleParseError, not a bare ValueError.
+    from dottednotes.exceptions import BrailleParseError
+
+    header_only = '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
+    with pytest.raises(BrailleParseError, match="No parallel systems found"):
+        EnsembleParser().parse(header_only)
