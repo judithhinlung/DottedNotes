@@ -8,8 +8,6 @@ from ..bana_symbols import (
     OCTAVE_MARKS,
     LOWER_DIGIT_CELLS,
     LITERARY_DIGITS,
-    WORD_SIGN,
-    END_WORD_SIGN,
     NUMBER_SIGN,
 )
 from ..models.instrument import InstrumentInfo
@@ -91,6 +89,31 @@ def extract_line_abbreviation(line_str: str) -> tuple[str | None, str]:
         return abbrev_cells, music_cells
 
     return None, line_str
+
+
+def _line_has_word_sign(line: str) -> bool:
+    """True if `line` contains a genuine standalone WORD_SIGN token, as
+    opposed to merely containing the same dot pattern as the second cell
+    of a HAND_SIGN_CELLS sequence (e.g. a two-hand piano piece's ⠨⠜/⠸⠜
+    hand sign followed later in the line by an unrelated END_WORD_SIGN-
+    shaped cell). Raw substring matching on WORD_SIGN/END_WORD_SIGN can't
+    tell these apart; the tokenizer's positional HAND_SIGN vs WORD_SIGN
+    classification (tokenizer.py) can. `line` must already be normalized
+    Unicode braille, same precondition as extract_measure_number.
+    """
+    tokens = BrailleTokenizer().tokenize(line)
+    return any(t.category == SymbolCategory.WORD_SIGN for t in tokens)
+
+
+def has_ensemble_header(text: str) -> bool:
+    """True if `text` (normalized Unicode braille) contains a BANA §33.2
+    instrument-list header line. Used to dispatch between EnsembleParser
+    and the solo BrailleParser/tokenizer path (see cli.py)."""
+    for line in text.splitlines():
+        m_num, _ = extract_measure_number(line)
+        if m_num is None and _line_has_word_sign(line):
+            return True
+    return False
 
 
 def decode_instrument_abbreviation(cells: str) -> tuple[str, list[str]]:
@@ -281,7 +304,7 @@ class EnsembleParser:
         while i < len(lines):
             line = lines[i]
             m_num, _ = extract_measure_number(line)
-            if m_num is None and WORD_SIGN in line and END_WORD_SIGN in line:
+            if m_num is None and _line_has_word_sign(line):
                 inst_lines.append(line)
             elif inst_lines:
                 break

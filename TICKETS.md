@@ -4605,9 +4605,44 @@ conventions. Confirmed directly: re-running the exact same detection
 logic against `BRLInputPipeline.load()`'s output for
 `fengyang_flower_drum.brf` (which does follow §33.2's instrument-list
 header conventions correctly) correctly returns `has_ensemble_header =
-True`. **The detection heuristic itself is not the bug** — don't spend
-this ticket's time rewriting it. The fix is entirely at the input-loading
-layer.
+True`.
+
+**Correction, found while implementing this ticket and smoke-testing the
+fix above end-to-end against every real fixture, not just Fengyang:** the
+paragraph above originally concluded "the detection heuristic itself is
+not the bug — don't spend this ticket's time rewriting it." That was
+correct for Fengyang specifically but wrong in general — there is a
+*second*, independent bug in the same heuristic, only reachable once the
+ASCII-conversion fix above unblocks real input from reaching it.
+`HAND_SIGN_CELLS` (`bana_symbols.py`) is a two-cell sequence (`⠨⠜` /
+`⠸⠜`, right/left hand) whose second cell is literally `WORD_SIGN`
+(`⠜`). A two-hand piano piece's hand-sign-prefixed line, followed later
+in the same line by an unrelated `⠄`-shaped cell that's just ordinary
+note content, is textually indistinguishable from a genuine
+instrument-list header line under raw substring matching. Confirmed on
+`tests/fixtures/fingering_melody.brf` (a real solo two-hand piece): both
+`cli.py`'s dispatch *and* `EnsembleParser.parse()`'s own internal
+`inst_lines` detection loop (`ensemble_parser.py`, ~line 279-291 — an
+independent copy of the identical flawed check) wrongly treat it as an
+ensemble score, and `EnsembleParser` then crashes with a confusing
+`ValueError: No parallel systems found in ensemble score.`
+
+The fix is **not** a rewrite of the heuristic's structure (measure-number-
+based line partitioning is unchanged) — it's swapping the raw substring
+test for a tokenizer-based one. `BrailleTokenizer` (`tokenizer.py`) already
+correctly and positionally distinguishes a `HAND_SIGN` token (`⠨`/`⠸` as
+the *first* cell of an exact 2-cell dict lookup) from a standalone
+`WORD_SIGN` token (only emitted when `⠜` appears as the current cell
+*alone*) — a hand sign never produces a `WORD_SIGN` token. This is already
+well-tested (`tests/test_parser.py`'s S5-4 hand-sign block). Add
+`has_ensemble_header(text)` and a private `_line_has_word_sign(line)`
+helper to `ensemble_parser.py` (tokenizing each candidate line and
+checking for a real `SymbolCategory.WORD_SIGN` token, instead of `WORD_SIGN
+in line and END_WORD_SIGN in line`), have `EnsembleParser.parse()`'s own
+`inst_lines` loop call the same helper, and have `cli.py` import and call
+`has_ensemble_header` directly instead of duplicating the loop — this also
+fixes the duplication that let the exact same bug exist unnoticed in two
+divergent copies in the first place.
 
 **Steps:**
 1. Restructure `src/dottednotes/cli.py`'s `argparse` setup to use
@@ -4632,13 +4667,14 @@ layer.
    `test_input_pipeline_lines`, `test_input_pipeline_missing_file`); delete
    those three and, if `.lines()`-style line splitting turns out to still
    be needed somewhere, add it to `BRLInputPipeline` instead of keeping
-   two parallel, inconsistent input-loading classes around. Don't touch
-   the `has_ensemble_header` detection logic itself (see above) — only the
-   text it's fed.
-5. Keep the ensemble-vs-solo dispatch already in `main()` structurally
-   as-is (`has_ensemble_header` via `extract_measure_number` /
-   `WORD_SIGN`/`END_WORD_SIGN`), now operating on `BRLInputPipeline`'s
-   normalized output.
+   two parallel, inconsistent input-loading classes around.
+5. Fix the hand-sign/word-sign false positive described above: add
+   `_line_has_word_sign(line)` and `has_ensemble_header(text)` to
+   `ensemble_parser.py` (tokenizer-based, replacing the raw substring
+   test), update `EnsembleParser.parse()`'s own `inst_lines` loop to call
+   `_line_has_word_sign`, and have `cli.py` import and call
+   `has_ensemble_header(text)` directly instead of maintaining its own
+   copy of the detection loop.
 6. Render via `Score.to_lilypond()` (post S7-1 — this ticket depends on
    S7-1 landing first, since it removes `LilypondRenderer`).
 7. If `--compile` is set: resolve an output path (write to a temp `.ly`
@@ -4652,12 +4688,15 @@ layer.
    `FileNotFoundError` if the binary isn't installed.
 9. Write CLI tests in `tests/test_cli.py` covering: `convert` with/without
    `output`, `--compile` (mocking or skipping actual `lilypond` invocation
-   — see S7-5 for the real end-to-end version), `--version`, and —
-   critically, as a regression test for this exact bug — converting
+   — see S7-5 for the real end-to-end version), `--version`, and — as
+   regression tests for both bugs found in this ticket — converting
    `tests/fixtures/fengyang_flower_drum.brf` (ASCII-encoded, real BANA
    orchestral-score conventions) end to end and asserting the output
    actually contains multiple named staves (e.g. `instrumentName =
-   "Flute"`), not just a bare `\version` line.
+   "Flute"`), not just a bare `\version` line; and separately converting
+   `tests/fixtures/fingering_melody.brf` (a real two-hand piano piece)
+   end to end and asserting it is *not* misrouted to `EnsembleParser`
+   (produces a two-staff `PianoStaff`, no `instrumentName` field).
 
 **Definition of Done:**
 - [ ] CLI supports `convert <input> [output]` with the subcommand structure
@@ -4666,27 +4705,40 @@ layer.
 - [ ] `dottednotes convert tests/fixtures/fengyang_flower_drum.brf`
       produces a real multi-staff orchestral score (flute, violin I,
       violin II, viola, cello, bass), not an empty `\version`-only file
+- [ ] `dottednotes convert tests/fixtures/fingering_melody.brf` succeeds
+      via the solo parser (not misrouted to `EnsembleParser`)
+- [ ] `EnsembleParser.parse()` on hand-sign-only text (no genuine header)
+      raises the clear `"No instrument list header found..."` message,
+      not a downstream `"No parallel systems found..."` failure caused by
+      a false-positive header match
 - [ ] CLI supports `--compile`, invoking `lilypond` via `subprocess.run`
       with an argument list (not a shell string)
 - [ ] CLI supports `--version`, sourced from installed package metadata,
       not a `pyproject.toml` file read
 - [ ] Missing `lilypond` binary produces a clear plain-text message instead
       of a raw `FileNotFoundError` traceback
-- [ ] `tests/test_cli.py` exists and covers the above, including the
-      Fengyang regression case
+- [ ] `tests/test_cli.py` exists and covers the above, including both the
+      Fengyang and fingering_melody regression cases
+- [ ] `tests/test_ensemble_parser.py` covers `has_ensemble_header` directly
+      for both the genuine-header and hand-sign-false-positive cases
 
 **Senior note:** Since `\score {}` already contains a `\midi {}` block
 (S7-1), plain `lilypond file.ly` with no extra flags produces both the PDF
 and the MIDI file in one invocation — resist the urge to add separate
 `--pdf`/`--midi`-style flags or multiple `lilypond` invocations; that
-complexity isn't needed here. Separately: this bug is a good example of
-why a silent empty-score fallback is dangerous for an accessibility tool
-specifically — a sighted developer testing with a small hand-typed
-Unicode-braille snippet (as most of this codebase's own tests do) would
-never have hit this, but a blind composer converting their actual
-BrailleNotetaker export would get a silently-empty output file with no
-error at all. This is exactly the failure mode S7-3's error handling
-should also make loud instead of silent.
+complexity isn't needed here. Separately: both bugs found in this ticket
+are a good example of why a silent empty-score fallback (and duplicated
+detection logic) is dangerous for an accessibility tool specifically — a
+sighted developer testing with a small hand-typed Unicode-braille snippet
+(as most of this codebase's own tests do) would never have hit either
+one, but a blind composer converting their actual BrailleNotetaker export
+(ASCII-encoded, real BANA conventions, real two-hand piano hand signs)
+would hit both. This is exactly the failure mode S7-3's error handling
+should also make loud instead of silent. The duplication angle matters
+too: the hand-sign bug existed identically in two places (`cli.py` and
+`ensemble_parser.py`) because the same flawed check was copy-pasted rather
+than shared — fixing it in only one place would have left the other
+silently broken.
 
 ---
 

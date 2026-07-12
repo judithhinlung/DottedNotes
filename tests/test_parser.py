@@ -5,7 +5,7 @@ import pytest
 
 from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES, SymbolCategory, TABLE_29_ENGLISH
 from dottednotes.models import Articulation, ArticulationType, Clef, ClefType, Dynamic, DynamicLevel, KeySignature, Ornament, OrnamentType, Score, TimeSignature
-from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, InputPipeline, parse_instrument_list, resolve_abbreviation
+from dottednotes.parser import BRLInputPipeline, BrailleParser, BrailleToken, BrailleTokenizer, parse_instrument_list, resolve_abbreviation
 from dottednotes.parser.instrument_list import _decode_abbreviation
 
 
@@ -602,26 +602,6 @@ def test_unclosed_triplet_group_at_end_of_input_raises():
     tokens = BrailleTokenizer().tokenize('⠐⠆⠹')  # sign, C quarter — never closes
     with pytest.raises(TripletDurationError):
         BrailleParser(tokens=tokens).parse()
-
-
-def test_input_pipeline_read(tmp_path: Path):
-    brf = tmp_path / "sample.brf"
-    brf.write_text("⠀⠼⠙⠲", encoding="utf-8")
-    pipeline = InputPipeline(brf)
-    assert pipeline.read() == "⠀⠼⠙⠲"
-
-
-def test_input_pipeline_lines(tmp_path: Path):
-    brf = tmp_path / "sample.brf"
-    brf.write_text("line one\nline two", encoding="utf-8")
-    pipeline = InputPipeline(brf)
-    assert pipeline.lines() == ["line one", "line two"]
-
-
-def test_input_pipeline_missing_file():
-    pipeline = InputPipeline("/nonexistent/path.brf")
-    with pytest.raises(FileNotFoundError):
-        pipeline.read()
 
 
 # --- BRLInputPipeline tests ---

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import pytest
 import warnings
+from pathlib import Path
 from dottednotes.parser.ensemble_parser import (
     EnsembleParser,
     extract_measure_number,
     extract_line_abbreviation,
     decode_instrument_abbreviation,
+    has_ensemble_header,
 )
 from dottednotes.parser.input_pipeline import BRLInputPipeline
 from dottednotes.models.orchestra_score import OrchestraScore
@@ -262,3 +264,56 @@ def test_orchestra_score_to_lilypond_no_header_when_unset():
     )
     score = EnsembleParser().parse(raw)
     assert r'\header' not in score.to_lilypond()
+
+
+# --- S7-2: hand-sign / word-sign dispatch false positive ---
+#
+# HAND_SIGN_CELLS ('⠨⠜': 'right', '⠸⠜': 'left') is a two-cell sequence
+# whose second cell is literally WORD_SIGN ('⠜'). A two-hand piano piece's
+# hand-sign-prefixed line, followed later by an unrelated END_WORD_SIGN
+# ('⠄')-shaped cell, used to be textually indistinguishable from a genuine
+# instrument-list header line under raw substring matching -- both
+# cli.py's dispatch and this module's own inst_lines detection loop did
+# `WORD_SIGN in line and END_WORD_SIGN in line`, which can't tell a real
+# standalone word-sign token from the tail of a hand sign. Fixed by
+# routing through the tokenizer's already-correct, already-tested
+# HAND_SIGN vs WORD_SIGN classification instead (see tokenizer.py's
+# _CLEF_PREFIX and HAND_SIGN_CELLS branches, and tests/test_parser.py's
+# S5-4 hand-sign block).
+
+def test_has_ensemble_header_false_for_hand_sign_line():
+    # tests/fixtures/fingering_melody.brf, line 5 (1-indexed): a left-hand
+    # sign (⠸⠜) with no leading measure number, immediately followed by an
+    # unrelated ⠄ cell -- the exact real-world shape that used to
+    # false-positive under raw substring matching.
+    hand_sign_line = '⠀⠀⠀⠸⠜⠄⠹⠅⠱⠂⠫⠇⠻⠃⠀⠽⠅⠬⠇⠔⠁⠣⠅'
+    assert has_ensemble_header(hand_sign_line) is False
+
+
+def test_has_ensemble_header_true_for_genuine_header():
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
+    )
+    assert has_ensemble_header(raw) is True
+
+
+def test_fingering_melody_not_routed_to_ensemble_parser():
+    # Regression: fingering_melody.brf is a real solo two-hand piano
+    # piece. Before the fix, cli.py's dispatch (mirroring this same
+    # heuristic) wrongly routed it to EnsembleParser, which then raised
+    # "No parallel systems found in ensemble score." -- a confusing
+    # failure for a file that was never an ensemble score to begin with.
+    text = BRLInputPipeline().load(
+        Path(__file__).parent / "fixtures" / "fingering_melody.brf"
+    )
+    assert has_ensemble_header(text) is False
+
+
+def test_ensemble_parser_raises_clear_error_on_hand_sign_only_text():
+    # With no genuine instrument-list header, EnsembleParser.parse() must
+    # still fail -- but with the clear, specific message, not a confusing
+    # downstream failure from bogus inst_lines slipping through.
+    hand_sign_only = '⠀⠀⠀⠸⠜⠄⠹⠅⠱⠂⠫⠇⠻⠃⠀⠽⠅⠬⠇⠔⠁⠣⠅\n'
+    with pytest.raises(ValueError, match="No instrument list header found"):
+        EnsembleParser().parse(hand_sign_only)
