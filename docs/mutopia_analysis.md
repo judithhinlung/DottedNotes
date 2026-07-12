@@ -48,15 +48,73 @@ LilyPond files in Mutopia overwhelmingly use standard paper size variables. Wher
 - `paper-height` and `paper-width` (frequently used to define standard dimensions or customized layouts)
 - In modern LilyPond, paper size is set via `#(set-default-paper-size "letter")` or `"a4"`.
 
-### Spacing and Margins (Average Values)
-The analyzed margins and system-system spacing vary significantly by instrumentation category to accommodate different densities of music:
+### Spacing and Margins (Mode / Median, not Average)
 
-| Category | Average Staff Size (pt) | Default Margin | System Spacing Rule |
-|----------|------------------------|----------------|---------------------|
-| Solo Piano | 20.0 | 20 mm | Tight (10-12pt baseline) |
-| Art Song | 20.0 | 18 mm | Moderate (12-14pt baseline) |
-| Chamber | 22.2 | 15 mm | Compact (14-16pt baseline) |
-| Orchestral | 21.0 | 12 mm | Very Compact (16-18pt system distance) |
+An arithmetic mean is misleading here: LilyPond's own built-in default
+global staff size is 20pt, and the overwhelming majority of scores in
+this corpus never override it at all (no `set-global-staff-size` call).
+Averaging a handful of outliers against a wall of "no override" produces
+a number — the previous version of this table's Chamber "22.2pt" — that
+isn't the staff size of any real score in the corpus. The mode and median
+below are, since both land exactly on a value scores actually use (`null`
+staff size is counted as 20.0pt below, since that's the size the score
+actually renders at when nothing overrides it).
+
+| Category | n | Staff-size mode (pt) | Staff-size median (pt) | Scores that override the default |
+|----------|--:|----------------------:|------------------------:|------------------------------------|
+| Solo Piano | 12 | 20.0 | 20.0 | 0 / 12 |
+| Art Song | 12 | 20.0 | 20.0 | 0 / 12 |
+| Chamber | 12 | 20.0 | 20.0 | 9 / 12 (7 effectively at 20.0, 5 at 24.0 — see note) |
+| Orchestral | 12 | 20.0 | 20.0 | 1 / 12 (21.0) |
+
+Every category's mode *and* median is 20.0pt — LilyPond's own default.
+Computed properly, **the raw corpus gives no category-level staff-size
+signal at all**: overrides are rare, and even where they exist (mostly a
+handful of Chamber scores at 24.0pt) they're a minority within their own
+category. This is exactly why S7b-4 uses a single curated anchor piece
+per category instead of a corpus-wide statistic — see
+`docs/lilypond_conventions.md`'s "A note on which numbers are actually
+cited". The `staff_size` values actually implemented in
+`LilyPondFormatter.DEFAULTS` (20.0 / 18.0 / 16.0 / 14.1pt) come from each
+category's anchor piece, not from this table.
+
+*Note on Chamber's split:* 3 of the 9 overriding scores set `20.0`
+explicitly (matching the default anyway); together with the 3 non-
+overriding scores that's 7 scores effectively at 20.0pt against 5 at
+24.0pt — and all 5 of those 24.0pt scores come from the same two Gossec
+symphony sources, so this may reflect one transcriber's habit rather than
+a genuine category-wide preference.
+
+### Margins
+
+Margin overrides are too sparse and inconsistently encoded in the raw
+corpus to support a category-level mode/median the way staff size does:
+
+| Category | Scores with an explicit `top-margin` | Raw values found |
+|----------|----------------------------------------|--------------------|
+| Solo Piano | 0 / 12 | — |
+| Art Song | 0 / 12 | — |
+| Chamber | 9 / 12 | `3.0` ×7, `5.0` ×2 (units as extracted from source — not consistently `\cm`/`\mm`-suffixed across the corpus, so not safe to normalize into a single unit here) |
+| Orchestral | 1 / 12 | `0\cm` |
+
+Solo Piano and Art Song have **zero** margin overrides in this corpus —
+there is no real per-score data to compute any statistic from for those
+two categories, mode/median or otherwise. As with staff size, the
+`margin_mm` values actually implemented (20.0 / 18.0 / 15.0 / 12.0mm) are
+each category's anchor-piece value, not an aggregate over this sparse,
+unit-inconsistent data. Don't reintroduce a per-category "default margin"
+row here unless it's recomputed from unit-normalized raw data with a
+documented conversion methodology — the previous version of this table
+was not.
+
+### System-system spacing
+
+The corpus doesn't support a clean, comparably-scoped statistic here
+either — most scores don't touch `system-system-spacing` at all using the
+key structure this analysis extracted. The
+`system_system_spacing_basic_distance`/`padding` values actually
+implemented are, again, anchor-piece values — see
+`docs/lilypond_conventions.md`.
 
 ## Rehearsal Mark Styles
 

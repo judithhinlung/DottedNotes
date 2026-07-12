@@ -93,7 +93,8 @@ DottedNotes/
 │   └── fixtures/                # .brf test files go here
 │       └── fengyang_flower_drum.brf
 ├── docs/
-│   └── bana_reference.md        # BANA symbol table reference
+│   ├── bana_reference.md        # BANA symbol table reference
+│   └── lilypond_conventions.md  # LilyPond formatting defaults reference
 ├── examples/
 ├── LICENSE                      # GPL-2.0
 ├── README.md
