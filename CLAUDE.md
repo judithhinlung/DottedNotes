@@ -239,11 +239,12 @@ See TICKETS.md for full ticket details and step-by-step instructions.
 - [ ] Sprint 1: Core Symbol Layer
 - [ ] Sprint 2: Braille Parser — Notes and Rhythm
 - [ ] Sprint 3: Key Signatures, Time Signatures, Clefs
-- [ ] Sprint 4: Articulations and Dynamics
+- [ ] Sprint 4: Articulations, Dynamics, Ornaments, and Text
 - [ ] Sprint 5: Chords and Multiple Voices
 - [ ] Sprint 5b: Orchestral Score Support
-- [ ] Sprint 6: Ornaments and Advanced Idioms
+- [ ] Sprint 6: Fingering Notation
 - [ ] Sprint 7: Score Assembly and Full Pipeline
+- [ ] Sprint 7b: LilyPond Formatting Library
 - [ ] Sprint 8: Accessibility and Polish
 - [ ] Sprint 9: Reverse Direction — LilyPond to BRF
 - [ ] Sprint 10: MusicXML Bridge

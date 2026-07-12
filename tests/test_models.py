@@ -991,7 +991,7 @@ def test_score_staff_grouping():
     score4.add_staff(make_staff("Violin II"))
     ly4 = score4.to_lilypond()
     # Should have a global << >> wrapping the single Flute staff and the String StaffGroup
-    assert ly4.strip().startswith('\\version "2.24.0"\n<<')
+    assert ly4.strip().startswith('\\version "2.24.0"\n\\score {\n  <<')
     assert r'\new Staff {' in ly4
     assert r'\new StaffGroup <<' in ly4
     assert ly4.count(r'\new Staff {') == 3
@@ -1072,4 +1072,117 @@ def test_score_transpose_wrapping_in_multi_staff_group():
     ly = score.to_lilypond()
     assert r"\transpose c' f {" in ly
     assert ly.count(r'\new Staff {') == 2
+
+
+# --- S7-1: \header / \score / \layout / \midi wrapping ---
+# (formerly covered by the now-removed LilypondRenderer / test_renderers.py;
+# Score.to_lilypond() is the one renderer now, so this coverage moved here.)
+
+def test_score_to_lilypond_includes_version():
+    assert r'\version' in Score().to_lilypond()
+
+
+def test_score_to_lilypond_empty_score_has_no_header_or_score_block():
+    ly = Score().to_lilypond()
+    assert ly == '\\version "2.24.0"\n'
+    assert r'\header' not in ly
+    assert r'\score' not in ly
+
+
+def test_score_to_lilypond_no_header_when_title_and_composer_unset():
+    staff = Staff(name="Violin")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score()
+    score.add_staff(staff)
+    assert r'\header' not in score.to_lilypond()
+
+
+def test_score_to_lilypond_header_includes_title_and_composer():
+    staff = Staff(name="Violin")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score(title="Moonlight Sonata", composer="Beethoven")
+    score.add_staff(staff)
+    ly = score.to_lilypond()
+    assert r'\header {' in ly
+    assert 'title = "Moonlight Sonata"' in ly
+    assert 'composer = "Beethoven"' in ly
+    # \header comes after \version and before \score, per S7-1.
+    assert ly.index(r'\version') < ly.index(r'\header') < ly.index(r'\score')
+
+
+def test_score_to_lilypond_header_present_even_with_no_staves():
+    # Matches the old LilypondRenderer behavior: header metadata doesn't
+    # depend on there being any music.
+    score = Score(title="Moonlight Sonata", composer="Beethoven")
+    ly = score.to_lilypond()
+    assert "Moonlight Sonata" in ly
+    assert "Beethoven" in ly
+    assert r'\score' not in ly  # no music to wrap
+
+
+def test_score_to_lilypond_header_omits_unset_field_individually():
+    staff = Staff(name="Violin")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+
+    title_only = Score(title="Moonlight Sonata")
+    title_only.add_staff(staff)
+    ly_title = title_only.to_lilypond()
+    assert 'title = "Moonlight Sonata"' in ly_title
+    assert 'composer' not in ly_title
+
+    composer_only = Score(composer="Beethoven")
+    composer_only.add_staff(staff)
+    ly_composer = composer_only.to_lilypond()
+    assert 'composer = "Beethoven"' in ly_composer
+    assert 'title' not in ly_composer
+
+
+def test_score_to_lilypond_header_escapes_embedded_quotes_and_backslashes():
+    staff = Staff(name="Violin")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score(title='Sonata "Pathetique"', composer=r'C:\composers\beethoven')
+    score.add_staff(staff)
+    ly = score.to_lilypond()
+    assert r'title = "Sonata \"Pathetique\""' in ly
+    assert r'composer = "C:\\composers\\beethoven"' in ly
+
+
+def test_score_to_lilypond_single_staff_wraps_in_score_layout_midi():
+    staff = Staff(name="Violin")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score()
+    score.add_staff(staff)
+    ly = score.to_lilypond()
+    assert r'\score {' in ly
+    assert r'\layout { }' in ly
+    assert r'\midi { }' in ly
+    # \score must wrap the music, not sit alongside it.
+    assert ly.index(r'\score {') < ly.index(r"\relative c'") < ly.rindex('}')
+
+
+def test_score_to_lilypond_multi_staff_wraps_in_single_score_block():
+    def make_staff(name):
+        staff = Staff(name=name)
+        m = Measure(number=1)
+        m.add_note(_make_note('C', 4, 4))
+        staff.add_measure(m)
+        return staff
+
+    score = Score()
+    score.add_staff(make_staff("Violin I"))
+    score.add_staff(make_staff("Violin II"))
+    ly = score.to_lilypond()
+    assert ly.count(r'\score {') == 1
+    assert ly.count(r'\layout { }') == 1
+    assert ly.count(r'\midi { }') == 1
 

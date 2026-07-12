@@ -45,6 +45,38 @@ class Score:
         return runs
 
     @staticmethod
+    def _escape_header_field(value: str) -> str:
+        """Escape backslash and double-quote characters so `value` can be
+        embedded in a LilyPond \\header string field without breaking out
+        of the surrounding quotes."""
+        return value.replace('\\', '\\\\').replace('"', '\\"')
+
+    def _header_lines(self) -> list[str]:
+        """Return \\header {} block lines for title/composer, or [] if
+        neither is set. Fields are omitted individually when empty, so a
+        title-only or composer-only score doesn't get a blank line for
+        the other field."""
+        if not self.title and not self.composer:
+            return []
+        fields: list[str] = []
+        if self.title:
+            fields.append(f'  title = "{self._escape_header_field(self.title)}"')
+        if self.composer:
+            fields.append(f'  composer = "{self._escape_header_field(self.composer)}"')
+        return [r'\header {', *fields, '}']
+
+    @staticmethod
+    def _indent_lines(lines: list[str], prefix: str = '  ') -> list[str]:
+        """Indent every line by `prefix`, including lines embedded inside
+        multi-line strings (e.g. a staff's rendered measures), so nested
+        \\score {} content lines up correctly. Blank lines are left as-is."""
+        result: list[str] = []
+        for line in lines:
+            for sub in line.split('\n'):
+                result.append(prefix + sub if sub.strip() else sub)
+        return result
+
+    @staticmethod
     def _wrap_transpose(
         staff: Staff, relative_block: list[str], indent: str, concert_pitch: bool
     ) -> list[str]:
@@ -84,8 +116,10 @@ class Score:
         generating an individual player's part).
         """
         version_line = f'\\version "{_LILYPOND_VERSION}"'
+        header_lines = self._header_lines()
         if not self.staves:
-            return version_line + '\n'
+            lines = [version_line, *header_lines]
+            return '\n'.join(lines) + '\n'
 
         if len(self.staves) == 1:
             staff = self.staves[0]
@@ -93,7 +127,14 @@ class Score:
             staff_content = staff.to_lilypond(start_midi=start_midi)
             relative_block = [f"\\relative {anchor} {{", staff_content, '}']
             body = self._wrap_transpose(staff, relative_block, '', concert_pitch)
-            lines = [version_line, *body]
+            score_lines = [
+                r'\score {',
+                *self._indent_lines(body),
+                '  \\layout { }',
+                '  \\midi { }',
+                '}',
+            ]
+            lines = [version_line, *header_lines, *score_lines]
             return '\n'.join(lines) + '\n'
 
         from .instrument import InstrumentFamily
@@ -132,14 +173,22 @@ class Score:
                 block_lines.append(">>")
                 top_level_blocks.append(block_lines)
 
-        lines = [version_line]
         if len(top_level_blocks) == 1:
-            lines.extend(top_level_blocks[0])
+            body = top_level_blocks[0]
         else:
-            lines.append("<<")
+            body = ["<<"]
             for block in top_level_blocks:
-                lines.extend("  " + line if line.strip() else line for line in block)
-            lines.append(">>")
+                body.extend("  " + line if line.strip() else line for line in block)
+            body.append(">>")
+
+        score_lines = [
+            r'\score {',
+            *self._indent_lines(body),
+            '  \\layout { }',
+            '  \\midi { }',
+            '}',
+        ]
+        lines = [version_line, *header_lines, *score_lines]
         return '\n'.join(lines) + '\n'
 
     def reconstruct_omitted_rests(self) -> None:

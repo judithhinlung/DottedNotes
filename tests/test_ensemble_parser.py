@@ -221,3 +221,44 @@ def test_ensemble_parser_word_sign_terminates_at_articulation_or_repeat_cell():
     assert first_note.dynamics[0].level.name == "MP"
     assert len(first_note.articulations) == 1
     assert first_note.articulations[0].type == ArticulationType.STACCATO
+
+
+# --- S7-1: OrchestraScore inherits Score's \header support ---
+# OrchestraScore.to_lilypond() has its own \score/\layout/\midi-wrapping
+# override (S5b-8, predates S7-1) but never called the shared
+# _header_lines() helper, so title/composer were silently dropped for
+# every ensemble score even though the plain Score path emitted them.
+
+def test_orchestra_score_to_lilypond_includes_header_when_set():
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠣⠣⠣⠼⠙⠲\n'
+        '⠁⠀⠀⠜⠋⠇⠄⠐⠹⠱⠫⠻⠀⠐⠳⠪⠺⠹\n'
+        '⠀⠀⠀⠜⠧⠇⠄⠸⠳⠪⠺⠹⠀⠸⠹⠱⠫⠻\n'
+    )
+    score = EnsembleParser().parse(raw)
+    score.title = 'Duet "in D"'
+    score.composer = "Traditional"
+    ly = score.to_lilypond()
+    assert r'\header {' in ly
+    assert r'title = "Duet \"in D\""' in ly
+    assert 'composer = "Traditional"' in ly
+    # header comes after \version and before the music-variable definitions.
+    assert ly.index(r'\version') < ly.index(r'\header') < ly.index('Music =')
+    # pre-existing S5b-8 score/layout/midi wrapping is unaffected.
+    assert r'\score {' in ly
+    assert r'\layout { }' in ly
+    assert r'\midi { }' in ly
+
+
+def test_orchestra_score_to_lilypond_no_header_when_unset():
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠣⠣⠣⠼⠙⠲\n'
+        '⠁⠀⠀⠜⠋⠇⠄⠐⠹⠱⠫⠻⠀⠐⠳⠪⠺⠹\n'
+        '⠀⠀⠀⠜⠧⠇⠄⠸⠳⠪⠺⠹⠀⠸⠹⠱⠫⠻\n'
+    )
+    score = EnsembleParser().parse(raw)
+    assert r'\header' not in score.to_lilypond()

@@ -6,7 +6,6 @@ from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, extract_measure_number
 from .parser.tokenizer import BrailleTokenizer
 from .parser.input_pipeline import InputPipeline
-from .renderers.lilypond_renderer import LilypondRenderer
 from .bana_symbols import WORD_SIGN, END_WORD_SIGN
 
 
@@ -36,7 +35,7 @@ def main() -> None:
         tokens = BrailleTokenizer().tokenize(text)
         score = BrailleParser(tokens=tokens).parse()
 
-    rendered = LilypondRenderer().render(score)
+    rendered = score.to_lilypond()
 
     if args.output:
         Path(args.output).write_text(rendered, encoding="utf-8")

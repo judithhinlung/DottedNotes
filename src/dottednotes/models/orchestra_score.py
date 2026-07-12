@@ -46,8 +46,10 @@ class OrchestraScore(Score):
 
     def to_lilypond(self, concert_pitch: bool = True) -> str:
         version_line = f'\\version "{_LILYPOND_VERSION}"'
+        header_lines = self._header_lines()
         if not self.staves:
-            return version_line + '\n'
+            lines = [version_line, *header_lines]
+            return '\n'.join(lines) + '\n'
 
         variable_defs: list[str] = []
         var_names: dict[int, str] = {}
@@ -97,7 +99,7 @@ class OrchestraScore(Score):
         score_lines.append('  \\midi { }')
         score_lines.append('}')
 
-        lines = [version_line, ''] + variable_defs + score_lines
+        lines = [version_line, *header_lines, ''] + variable_defs + score_lines
         return '\n'.join(lines) + '\n'
 
     @staticmethod

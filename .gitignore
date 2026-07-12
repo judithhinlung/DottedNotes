@@ -11,3 +11,4 @@ htmlcov/
 venv/
 *.bak
 -.pdf
+.mutopia_cache/

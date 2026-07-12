@@ -4488,189 +4488,630 @@ Estimated time: 4–6 days.
 
 Estimated time: 4–5 days.
 
-### [ ] S7-1: Implement Score and Staff to_lilypond() with full header block
+**Research basis for this sprint:** LilyPond Notation Reference v2.26,
+"Titles and headers" chapter (`\header` block syntax and field names) and
+"MIDI output" chapter (the `\midi {}` block inside `\score {}` is what
+actually produces a `.midi` file — see CLAUDE.md's own quick-reference
+list). Fetch both before touching `Score.to_lilypond()` in S7-1, per
+CLAUDE.md's "fetch before implementing" rule — this sprint should not guess
+`\header`/`\score`/`\midi` syntax from memory.
 
-**Why:** The `Score` model has `title` and `composer` attributes, but its
-`to_lilypond()` method currently does not output a `\header` block containing
-this metadata. Additionally, the CLI currently relies on `LilypondRenderer`
-(which has a legacy, simplified staff rendering format that does not match
-the actual structured layout in `Score.to_lilypond()`). We must integrate the
-two so that `Score.to_lilypond()` handles all rendering including `\version`
-and the `\header` block, and update `LilypondRenderer` to use the model's
-rendering method.
-
-**Steps:**
-1. Update `Score.to_lilypond()` in `src/dottednotes/models/score.py` to output
-   the `\header` block containing `title` and `composer` if either is set. The
-   block should be placed after the `\version` line and before the staff/musical
-   content.
-2. Refactor `LilypondRenderer` in `src/dottednotes/renderers/lilypond_renderer.py`
-   to delegate directly to `Score.to_lilypond()`.
-3. Update `tests/test_renderers.py` to ensure all rendering tests verify
-   `Score.to_lilypond()` output formatting and the new header behavior.
-4. Verify that existing tests pass and no regression occurs in score structure,
-   relative octave calculations, or transposition.
-
-**Definition of Done:**
-- [ ] `Score.to_lilypond()` formats and includes the `\header` block containing
-      title and composer when present
-- [ ] `LilypondRenderer.render()` is refactored to delegate to `Score.to_lilypond()`
-- [ ] All tests in `tests/test_renderers.py` pass and assert correct behavior
-- [ ] All package unit tests pass
+**Known codebase gap this sprint must close:** `Score.to_lilypond()`
+(`models/score.py:70`) only ever emits a bare `\version` line followed by
+the staff content — there is no `\header`, `\score`, `\layout`, or `\midi`
+block anywhere in its output, even though `Score.title` and `Score.composer`
+are real, populated fields. Separately, `cli.py` does not call
+`Score.to_lilypond()` at all: it calls the much simpler
+`LilypondRenderer.render()` (`renderers/lilypond_renderer.py`), whose
+`_render_staff()` flattens every measure into `"{ note note note }"` with no
+clef, key signature, time signature, or bar lines — none of the structure
+that `Staff.to_lilypond()` (used everywhere in the test suite's
+ground-truth comparisons) actually produces. In its current state,
+`dottednotes convert` does not produce the same output the tests verify.
 
 ---
 
-### [ ] S7-2: Implement CLI with convert command
+### [x] S7-1: Implement Score.to_lilypond() header/score/midi wrapping and retire the legacy renderer
 
-**Why:** The CLI should support the commands outlined in `CLAUDE.md`. We need
-to expand the CLI in `dottednotes/cli.py` to support the `convert` subcommand
-explicitly, parse and pass through flags, support the `--compile` flag to
-automatically run LilyPond on output files, and support the `--version` flag.
+**Why:** Two separate problems, not one: (1) `Score.to_lilypond()` has
+`title`/`composer` fields but never emits a `\header` block, and never
+wraps its output in `\score { ... \layout {} \midi {} }` — without the
+`\midi {}` block, `lilypond file.ly` will not produce a `.midi` file at
+all, which breaks the workflow CLAUDE.md documents (".brf → .ly → PDF +
+MIDI"). (2) `LilypondRenderer`, the class the CLI actually calls, is a
+parallel, much simpler implementation that ignores clefs/keys/time
+signatures/bar lines entirely. Fixing only (1) without also fixing (2)
+leaves the CLI emitting flat, structurally wrong output.
 
 **Steps:**
-1. Update the argument parser in `src/dottednotes/cli.py` to support:
-   - A `convert` subcommand taking `input` and optional `output` arguments.
-   - A `--compile` flag on the `convert` subcommand.
-   - A `--version` flag at the top-level to print the package version.
-2. Update the `convert` command execution to:
-   - Load the file via `InputPipeline(input_path).read()`.
-   - Parse using the correct parser (Ensemble or Solo).
-   - Render to LilyPond using `LilypondRenderer` or `Score.to_lilypond()`.
-   - If an output file is specified, write to it; otherwise print to standard
-     output.
-   - If `--compile` is specified, invoke `lilypond <output_file>` (or write to
-     a temporary file if output was stdout) using Python's `subprocess` module
-     to compile the LilyPond file to PDF and MIDI.
-3. Write CLI unit tests in `tests/test_cli.py` checking argument parsing,
-   version output, and subcommand invocation.
+1. Fetch the LilyPond Notation Reference "Titles and headers" section and
+   confirm exact `\header {}` field syntax (field names are unquoted
+   identifiers, values are quoted strings) before writing code.
+2. In `Score.to_lilypond()`, after the `\version` line, emit a
+   `\header { title = "..." composer = "..." }` block only when `title` or
+   `composer` is set (mirror the existing single-field-omission behavior —
+   don't emit an empty `title = ""` line if only one is set).
+3. Escape embedded `"` characters in `title`/`composer` before interpolating
+   them into the header (a literal quote in an unescaped field would
+   currently produce broken LilyPond — the same latent bug already present
+   in `LilypondRenderer.render()`).
+4. Wrap the staff content in `\score { ... \layout {} \midi {} }` rather
+   than emitting the staff blocks directly at top level.
+5. Delete `renderers/lilypond_renderer.py` (or reduce it to a thin
+   `LilypondRenderer.render(score) -> score.to_lilypond()` shim if
+   something outside `cli.py` still imports the class name) and update
+   `cli.py` to call `Score.to_lilypond()` directly.
+6. Update every test that currently asserts on `score.to_lilypond()`'s
+   exact structure — **31 call sites** across `tests/*.py` as of this
+   sprint (grep `score\.to_lilypond()` before starting; this is the
+   majority of the ticket's actual effort) — to account for the new
+   `\header`/`\score`/`\midi` wrapping and the resulting indentation shift.
+7. Update `tests/test_renderers.py` accordingly, or fold its cases into
+   `test_parser.py`/`test_models.py` if `LilypondRenderer` is removed
+   outright.
 
 **Definition of Done:**
-- [ ] CLI supports `convert` subcommand with optional output file path
-- [ ] CLI supports `--compile` flag to run `lilypond` on the output
-- [ ] CLI supports `--version` flag printing the version from `pyproject.toml`
-- [ ] `tests/test_cli.py` is implemented and covers the CLI arguments
+- [x] `Score.to_lilypond()` emits `\header` with escaped title/composer
+      when either is set, and omits the block entirely when neither is set
+- [x] `Score.to_lilypond()` output is wrapped in
+      `\score { ... \layout {} \midi {} }`
+- [x] Running `lilypond` on generated output produces both a `.pdf` and a
+      `.midi` file (verified manually or in S7-5)
+- [x] `cli.py` no longer imports or calls `LilypondRenderer`
+- [x] All ~31 existing call sites that assert on `to_lilypond()` structure
+      are updated and pass
+- [x] All package unit tests pass
+
+**Senior note:** This ticket is bigger than it looks. The `\header`/`\midi`
+addition itself is a handful of lines; updating every existing test that
+pattern-matches on the current unwrapped output is the real work. Do the
+wrapping change first, run the full suite, and triage the failures as a
+checklist rather than trying to predict all 31 call sites up front — don't
+guess at what breaks. Same "verify before implementing" discipline the
+`bana_symbols.py` dot-pattern tickets require, applied to LilyPond syntax
+instead of braille.
+
+---
+
+### [ ] S7-2: Implement CLI `convert` subcommand, `--compile`, `--version`, and fix input loading
+
+**Why:** The current CLI (`cli.py`) takes a bare positional `input` path
+with no subcommand at all — it doesn't match the
+`dottednotes convert input.brf output.ly [--compile] [--verbose]`
+interface `CLAUDE.md` documents, and has no `--version`. This ticket
+introduces the subcommand structure; it is not a small addition to an
+existing `convert` command — the flat interface changes.
+
+**A confirmed bug this ticket must also fix:** `cli.py` loads input via
+`InputPipeline(args.input).read()` (`parser/input_pipeline.py`), which is
+a raw pass-through — unlike `BRLInputPipeline.load()` (the class every
+other real caller in this codebase uses: `braille_parser.py`,
+`ensemble_parser.py`, every fixture-based test), it never converts ASCII
+braille to Unicode braille. Of the 10 real `.brf`/`.brl` fixtures in this
+repo, 8 are ASCII-encoded (checked by hex-dumping each file's leading
+bytes) — **ASCII is the common case for real `.brf` files, not the
+exception**, since that's what a BrailleNotetaker actually exports (see
+`CLAUDE.md`'s Developer Context). Feeding raw ASCII text to the tokenizer
+means it never recognizes a single cell.
+
+This was originally logged as two separate bugs — the CLI's
+ensemble-vs-solo detection heuristic (`has_ensemble_header` in `main()`,
+checking `WORD_SIGN`/`END_WORD_SIGN`) silently failing on
+`fengyang_flower_drum.brf` and producing an empty score — but it's one
+root cause, not two: `WORD_SIGN`/`END_WORD_SIGN` are Unicode braille
+characters, so they can never appear in unconverted raw ASCII text
+regardless of whether the file's content matches BANA orchestral-score
+conventions. Confirmed directly: re-running the exact same detection
+logic against `BRLInputPipeline.load()`'s output for
+`fengyang_flower_drum.brf` (which does follow §33.2's instrument-list
+header conventions correctly) correctly returns `has_ensemble_header =
+True`. **The detection heuristic itself is not the bug** — don't spend
+this ticket's time rewriting it. The fix is entirely at the input-loading
+layer.
+
+**Steps:**
+1. Restructure `src/dottednotes/cli.py`'s `argparse` setup to use
+   `add_subparsers()` with a `convert` subcommand taking `input`
+   (positional, required) and `output` (positional, optional — CLAUDE.md's
+   examples show `dottednotes convert input.brf output.ly`, not `-o`;
+   decide whether to keep `-o/--output` too for backward compatibility
+   with the current interface, or replace it, and note the choice in the
+   PR).
+2. Add `--compile` as a flag on the `convert` subcommand.
+3. Add a top-level `--version` flag. Use
+   `importlib.metadata.version("dottednotes")` (stdlib since Python 3.8)
+   rather than reading `pyproject.toml` directly — the installed package
+   won't have `pyproject.toml` sitting next to it in `site-packages`, so a
+   file-path read only works from a source checkout, not from
+   `pip install dottednotes`.
+4. Replace `InputPipeline(args.input).read()` with
+   `BRLInputPipeline().load(args.input)`. Then retire the `InputPipeline`
+   class (`parser/input_pipeline.py`) entirely — grep confirms it has
+   exactly one real caller (`cli.py`) plus its own three tests in
+   `test_parser.py` (`test_input_pipeline_read`,
+   `test_input_pipeline_lines`, `test_input_pipeline_missing_file`); delete
+   those three and, if `.lines()`-style line splitting turns out to still
+   be needed somewhere, add it to `BRLInputPipeline` instead of keeping
+   two parallel, inconsistent input-loading classes around. Don't touch
+   the `has_ensemble_header` detection logic itself (see above) — only the
+   text it's fed.
+5. Keep the ensemble-vs-solo dispatch already in `main()` structurally
+   as-is (`has_ensemble_header` via `extract_measure_number` /
+   `WORD_SIGN`/`END_WORD_SIGN`), now operating on `BRLInputPipeline`'s
+   normalized output.
+6. Render via `Score.to_lilypond()` (post S7-1 — this ticket depends on
+   S7-1 landing first, since it removes `LilypondRenderer`).
+7. If `--compile` is set: resolve an output path (write to a temp `.ly`
+   file if none was given — `--compile` without an output path can't work,
+   since `lilypond` compiles a file, not stdin), then invoke `lilypond` via
+   `subprocess.run([...], check=True)` — **pass the command as a list,
+   never `shell=True`**, since the input filename is user-controlled.
+8. Before invoking `subprocess.run`, check
+   `shutil.which("lilypond") is not None` and fail with a clear plain-text
+   message (ties into S7-3) rather than letting `subprocess` raise
+   `FileNotFoundError` if the binary isn't installed.
+9. Write CLI tests in `tests/test_cli.py` covering: `convert` with/without
+   `output`, `--compile` (mocking or skipping actual `lilypond` invocation
+   — see S7-5 for the real end-to-end version), `--version`, and —
+   critically, as a regression test for this exact bug — converting
+   `tests/fixtures/fengyang_flower_drum.brf` (ASCII-encoded, real BANA
+   orchestral-score conventions) end to end and asserting the output
+   actually contains multiple named staves (e.g. `instrumentName =
+   "Flute"`), not just a bare `\version` line.
+
+**Definition of Done:**
+- [ ] CLI supports `convert <input> [output]` with the subcommand structure
+- [ ] CLI loads input via `BRLInputPipeline.load()`; `InputPipeline` and
+      its now-redundant tests are removed
+- [ ] `dottednotes convert tests/fixtures/fengyang_flower_drum.brf`
+      produces a real multi-staff orchestral score (flute, violin I,
+      violin II, viola, cello, bass), not an empty `\version`-only file
+- [ ] CLI supports `--compile`, invoking `lilypond` via `subprocess.run`
+      with an argument list (not a shell string)
+- [ ] CLI supports `--version`, sourced from installed package metadata,
+      not a `pyproject.toml` file read
+- [ ] Missing `lilypond` binary produces a clear plain-text message instead
+      of a raw `FileNotFoundError` traceback
+- [ ] `tests/test_cli.py` exists and covers the above, including the
+      Fengyang regression case
+
+**Senior note:** Since `\score {}` already contains a `\midi {}` block
+(S7-1), plain `lilypond file.ly` with no extra flags produces both the PDF
+and the MIDI file in one invocation — resist the urge to add separate
+`--pdf`/`--midi`-style flags or multiple `lilypond` invocations; that
+complexity isn't needed here. Separately: this bug is a good example of
+why a silent empty-score fallback is dangerous for an accessibility tool
+specifically — a sighted developer testing with a small hand-typed
+Unicode-braille snippet (as most of this codebase's own tests do) would
+never have hit this, but a blind composer converting their actual
+BrailleNotetaker export would get a silently-empty output file with no
+error at all. This is exactly the failure mode S7-3's error handling
+should also make loud instead of silent.
 
 ---
 
 ### [ ] S7-3: Add error handling and meaningful plain-text error messages
 
-**Why:** For accessibility, especially for blind composers using VoiceOver,
-all error messages must be plain text and meaningful. Unhandled exceptions
-should not crash the command-line interface with long, confusing Python
-tracebacks. We must define clean custom exception classes and catch failures
-to report them cleanly.
+**Why:** For accessibility, especially for blind composers using
+VoiceOver, all error messages must be plain text and meaningful. Right now
+nothing in the tokenizer/parser/CLI path raises a purpose-built exception —
+a malformed file currently either produces silently wrong output (unknown
+cells already degrade gracefully to `UNKNOWN` tokens, per S2-1) or an
+unhandled Python exception with a full traceback dumped to the terminal.
 
 **Steps:**
-1. Define custom exceptions (e.g. `BrailleParseError`, `BrailleTokenizeError`)
-   under a common base exception in a new or existing module (e.g.,
-   `src/dottednotes/exceptions.py` or within parser modules).
-2. Update tokenizer and parser stages to raise these exceptions with clear
-   context (e.g., line numbers, character indices, or token content) when
-   encountering invalid cells, invalid voice counts, or syntax violations.
-3. Update `cli.py` to wrap the entry points in a try-except block that catches
-   these custom exceptions (and generic file access errors) and writes a
-   concise, plain-text error description to `stderr`, returning a non-zero exit
-   code.
-4. Ensure no visual-only progress bars or raw tracebacks are printed under
-   normal error conditions.
-5. Add unit tests verifying that malformed inputs raise the custom exceptions,
-   and that the CLI formats these failures correctly.
+1. Create `src/dottednotes/exceptions.py` with a `DottedNotesError` base
+   class and specific subclasses: at minimum `BrailleParseError`
+   (parser-level failures) and `LilyPondCompileError` (wraps a
+   non-zero-exit `lilypond` subprocess failure — captures its stderr).
+2. Audit `braille_parser.py` and `ensemble_parser.py` for places that
+   currently raise bare `ValueError`/`IndexError`/`KeyError` on malformed
+   input (e.g. an unterminated in-accord, a missing time signature) and
+   convert the ones reachable from real user input to `BrailleParseError`
+   with the measure/line context already available on parser state. Don't
+   convert exceptions that only fire on programmer error (e.g. an
+   assertion that a fully-internal invariant holds) — those should keep
+   failing loudly in development.
+3. In `cli.py`'s `main()`, wrap the parse/render/compile calls in a
+   `try/except DottedNotesError` (plus `OSError` for file-not-found) that
+   prints a one-line plain-text message to `stderr` and exits with a
+   non-zero status via `sys.exit(1)`.
+4. Add unit tests feeding deliberately malformed `.brf` content through the
+   CLI (via `capsys`-style invocation) and asserting on the `stderr`
+   message text and exit code.
 
 **Definition of Done:**
-- [ ] Custom parse/tokenize exceptions defined and used
-- [ ] CLI catches exceptions and outputs clear, plain-text error messages to
-      `stderr` instead of tracebacks
-- [ ] Compilation or missing `lilypond` binary failures are caught and reported
-      cleanly
-- [ ] Unit tests verify screen-reader friendly error reporting
+- [ ] `exceptions.py` defines `DottedNotesError` and at least
+      `BrailleParseError`, `LilyPondCompileError`
+- [ ] Parser-reachable failure paths raise these instead of bare built-in
+      exceptions
+- [ ] CLI catches them and prints a single plain-text line to `stderr`, no
+      traceback, non-zero exit code
+- [ ] Unit tests verify both the message and exit code for at least one
+      parser failure and one missing-file case
+
+**Senior note:** Don't wrap `main()`'s body in a bare `except Exception`.
+That would silently swallow real bugs (a `TypeError` from a genuine coding
+mistake would print as if it were a user-facing "your file is malformed"
+message, actively hiding defects during development). Only catch the
+specific exception types defined above, plus the narrow set of expected
+`OSError` cases (file not found, permission denied).
 
 ---
 
 ### [ ] S7-4: Add --verbose flag
 
-**Why:** Diagnosing issues in braille translation requires inspecting what the
-tokenizer and parser have done. The `--verbose` flag will print a detailed trace
-of the processed tokens, the identified notes/markings, and any validation
-warnings (like measure beat count discrepancies).
+**Why:** Diagnosing translation issues requires inspecting what the
+tokenizer and parser actually did to a given input — right now the only
+way to do that is to read source or drop into a debugger.
 
 **Steps:**
-1. Add the `--verbose` flag to the `convert` subcommand in `cli.py`.
-2. Implement logging or tracing statements throughout `BrailleTokenizer` and
-   `BrailleParser` that output trace information when the verbose flag is set.
-3. Output the following details to `stderr` in a clear, screen-reader friendly
-   format:
-   - Input encoding details and normalization results.
-   - List of identified tokens with their categories and raw braille characters.
-   - Validation warnings (e.g., if a measure's total duration doesn't match the
-     active time signature).
-4. Add unit tests that capture `stderr` and verify that the verbose trace is
-   emitted and correct.
+1. Add `--verbose` to the `convert` subcommand.
+2. Add tracing to `BrailleTokenizer`/`BrailleParser` (a simple list
+   collected during the pass and returned/attached to the result is
+   enough — avoid reaching for the `logging` module's global state here,
+   since it doesn't compose well with capturing output in tests) covering:
+   detected input encoding, each token's category and raw braille
+   character, and any beat-count/validation warnings already raised via
+   `warnings.warn` (S2-4 and later — these already exist; `--verbose` just
+   needs to surface them clearly rather than relying on Python's default
+   warning formatting).
+3. Print the trace to `stderr`, one item per line, plain text.
+4. Add unit tests that capture `stderr` (`capsys`) and check the trace
+   contains expected token categories/warning text for a small fixture.
 
 **Definition of Done:**
-- [ ] CLI supports `--verbose` flag
-- [ ] Tokenizer and parser output detailed process logs to `stderr` under
-      `--verbose`
-- [ ] Validation warnings and token classifications are formatted in
-      VoiceOver-friendly plain text
-- [ ] Unit tests verify verbose output
+- [ ] `--verbose` flag exists on `convert`
+- [ ] Tokenizer/parser trace and existing validation warnings are printed
+      to `stderr` in plain text, one item per line
+- [ ] Unit tests verify verbose output content
+
+**Senior note:** `stdout` and `stderr` are not interchangeable here: S7-2's
+`convert` prints the rendered `.ly` to `stdout` when no output path is
+given, and composers may pipe that (`dottednotes convert piece.brf |
+lilypond -`). Any verbose trace that leaks onto `stdout` would silently
+corrupt that piped LilyPond source. Everything from `--verbose` must go to
+`stderr`, never `stdout` — same reasoning as the existing
+`"Written to {path}"` message in today's `cli.py`, which already gets this
+right.
 
 ---
 
-### [ ] S7-5: End-to-end test: .brf in, compiled PDF out
+### [ ] S7-5: End-to-end test: .brf in, compiled PDF + MIDI out
 
-**Why:** We need an integration test verifying the complete pipeline from a
-braille `.brf` input file to a fully-compiled PDF and MIDI output using the
-system's `lilypond` compiler.
+**Why:** Every other test in the suite stops at the `Score`/string-of-
+LilyPond level. Nothing currently proves that `dottednotes convert
+--compile` actually produces a working PDF and MIDI via a real `lilypond`
+invocation, which is the entire point of the tool per `CLAUDE.md`'s
+workflow diagram.
 
 **Steps:**
-1. Implement `test_e2e_conversion` in `tests/test_cli.py`.
-2. The test should locate `tests/fixtures/fengyang_flower_drum.brf`, call the
-   CLI conversion command with `--compile`, and verify that the corresponding
-   `.ly`, `.pdf`, and `.midi` files are generated.
-3. Check if the `lilypond` executable is available in the system PATH. If not,
-   skip the compilation portion of the test using `@pytest.mark.skipif`.
-4. Ensure the test cleans up all generated files (including the compiled PDF
-   and MIDI artifacts) after execution.
+1. Implement `test_e2e_conversion` in `tests/test_cli.py`, using
+   `tests/fixtures/fengyang_flower_drum.brf` — the one fixture `CLAUDE.md`
+   calls out as developer-verified ground truth.
+2. Invoke the CLI's `main()` (or the underlying convert function directly)
+   with `--compile` against a `tmp_path` (pytest's built-in
+   temp-directory fixture — don't write into `tests/fixtures/` itself; see
+   the Senior note).
+3. Guard the whole test with
+   `@pytest.mark.skipif(shutil.which("lilypond") is None, reason="lilypond not installed")`
+   so the suite still passes in environments (e.g. CI images) without the
+   binary.
+4. Pass `timeout=` to the underlying `subprocess.run` call (or wrap the
+   test call site) — a hung or misbehaving `lilypond` process should fail
+   the test after a bounded time, not hang CI indefinitely.
+5. Assert the expected `.ly`, `.pdf`, and `.midi` files exist in the temp
+   directory and are non-empty (`stat().st_size > 0` — a 0-byte PDF from a
+   crashed compile is a common false-positive).
 
 **Definition of Done:**
-- [ ] End-to-end integration test successfully parses a fixture file and
-      outputs a LilyPond file
-- [ ] Subprocess compilation is tested and produces PDF/MIDI files when
-      `lilypond` is installed
-- [ ] Test cleans up all output files upon completion or failure
+- [ ] `test_e2e_conversion` parses a real fixture and produces a `.ly` file
+      via the CLI
+- [ ] When `lilypond` is installed, the test additionally verifies
+      non-empty `.pdf` and `.midi` output; the test is skipped (not
+      failed) when it isn't
+- [ ] The subprocess call has a timeout, so a hung `lilypond` process fails
+      the test rather than hanging the run
+- [ ] All output is written under pytest's `tmp_path`, never into
+      `tests/fixtures/`
+
+**Senior note:** This project's working tree has already accumulated real
+`.pdf`/`.midi` files under `tests/fixtures/` from ad hoc manual
+`--compile` runs (`fengyang_flower_drum.pdf`, `fingering_melody.pdf`,
+etc.) — don't repeat that pattern here. Committed binary artifacts don't
+belong in the fixtures directory (nothing else there is a compiled output;
+every other fixture is a `.brf`/`.brl` input paired with a hand-authored
+`.ly` ground truth at most). Write everything this test produces to
+`tmp_path` and let pytest clean it up.
 
 ---
 
 ### [ ] S7-6: Write user-facing README with installation and usage
 
 **Why:** Composers using the tool need clear instructions on installation,
-external dependencies (specifically LilyPond), and CLI commands.
+the external LilyPond dependency, and the actual CLI surface — which,
+after S7-1 through S7-4, will have changed shape (subcommand instead of
+flat positional, plus `--compile`/`--verbose`/`--version`).
 
 **Steps:**
-1. Update `README.md` to document the newly implemented Python CLI interface.
-2. Provide step-by-step instructions on setting up a virtual environment,
-   installing package dependencies, and installing the `lilypond` binary on
-   macOS, Windows, and Linux.
-3. List CLI command examples for standard conversion, printing to stdout,
-   compiling to PDF/MIDI, and verbose logging.
-4. Verify that the formatting is accessible for VoiceOver users.
+1. Update `README.md`'s usage section to match the final
+   `convert`-subcommand CLI from S7-2, not the flat
+   `dottednotes input.brf` interface it may still describe from before
+   this sprint.
+2. Document installing the `lilypond` binary itself on macOS (Homebrew),
+   Windows, and Linux — this is a separate install from
+   `pip install dottednotes` and easy to gloss over.
+3. Show CLI examples for: default conversion (stdout), writing to a file,
+   `--compile`, and `--verbose`.
+4. Keep the accessibility-motivation section already present from S0-8 —
+   extend it, don't duplicate it with a second "why accessibility matters"
+   block.
+5. Read the result back as plain text (no tables/ASCII diagrams that don't
+   degrade well under a screen reader) before considering this done.
 
 **Definition of Done:**
-- [ ] `README.md` updated with correct setup and Python install instructions
-- [ ] CLI command options (`convert`, `--compile`, `--verbose`, `--version`)
-      fully documented with examples
-- [ ] External dependencies (LilyPond installation) documented
+- [ ] `README.md` usage section matches the actual S7-2 CLI surface
+      exactly (subcommand, flags, argument order)
+- [ ] LilyPond binary installation is documented per-platform
+- [ ] `convert`, `--compile`, `--verbose`, `--version` are each shown with
+      an example
+- [ ] No duplicate accessibility-motivation section (extends S0-8's,
+      doesn't repeat it)
+
+**Senior note:** Write this ticket last, after S7-1 through S7-5 actually
+land — a README written against a planned interface tends to quietly
+drift from what got built. If the CLI's final shape differs from what's
+speculated in S7-2 (e.g. `-o/--output` kept instead of replaced), the
+README must describe what actually shipped.
 
 ---
-**Sprint 7b: LilyPond Formatting Library**
-- [ ] S7b-1: Download and analyze 50 representative Mutopia scores programmatically — extract common header patterns, paper settings, staff spacing values, and rehearsal mark styles
-- [ ] S7b-2: Implement `LilyPondFormatter` class with evidence-based defaults derived from Mutopia analysis
-- [ ] S7b-3: Implement instrumentation detection and template selection
-- [ ] S7b-4: Curate 4 formatting templates (solo piano, art song, chamber, orchestral) based on high-quality Mutopia examples
-- [ ] S7b-5: Implement page layout defaults (paper size A4/Letter, margins, system spacing) for each template
-- [ ] S7b-6: Implement `\header` block generation with title, composer, copyright, and Mutopia-style tagline
-- [ ] S7b-7: Integration test: generate a formatted score and verify it compiles to a professional-looking PDF
-- [ ] S7b-8: Document all formatting rules in `docs/lilypond_conventions.md` with source citations
+
+# Sprint 7b: LilyPond Formatting Library
+
+Estimated time: 1.5–2 weeks.
+
+**Why this sprint exists:** `Score.to_lilypond()` (post S7-1) is
+functionally correct but visually generic — fixed margins, no distinction
+between a solo piano piece and a full orchestral score, no rehearsal
+marks, no evidence-based paper/spacing defaults. Sprint 7b's premise is to
+derive formatting defaults from a corpus of real, high-quality engraved
+LilyPond scores (the Mutopia Project, mutopiaproject.org, which
+distributes public-domain sheet music with its LilyPond `.ly` source)
+rather than guessing at "reasonable" spacing values.
+
+**Before starting S7b-1:** confirm the Mutopia Project's terms of use
+permit bulk/programmatic downloading of source files for this kind of
+analysis (rather than one-off manual browsing), and rate-limit requests
+either way. This sprint only needs the *statistical patterns* extracted
+from the `.ly` source (header field usage, paper/margin values, spacing
+numbers) — it does not need to redistribute or commit any of the
+downloaded scores themselves into this repository, and shouldn't.
+
+### [ ] S7b-1: Download and analyze representative Mutopia scores for formatting patterns
+
+**Why:** Tickets S7b-2 through S7b-6 need real numbers (margins, staff
+spacing, common header fields) to build evidence-based defaults from,
+rather than values invented from memory — the same "don't guess, verify"
+principle CLAUDE.md applies to BANA dot patterns and LilyPond syntax
+elsewhere in this project applies here too.
+
+**Steps:**
+1. Write a script (e.g. `scripts/analyze_mutopia_corpus.py`, not part of
+   the installed package) that downloads a representative sample of
+   Mutopia `.ly` source files, stratified across the instrumentation
+   categories relevant to S7b-4's templates: solo piano, art song (voice +
+   piano), chamber (string quartet or similar small ensemble), and
+   orchestral. Aim for roughly even coverage across the four categories
+   rather than skewing toward whichever category happens to be most
+   numerous on the site.
+2. For each downloaded score, extract (via simple text/regex extraction,
+   not a full LilyPond parser): `\header` field names actually used,
+   `\paper` block settings (paper size, margins), any `\layout`/spacing-
+   related settings, and rehearsal-mark style (`\mark`, letter vs. number
+   sequences).
+3. Aggregate results into a summary (e.g. `docs/mutopia_analysis.md` or a
+   structured JSON file under `docs/`) showing frequency/distribution per
+   instrumentation category — this is the artifact S7b-2 and S7b-4
+   consume.
+4. Keep the downloaded `.ly` corpus itself out of version control (a local
+   cache directory, gitignored) — only the extracted summary is committed.
+
+**Definition of Done:**
+- [ ] Download/analysis script exists and is runnable independently of the
+      main package
+- [ ] A representative, roughly-balanced sample across the four target
+      instrumentation categories has been analyzed (document the actual
+      count and category breakdown achieved — it does not need to hit an
+      exact number if Mutopia's catalog doesn't support even coverage)
+- [ ] A committed summary artifact (not the raw corpus) captures
+      header/paper/spacing/rehearsal-mark patterns per category
+- [ ] Mutopia's terms of use for bulk download were checked before running
+      the script at scale
+
+**Senior note:** Resist treating "50 scores" as a hard requirement handed
+down from nowhere — it's a rough sample-size placeholder. What actually
+matters for S7b-2 through S7b-6 is category coverage (having enough
+orchestral examples to derive orchestral defaults, not just piano ones),
+not hitting a specific total count.
+
+### [ ] S7b-2: Implement `LilyPondFormatter` class with evidence-based defaults
+
+**Why:** Centralize the formatting decisions derived from S7b-1's analysis
+into one class that S7b-3 through S7b-6 build on, rather than scattering
+magic numbers across `Score.to_lilypond()`.
+
+**Steps:**
+1. Create `src/dottednotes/renderers/lilypond_formatter.py` with a
+   `LilyPondFormatter` class holding the paper/margin/spacing defaults
+   extracted in S7b-1, keyed by instrumentation category.
+2. Give it a method that, given a `Score` (or an explicit category
+   override), returns the formatting settings to apply — this is a pure
+   data-selection step; actual `\paper`/`\layout` string generation
+   belongs to S7b-5/S7b-6.
+3. Cite the specific S7b-1 analysis numbers backing each default directly
+   in a comment or docstring (traceability back to the evidence, not just
+   the value).
+
+**Definition of Done:**
+- [ ] `LilyPondFormatter` exists with defaults sourced from
+      `docs/mutopia_analysis.md` (or equivalent), not invented values
+- [ ] Each default is traceable to the S7b-1 summary that justifies it
+- [ ] Unit tests cover default selection for at least one case per
+      instrumentation category
+
+### [ ] S7b-3: Implement instrumentation detection and template selection
+
+**Why:** `LilyPondFormatter` (S7b-2) needs to know which of the four
+S7b-4 templates applies to a given `Score` without the caller specifying
+it manually every time.
+
+**Steps:**
+1. Reuse the instrument-family grouping already implemented for S5b
+   (`Score._group_by_family`, `models/instrument.py`'s
+   `InstrumentFamily`) rather than re-deriving instrumentation logic from
+   scratch.
+2. Classify a `Score` into one of: solo piano (single `KEYBOARD_HARP`
+   staff), art song (voice + piano — check whether the codebase has a
+   voice/vocal staff concept yet; if not, flag that as a dependency this
+   ticket surfaces rather than silently guessing), chamber (small
+   `StaffGroup`, e.g. ≤6 staves of strings/winds), orchestral (larger
+   multi-family `StaffGroup`).
+3. Add a manual override parameter for the cases the heuristic gets wrong.
+
+**Definition of Done:**
+- [ ] `Score` → template-category classification implemented, reusing
+      existing `InstrumentFamily` grouping
+- [ ] Manual override supported
+- [ ] Unit tests cover all four categories plus at least one
+      ambiguous/edge case
+
+**Senior note:** If art-song detection turns out to need a vocal-staff
+concept that doesn't exist yet in the domain model, don't invent one
+silently inside this ticket — surface it back as a blocking dependency
+rather than papering over it with a heuristic guess.
+
+### [ ] S7b-4: Curate 4 formatting templates from Mutopia examples
+
+**Why:** Concrete, per-category presets (solo piano, art song, chamber,
+orchestral) are what S7b-3's classification actually selects between.
+
+**Steps:**
+1. From the S7b-1 analysis, hand-select a small number of representative
+   high-quality examples per category (not just the statistical average —
+   engraving quality varies across Mutopia's corpus, so "representative"
+   means typical of well-engraved scores in that category, confirmed by
+   eye, not just whatever the script downloaded first).
+2. For each of the 4 categories, define a template: paper size, margins,
+   staff spacing, and any category-specific defaults (e.g. orchestral
+   scores commonly use smaller staff size and instrument-name
+   abbreviations after the first system — verify this against the actual
+   S7b-1 sample rather than assuming).
+3. Document the source examples each template was drawn from.
+
+**Definition of Done:**
+- [ ] 4 templates defined (solo piano, art song, chamber, orchestral) with
+      concrete paper/margin/spacing values
+- [ ] Each template cites the specific Mutopia example(s) it was derived
+      from
+- [ ] Templates are consumable by `LilyPondFormatter` (S7b-2)
+
+### [ ] S7b-5: Implement page layout defaults (paper size, margins, system spacing) per template
+
+**Why:** Translate S7b-4's curated template values into actual LilyPond
+`\paper {}` block output.
+
+**Steps:**
+1. Fetch the LilyPond Notation Reference's "Page layout" chapter and
+   confirm exact `\paper {}` field names (e.g. `paper-size`, margin field
+   names) before writing generation code — don't guess the field names
+   from general LilyPond familiarity.
+2. Implement `\paper {}` block generation per template in
+   `LilyPondFormatter`.
+3. Support both A4 and Letter paper size, selectable independently of the
+   instrumentation template (a US-based and a European composer using the
+   same orchestral template shouldn't be forced into one paper size).
+
+**Definition of Done:**
+- [ ] `\paper {}` generation implemented and verified against the
+      Notation Reference's actual field syntax
+- [ ] A4/Letter selectable independently of template
+- [ ] Unit tests assert generated `\paper {}` content per template
+
+### [ ] S7b-6: Implement `\header` block generation with title, composer, copyright, and Mutopia-style tagline
+
+**Why:** Extends S7-1's minimal `\header` (title/composer only) with the
+fuller field set common in well-engraved scores, per the S7b-1 analysis of
+which `\header` fields Mutopia scores actually use in practice.
+
+**Steps:**
+1. Extend `\header {}` generation (building on S7-1's implementation, not
+   duplicating it) to optionally include `copyright` and a `tagline`.
+2. Only emit fields that have a value — don't emit empty `copyright = ""`
+   lines, matching the existing title/composer omission behavior from
+   S7-1.
+3. Escape embedded quote characters in all fields (same latent issue
+   flagged in S7-1's Senior note — if S7-1 already added an escaping
+   helper, reuse it rather than reimplementing it here).
+
+**Definition of Done:**
+- [ ] `\header {}` supports title, composer, copyright, tagline, each
+      optional
+- [ ] Field values are quote-escaped
+- [ ] Unit tests cover all-fields-present, some-fields-present, and
+      no-fields-present cases
+
+### [ ] S7b-7: Integration test: generate a formatted score and verify it compiles to a professional-looking PDF
+
+**Why:** Prove the formatting pipeline (S7b-2 through S7b-6) produces
+LilyPond that actually compiles — the same "don't just check the string,
+check it really works" principle as S7-5.
+
+**Steps:**
+1. Reuse S7-5's `shutil.which("lilypond")` skip-if pattern and `tmp_path`
+   output convention — don't reinvent fixture/output handling this ticket
+   already established.
+2. Generate output for at least one fixture per template category (reuse
+   existing fixtures — `fengyang_flower_drum.brf` for chamber/small-
+   ensemble, `children_s_piece.brf` for solo piano, etc. — rather than
+   authoring new ones unless no existing fixture fits a category).
+3. Compile via `lilypond` and assert non-empty PDF output, same non-zero-
+   byte check as S7-5.
+4. "Professional-looking" isn't machine-checkable from a compiled PDF's
+   bytes alone — treat this test as verifying successful compilation with
+   the formatting applied (no LilyPond warnings/errors in the compile
+   log), and pair it with a manual visual check of at least one generated
+   PDF per category before closing this ticket.
+
+**Definition of Done:**
+- [ ] Integration test compiles a formatted score per template category
+      (skipped when `lilypond` isn't installed)
+- [ ] Compile log is checked for LilyPond-side warnings/errors, not just
+      process exit code
+- [ ] At least one generated PDF per category has been manually visually
+      reviewed (documented in the PR, not automated)
+
+### [ ] S7b-8: Document all formatting rules in docs/lilypond_conventions.md with source citations
+
+**Why:** Every formatting default in this sprint was derived from evidence
+(S7b-1's analysis), and that traceability needs to survive past the PR
+that introduced it — future changes to a default should be checked
+against the same evidence, not against whatever the code currently
+happens to do.
+
+**Steps:**
+1. Write `docs/lilypond_conventions.md` documenting each default from
+   S7b-2 through S7b-6, with a citation back to the specific Mutopia
+   example(s) or S7b-1 analysis numbers that justified it (mirror
+   `docs/bana_reference.md`'s role as a human-readable companion to
+   `bana_symbols.py`).
+2. Cross-link from `CLAUDE.md`'s project structure listing, the way
+   `docs/bana_reference.md` already is.
+
+**Definition of Done:**
+- [ ] `docs/lilypond_conventions.md` exists, covering every default
+      introduced in S7b-2 through S7b-6
+- [ ] Each default cites its source evidence
+- [ ] Referenced from `CLAUDE.md`'s docs/ listing
 
 ---
 
