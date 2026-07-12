@@ -95,3 +95,94 @@ class InstrumentInfo:
     def family(self) -> InstrumentFamily | None:
         """The InstrumentFamily for this instrument, inferred from name."""
         return get_instrument_family(self.name)
+
+
+# ---------------------------------------------------------------------------
+# MIDI instrument names (S5b-8, "\set Staff.midiInstrument = ...").
+#
+# These are General MIDI Program Names as defined by the MIDI standard
+# itself (not a BANA convention), verified against the LilyPond Notation
+# Reference's MIDI instruments list (Documentation/notation/midi-instruments)
+# rather than assumed from memory, per CLAUDE.md's mandate for LilyPond
+# syntax. General MIDI has no dedicated patch for every orchestral
+# instrument (e.g. bass clarinet, double bassoon) -- those fall back to
+# the closest available GM instrument (clarinet, bassoon).
+# ---------------------------------------------------------------------------
+
+_NAME_TO_MIDI_INSTRUMENT: dict[str, str] = {
+    'Piccolo': 'piccolo',
+    'Flute': 'flute',
+    'Oboe': 'oboe',
+    'English horn': 'english horn',
+    'Clarinet': 'clarinet',
+    'Bass clarinet': 'clarinet',       # no dedicated GM patch
+    'Bassoon': 'bassoon',
+    'Double bassoon': 'bassoon',       # no dedicated GM patch
+    'Horn': 'french horn',
+    'Trumpet': 'trumpet',
+    'Trombone': 'trombone',
+    'Tuba': 'tuba',
+    'Kettledrums': 'timpani',
+    'Harp right hand': 'orchestral harp',
+    'Harp left hand': 'orchestral harp',
+    'Piano right hand': 'acoustic grand',
+    'Piano left hand': 'acoustic grand',
+    'Violin I': 'violin',
+    'Violin II': 'violin',
+    'Viola': 'viola',
+    'Violoncello': 'cello',
+    'Double bass': 'contrabass',
+}
+
+
+def get_midi_instrument_name(name: str) -> str | None:
+    """Resolve an instrument name to a General MIDI instrument name string
+    for \\set Staff.midiInstrument, or None if there's no reasonable match.
+
+    Uses an exact Table-29-style name match first (case-insensitive), then
+    falls back to family-based keyword matching (mirroring
+    get_instrument_family's fallback) for names outside that roster --
+    e.g. a bare "Violin" or "Cello" without a part number.
+    """
+    normalized_name = name.strip()
+    for known_name, midi_name in _NAME_TO_MIDI_INSTRUMENT.items():
+        if known_name.lower() == normalized_name.lower():
+            return midi_name
+
+    lower_name = normalized_name.lower()
+    if 'piccolo' in lower_name:
+        return 'piccolo'
+    if 'flute' in lower_name:
+        return 'flute'
+    if 'english horn' in lower_name:
+        return 'english horn'
+    if 'oboe' in lower_name:
+        return 'oboe'
+    if 'clarinet' in lower_name:
+        return 'clarinet'
+    if 'bassoon' in lower_name:
+        return 'bassoon'
+    if 'horn' in lower_name:
+        return 'french horn'
+    if 'trumpet' in lower_name:
+        return 'trumpet'
+    if 'trombone' in lower_name:
+        return 'trombone'
+    if 'tuba' in lower_name:
+        return 'tuba'
+    if 'timpani' in lower_name or 'kettledrum' in lower_name:
+        return 'timpani'
+    if 'harp' in lower_name:
+        return 'orchestral harp'
+    if 'piano' in lower_name:
+        return 'acoustic grand'
+    if 'violin' in lower_name or 'fiddle' in lower_name:
+        return 'violin'
+    if 'viola' in lower_name:
+        return 'viola'
+    if 'violoncello' in lower_name or 'cello' in lower_name:
+        return 'cello'
+    if 'double bass' in lower_name or 'contrabass' in lower_name:
+        return 'contrabass'
+
+    return None

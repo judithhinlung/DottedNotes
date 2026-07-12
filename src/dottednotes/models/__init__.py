@@ -11,8 +11,10 @@ from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
 from .measure_repeat import MeasureRepeat
 from .note import Note, Rest
+from .fingering import Fingering
 from .ornament import GraceNote, Ornament, OrnamentType, ORNAMENT_TO_LILYPOND
 from .score import Score
+from .orchestra_score import OrchestraScore
 from .staff import Staff
 from .text_marking import TextMarking, TextMarkingType, TEMPO_TERMS
 from .time_signature import TimeSignature, VALID_DENOMINATORS
@@ -41,11 +43,13 @@ __all__ = [
     "MeasureRepeat",
     "Note",
     "Rest",
+    "Fingering",
     "GraceNote",
     "Ornament",
     "OrnamentType",
     "ORNAMENT_TO_LILYPOND",
     "Score",
+    "OrchestraScore",
     "Staff",
     "TEMPO_TERMS",
     "TextMarking",

@@ -8,6 +8,7 @@ from .base import BrailleSymbol
 from .duration import Duration
 from .dynamic import Dynamic
 from .ornament import GraceNote, Ornament
+from .fingering import Fingering
 
 NOTE_NAME_TO_LILYPOND = {
     'C': 'c', 'D': 'd', 'E': 'e', 'F': 'f',
@@ -43,6 +44,7 @@ class Note(BrailleSymbol):
     slur_end: bool = False
     slur_bracket_open: bool = False
     slur_bracket_close: bool = False
+    fingerings: list[Fingering] = field(default_factory=list)
 
     def __post_init__(self):
         if self.note_name not in NOTE_NAME_TO_LILYPOND:
@@ -68,6 +70,7 @@ class Note(BrailleSymbol):
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
         octave_str = self._octave_marks()
         duration_str = self.duration.to_lilypond()
+        fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         ornament_str = ''.join(o.to_lilypond() for o in self.ornaments)
         tie_str = '~' if self.tie else ''
@@ -78,7 +81,7 @@ class Note(BrailleSymbol):
             (')' if self.slur_end else '') +
             ('\\)' if self.slur_bracket_close else '')
         )
-        return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}"
+        return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{fingering_str}"
                 f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}")
 
     def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
@@ -109,7 +112,8 @@ class Note(BrailleSymbol):
 
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
-        return f"{ly_name}{accidental_str}{octave_str}", target_midi
+        fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
+        return f"{ly_name}{accidental_str}{octave_str}{fingering_str}", target_midi
 
     def _midi_pitch(self) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
@@ -164,6 +168,7 @@ class Note(BrailleSymbol):
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
         accidental_str = self.accidental.to_lilypond() if self.accidental else ''
         duration_str = self.duration.to_lilypond()
+        fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         ornament_str = ''.join(o.to_lilypond() for o in self.ornaments)
         tie_str = '~' if self.tie else ''
@@ -174,7 +179,7 @@ class Note(BrailleSymbol):
             (')' if self.slur_end else '') +
             ('\\)' if self.slur_bracket_close else '')
         )
-        result = (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}"
+        result = (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{fingering_str}"
                   f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}")
         return result, target_midi
 

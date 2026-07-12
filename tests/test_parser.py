@@ -764,8 +764,8 @@ def test_tokenizer_unknown_cell():
 
 def test_tokenizer_unknown_does_not_raise():
     # Any unrecognized cell must produce UNKNOWN, never raise.
-    # ⠭ (dots 1,3,4,6) is not in any symbol table.
-    tokens = BrailleTokenizer().tokenize('⠭')
+    # ⠅ (dots 1,3) is not in any symbol table.
+    tokens = BrailleTokenizer().tokenize('⠅')
     assert len(tokens) == 1
     assert tokens[0].category == SymbolCategory.UNKNOWN
 
@@ -3912,7 +3912,12 @@ def test_children_s_piece_renders_piano_staff_lilypond():
     assert r'\version' in ly
     assert r'\new PianoStaff <<' in ly
     assert ly.count(r'\new Staff {') == 2
-    assert ly.count("\\relative c' {") == 2
+    # Each staff's \relative anchor matches its register (S6 follow-up):
+    # the upper/treble staff opens on c'' and the lower/bass staff on plain
+    # c, exactly as Children_s_Piece.ly (hand-authored ground truth) does --
+    # not a uniform \relative c' for both.
+    assert "\\relative c'' {" in ly
+    assert "\\relative c {" in ly
 
 
 def test_children_s_piece_measure1_matches_lilypond_ground_truth():

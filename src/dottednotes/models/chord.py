@@ -58,11 +58,12 @@ class Chord:
 
 
 def NOTE_PITCH_ONLY(note: Note) -> str:
-    """Return just the pitch portion of a note (name + accidental), no octave or duration."""
+    """Return just the pitch portion of a note (name + accidental + fingering), no octave or duration."""
     from .note import NOTE_NAME_TO_LILYPOND
     ly_name = NOTE_NAME_TO_LILYPOND[note.note_name]
     accidental_str = note.accidental.to_lilypond() if note.accidental else ''
-    return f"{ly_name}{accidental_str}"
+    fingering_str = ''.join(f.to_lilypond() for f in note.fingerings)
+    return f"{ly_name}{accidental_str}{fingering_str}"
 
 
 def _chord_extras(written: Note) -> str:

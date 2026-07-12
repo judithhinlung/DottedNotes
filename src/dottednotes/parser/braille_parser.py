@@ -23,6 +23,10 @@ from ..bana_symbols import (
     SLUR_CELLS,
     TIME_SIGNATURE_CELLS,
     SymbolCategory,
+    FINGERING_CELLS,
+    FINGERING_CHANGE_CELL,
+    OMISSION_FIRST_FINGERING_CELL,
+    OMISSION_SECOND_FINGERING_CELL,
 )
 from ..models.accidental import Accidental, AccidentalType
 from ..models.chord import Chord
@@ -36,6 +40,7 @@ from ..models.key_signature import KeySignature
 from ..models.measure import Measure
 from ..models.measure_repeat import MeasureRepeat
 from ..models.note import Note, Rest
+from ..models.fingering import Fingering
 from ..models.ornament import GraceNote, Ornament, OrnamentType
 from ..models.score import Score
 from ..models.staff import Staff
@@ -167,8 +172,9 @@ class _PendingNote:
     slur_end: bool = False
     slur_bracket_open: bool = False
     slur_bracket_close: bool = False
-    # Each tuple: (note_name, octave, accidental_or_None)
-    interval_notes: list[tuple[str, int, Accidental | None]] = field(default_factory=list)
+    fingerings: list[Fingering] = field(default_factory=list)
+    # Each tuple: (note_name, octave, accidental_or_None, fingerings)
+    interval_notes: list[tuple[str, int, Accidental | None, list[Fingering]]] = field(default_factory=list)
     dots: int = 0
     is_triplet: bool = False  # S5-8/S5-9: part of a single-cell triplet group
     # (BANA 8.4). Groups may mix note values (S5-9) — no longer necessarily
@@ -222,6 +228,8 @@ class BrailleParser:
         tokens: list[BrailleToken],
         instruments: list[InstrumentInfo] | None = None,
         ensemble: bool = False,
+        preserve_state: bool = False,
+        initial_state: dict | None = None,
     ) -> None:
         self._tokens = tokens
         # S5b-3 / BANA 33.4.2: "Intervals and in-accords are read upward in
@@ -233,6 +241,8 @@ class BrailleParser:
         # supplied," not something detected from raw text.
         self._instruments = instruments or []
         self._ensemble_opt = ensemble
+        self._preserve_state = preserve_state
+        self._initial_state = initial_state
 
     def parse(self) -> Score:
         self._reset_state()
@@ -241,7 +251,9 @@ class BrailleParser:
         left_staff = Staff(name="left hand")
         pending: list[_PendingNote] = []
 
-        for token in self._tokens:
+        i = 0
+        while i < len(self._tokens):
+            token = self._tokens[i]
             if token.category == SymbolCategory.OCTAVE_MARK:
                 self._handle_octave_mark(token)
             elif token.category == SymbolCategory.ORNAMENT:
@@ -267,8 +279,22 @@ class BrailleParser:
                     self._commit_pending_triplet_signs()
                     pending.append(self._buffer_note(token))
                     self._apply_triplet_flag(pending[-1])
+                    self._last_item_was_interval = False
+                    i = self._parse_fingering_after_note_or_interval(i, pending)
             elif token.category == SymbolCategory.HAND_SIGN:
-                self._current_hand = token.character
+                # Octave state is tracked per hand: a BRF that interleaves
+                # right/left-hand systems without restating the octave mark
+                # on every hand switch (BANA only requires a mark when the
+                # octave actually changes -- it is not required to restate
+                # it just because the other hand's notes came between) must
+                # resume each hand's notes from that hand's own last-known
+                # octave, not whichever hand set the shared state most
+                # recently.
+                if self._current_hand is not None:
+                    self._octave_by_hand[self._current_hand] = self._current_octave
+                new_hand = token.character
+                self._current_octave = self._octave_by_hand.get(new_hand, 4)
+                self._current_hand = new_hand
             elif token.category == SymbolCategory.BAR_LINE:
                 self._check_triplet_group_not_open_at_bar_line()
                 if pending or self._pending_repeat_count > 0:
@@ -320,6 +346,8 @@ class BrailleParser:
                 self._handle_slur(token, pending)
             elif token.category == SymbolCategory.INTERVAL:
                 self._handle_interval(token, pending)
+                self._last_item_was_interval = True
+                i = self._parse_fingering_after_note_or_interval(i, pending)
             elif token.category == SymbolCategory.IN_ACCORD:
                 self._handle_in_accord(token, pending)
                 pending = []
@@ -327,6 +355,7 @@ class BrailleParser:
                 self._commit_pending_triplet_signs()
                 pending.append(self._buffer_rest(token))
                 self._apply_triplet_flag(pending[-1])
+                self._last_item_was_interval = False
             elif token.category == SymbolCategory.MULTI_MEASURE_REST:
                 self._commit_pending_triplet_signs()
                 active = left_staff if self._current_hand == 'left' else right_staff
@@ -378,9 +407,12 @@ class BrailleParser:
                         "Augmentation dot with no preceding note or rest; ignoring.",
                         stacklevel=2,
                     )
+                self._last_item_was_interval = False
+                i = self._parse_fingering_after_note_or_interval(i, pending)
             elif token.category == SymbolCategory.TRIPLET_INDICATOR:
                 self._pending_triplet_signs += 1
             # UNKNOWN — handled in later tickets
+            i += 1
 
         # End-of-input is, for triplet-group purposes, an implicit final
         # bar line (S5-9): a group left mid-flight here is just as
@@ -713,9 +745,17 @@ class BrailleParser:
             # BANA 33.4.2: "Intervals and in-accords are read upward in all
             # parts" in ensemble scores — clef no longer decides direction.
             descending = False
-        else:
+        elif self._clef_parsed:
             clef_str = self._clef.clef_type.name  # 'TREBLE', 'BASS', 'ALTO', 'TENOR'
             descending = clef_str in ('TREBLE', 'ALTO')
+        else:
+            # No explicit clef cell was ever parsed for this piece (some BRF
+            # files use plain hand-change signs and rely on the BANA default
+            # of right hand = treble, left hand = bass instead of restating
+            # the clef). Fall back to that per-hand default rather than the
+            # single-staff TREBLE default, so left-hand intervals/chords
+            # resolve upward as bass clef requires.
+            descending = self._current_hand != 'left'
         iname, ioctave = _interval_pitch(
             pnote.note_name, pnote.octave, interval_number, descending
         )
@@ -741,7 +781,93 @@ class BrailleParser:
                 type=iacc_type,
             )
 
-        pnote.interval_notes.append((iname, ioctave, iacc))
+        pnote.interval_notes.append((iname, ioctave, iacc, []))
+
+    def _parse_fingering_after_note_or_interval(self, current_idx: int, pending: list[_PendingNote]) -> int:
+        if not pending:
+            return current_idx
+
+        idx = current_idx + 1
+
+        # Check if the next token(s) represent a fingering sequence:
+        # A fingering sequence starts with either:
+        # - a basic finger cell (⠁, ⠃, ⠇, ⠂, ⠅)
+        # - or OMISSION_FIRST_FINGERING_CELL (⠠)
+        if idx >= len(self._tokens):
+            return current_idx
+
+        t1 = self._tokens[idx]
+
+        def get_finger(char: str) -> int | None:
+            return FINGERING_CELLS.get(char, None)
+
+        f1 = get_finger(t1.character)
+        is_om1 = (t1.character == OMISSION_FIRST_FINGERING_CELL)
+
+        if f1 is None and not is_om1:
+            return current_idx
+
+        # We found a fingering sequence!
+        idx2 = idx + 1
+        if idx2 < len(self._tokens):
+            t2 = self._tokens[idx2]
+
+            # Check for Change of Fingering: t2 is FINGERING_CHANGE_CELL ('⠉')
+            if t2.character == FINGERING_CHANGE_CELL:
+                idx3 = idx2 + 1
+                if idx3 < len(self._tokens):
+                    t3 = self._tokens[idx3]
+                    f3 = get_finger(t3.character)
+                    if f3 is not None:
+                        f_obj = Fingering(
+                            dots=frozenset(),
+                            category=SymbolCategory.FINGERING,
+                            raw_brl=t1.character + t2.character + t3.character,
+                            finger=f1,
+                            change_to=f3,
+                        )
+                        self._attach_fingering(f_obj, pending)
+                        return idx3
+
+            # Check for Alternative Fingering: t2 is a basic finger cell or OMISSION_SECOND_FINGERING_CELL ('⠄')
+            f2 = get_finger(t2.character)
+            is_om2 = (t2.character == OMISSION_SECOND_FINGERING_CELL)
+
+            if f2 is not None or is_om2:
+                f_obj = Fingering(
+                    dots=frozenset(),
+                    category=SymbolCategory.FINGERING,
+                    raw_brl=t1.character + t2.character,
+                    finger=f1 if not is_om1 else None,
+                    alternative=f2 if not is_om2 else None,
+                    first_omitted=is_om1,
+                    second_omitted=is_om2,
+                )
+                self._attach_fingering(f_obj, pending)
+                return idx2
+
+        # Single fingering
+        if f1 is not None:
+            f_obj = Fingering(
+                dots=frozenset(),
+                category=SymbolCategory.FINGERING,
+                raw_brl=t1.character,
+                finger=f1,
+            )
+            self._attach_fingering(f_obj, pending)
+            return idx
+
+        return current_idx
+
+    def _attach_fingering(self, f_obj: Fingering, pending: list[_PendingNote]) -> None:
+        if not pending:
+            return
+        pnote = pending[-1]
+        if self._last_item_was_interval and pnote.interval_notes:
+            iname, ioctave, iacc, ifings = pnote.interval_notes[-1]
+            ifings.append(f_obj)
+        else:
+            pnote.fingerings.append(f_obj)
 
     def _handle_ornament(self, token: BrailleToken, pending: list[_PendingNote]) -> None:
         char = token.character
@@ -1085,13 +1211,14 @@ class BrailleParser:
                 slur_end=pnote.slur_end,
                 slur_bracket_open=pnote.slur_bracket_open,
                 slur_bracket_close=pnote.slur_bracket_close,
+                fingerings=list(pnote.fingerings),
             )
             if pnote.is_divisi_octave and pnote.interval_notes:
                 # Divisi-in-octaves (BANA 33.4.2): the octave partner is a
                 # second voice, not a chord tone. Only the octave interval
                 # is expected to be active during a divisi passage, so the
                 # first interval_notes entry is the partner.
-                iname, ioctave, iacc = pnote.interval_notes[0]
+                iname, ioctave, iacc, ifings = pnote.interval_notes[0]
                 items.append(written)
                 divisi_partners.append(Note(
                     dots=frozenset(),
@@ -1101,10 +1228,11 @@ class BrailleParser:
                     octave=ioctave,
                     duration=dur,
                     accidental=iacc,
+                    fingerings=list(ifings),
                 ))
             elif pnote.interval_notes:
                 chord_notes = [written]
-                for iname, ioctave, iacc in pnote.interval_notes:
+                for iname, ioctave, iacc, ifings in pnote.interval_notes:
                     chord_notes.append(Note(
                         dots=frozenset(),
                         category=SymbolCategory.NOTE,
@@ -1113,6 +1241,7 @@ class BrailleParser:
                         octave=ioctave,
                         duration=dur,
                         accidental=iacc,
+                        fingerings=list(ifings),
                     ))
                 items.append(Chord(notes=chord_notes))
                 divisi_partners.append(None)
@@ -1371,6 +1500,17 @@ class BrailleParser:
         # convention, so these are re-checked against the measure's beat
         # budget afterward (Bug B).
         whole_candidates: list[int] = []
+        # Indices resolved to a "genuine 8th" specifically because they
+        # followed an INDIVIDUAL-state run (2+ consecutive base_1 cells) --
+        # the documented default per the Key rule above. Real orchestral
+        # passages can have 3+ consecutive base_1 cells immediately
+        # continued by base_8 cells that are actually part of the SAME
+        # 16th-note run (confirmed against Fengyang_Flower_Drum.brf Violin I
+        # mm. 21-22: bes16 c16 ees16 c16 ees16 f16, all one run) -- the
+        # "genuine 8th" default overflows the measure's beat budget in that
+        # case, the same overflow signal Bug B already uses for
+        # whole_candidates. These are re-checked the same way afterward.
+        individual_trailing_candidates: list[int] = []
         # Ticks consumed so far in the current beat (S5-7); reset to 0
         # whenever it reaches a full beat. Lets a RUN account for beat
         # space already spent by whatever preceded its leader.
@@ -1396,6 +1536,15 @@ class BrailleParser:
             elif n.base_duration == 8:
                 if state == "run":
                     resolved[i] = 16
+                elif state == "individual" or state == "individual_trailing":
+                    # Tentatively a genuine 8th (the Key rule's default), but
+                    # every base_8 cell in this consecutive chain is a
+                    # candidate for retroactive 16th-run correction below if
+                    # that's the only way the measure's beat budget can be
+                    # satisfied -- not just the first one.
+                    resolved[i] = 8
+                    individual_trailing_candidates.append(i)
+                    state = "individual_trailing"
                 else:
                     resolved[i] = 8
                     state = "normal"
@@ -1433,6 +1582,24 @@ class BrailleParser:
                 # A whole note here would overflow the measure — it must
                 # actually be a 16th note (context-based disambiguation).
                 old_ticks = Duration(value=1, dots=pending[idx].dots).duration_in_ticks()
+                new_ticks = Duration(value=16, dots=pending[idx].dots).duration_in_ticks()
+                resolved[idx] = 16
+                total_ticks += new_ticks - old_ticks
+
+        if individual_trailing_candidates:
+            total_ticks = sum(
+                Duration(
+                    value=resolved[i], dots=pending[i].dots, is_triplet=pending[i].is_triplet
+                ).duration_in_ticks()
+                for i in range(len(pending))
+            )
+            for idx in individual_trailing_candidates:
+                if total_ticks <= beats_ticks:
+                    break
+                # A genuine 8th here would overflow the measure — it must
+                # actually be a 16th-note run continuation (context-based
+                # disambiguation, same overflow signal as Bug B above).
+                old_ticks = Duration(value=8, dots=pending[idx].dots).duration_in_ticks()
                 new_ticks = Duration(value=16, dots=pending[idx].dots).duration_in_ticks()
                 resolved[idx] = 16
                 total_ticks += new_ticks - old_ticks
@@ -1476,12 +1643,69 @@ class BrailleParser:
     # Internal state
     # ------------------------------------------------------------------
 
+    def get_state(self) -> dict:
+        import copy
+        return {
+            '_current_octave': self._current_octave,
+            '_octave_by_hand': dict(self._octave_by_hand),
+            '_key_signature': self._key_signature,
+            '_time_signature': self._time_signature,
+            '_clef': self._clef,
+            '_key_signature_parsed': self._key_signature_parsed,
+            '_time_signature_parsed': self._time_signature_parsed,
+            '_clef_parsed': self._clef_parsed,
+            '_pending_accidental': self._pending_accidental,
+            '_pending_dynamics': list(self._pending_dynamics),
+            '_pending_articulations': list(self._pending_articulations),
+            '_active_articulations': set(self._active_articulations),
+            '_terminating_articulations': set(self._terminating_articulations),
+            '_last_articulation_seen': self._last_articulation_seen,
+            '_pending_ornaments': list(self._pending_ornaments),
+            '_trill_carry_active': self._trill_carry_active,
+            '_last_ornament_was_trill': self._last_ornament_was_trill,
+            '_pending_grace_note_indicator': self._pending_grace_note_indicator,
+            '_pending_grace_note_is_long': self._pending_grace_note_is_long,
+            '_pending_grace_notes': list(self._pending_grace_notes),
+            '_grace_carry_active': self._grace_carry_active,
+            '_grace_carry_ending': self._grace_carry_ending,
+            '_last_token_was_slur': self._last_token_was_slur,
+            '_slur_carry_active': self._slur_carry_active,
+            '_pending_slur_end': self._pending_slur_end,
+            '_pending_slur_bracket_open': self._pending_slur_bracket_open,
+            '_pending_tempo': self._pending_tempo,
+            '_pending_text_markings': list(self._pending_text_markings),
+            '_active_intervals': dict(self._active_intervals),
+            '_last_interval_seen': self._last_interval_seen,
+            '_interval_octave_override': self._interval_octave_override,
+            '_octave_mark_pending': self._octave_mark_pending,
+            '_divisi_marking_pending': self._divisi_marking_pending,
+            '_divisi_octave_active': self._divisi_octave_active,
+            '_in_accord_parts': copy.deepcopy(self._in_accord_parts),
+            '_in_accord_type': self._in_accord_type,
+            '_in_accord_sections': copy.deepcopy(self._in_accord_sections),
+            '_current_hand': self._current_hand,
+            '_pending_repeat_count': self._pending_repeat_count,
+            '_pending_repeat_line': self._pending_repeat_line,
+        }
+
+    def set_state(self, state: dict) -> None:
+        for k, v in state.items():
+            if isinstance(v, list):
+                setattr(self, k, list(v))
+            elif isinstance(v, set):
+                setattr(self, k, set(v))
+            elif isinstance(v, dict):
+                setattr(self, k, dict(v))
+            else:
+                setattr(self, k, v)
+
     def _reset_state(self) -> None:
         # BANA 33.4.2: any supplied instrument list means this is an
         # ensemble score, which reads intervals upward in every part
         # regardless of clef (see _apply_interval).
         self._is_ensemble: bool = self._ensemble_opt or bool(self._instruments)
         self._current_octave: int = 4
+        self._octave_by_hand: dict[str, int] = {}
         self._key_signature: KeySignature = KeySignature(
             dots=frozenset(),
             category=SymbolCategory.KEY_SIGNATURE,
@@ -1541,6 +1765,7 @@ class BrailleParser:
         # bar lines exactly like the underlying carry already does.
         self._divisi_marking_pending: bool = False
         self._divisi_octave_active: bool = False
+        self._last_item_was_interval: bool = False
         # In-accord state
         self._in_accord_parts: list[list] = []
         self._in_accord_type: str = 'full'
@@ -1614,3 +1839,6 @@ class BrailleParser:
         self._triplet_group_smallest_ticks: int | None = None
         self._triplet_block_smallest_ticks: int | None = None
         self._triplet_block_has_ambiguous: bool = False
+
+        if self._preserve_state and self._initial_state is not None:
+            self.set_state(self._initial_state)

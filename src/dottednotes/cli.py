@@ -3,8 +3,11 @@ import sys
 from pathlib import Path
 
 from .parser.braille_parser import BrailleParser
+from .parser.ensemble_parser import EnsembleParser, extract_measure_number
+from .parser.tokenizer import BrailleTokenizer
 from .parser.input_pipeline import InputPipeline
 from .renderers.lilypond_renderer import LilypondRenderer
+from .bana_symbols import WORD_SIGN, END_WORD_SIGN
 
 
 def main() -> None:
@@ -17,7 +20,22 @@ def main() -> None:
     args = parser.parse_args()
 
     text = InputPipeline(args.input).read()
-    score = BrailleParser().parse(text)
+
+    # Determine if it's an ensemble score by checking for an instrument list header
+    lines = text.splitlines()
+    has_ensemble_header = False
+    for line in lines:
+        m_num, _ = extract_measure_number(line)
+        if m_num is None and WORD_SIGN in line and END_WORD_SIGN in line:
+            has_ensemble_header = True
+            break
+
+    if has_ensemble_header:
+        score = EnsembleParser().parse(text)
+    else:
+        tokens = BrailleTokenizer().tokenize(text)
+        score = BrailleParser(tokens=tokens).parse()
+
     rendered = LilypondRenderer().render(score)
 
     if args.output:

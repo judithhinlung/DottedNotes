@@ -60,6 +60,7 @@ class SymbolCategory(Enum):
     AUGMENTATION_DOT = auto()
     TRIPLET_INDICATOR = auto()
     MULTI_MEASURE_REST = auto()
+    FINGERING = auto()
     UNKNOWN = auto()
 
 
@@ -260,6 +261,8 @@ REST_CELLS: dict[str, int] = {
     '⠍': 1,  # dots 1,3,4    — whole rest (or 16th rest)
     '⠥': 2,  # dots 1,3,6    — half rest  (or 32nd rest)
     '⠧': 4,  # dots 1,2,3,6  — quarter rest (or 64th rest)
+    '⠭': 8,  # dots 1,3,4,6  — eighth rest, unambiguous (confirmed by developer,
+             # S5b-8, from Fengyang_Flower_Drum.brf Violin I mm. 21-22)
 }
 
 # ---------------------------------------------------------------------------
@@ -679,3 +682,21 @@ LITERARY_DIGITS: dict[str, int] = {
     '⠊': 9,   # dots 2,4     (I) — also A-eighth note mid-line
     '⠚': 0,   # dots 2,4,5   (J) — also B-eighth note mid-line
 }
+
+# ---------------------------------------------------------------------------
+# Fingering notation (BANA Section 15 & Table 15)
+# ---------------------------------------------------------------------------
+
+FINGERING_CELLS: dict[str, int] = {
+    '⠁': 1,  # dot 1
+    '⠃': 2,  # dots 1,2
+    '⠇': 3,  # dots 1,2,3
+    '⠂': 4,  # dot 2
+    '⠅': 5,  # dots 1,3
+}
+
+FINGERING_CHANGE_CELL: str = '⠉'  # dots 1,4
+
+OMISSION_FIRST_FINGERING_CELL: str = '⠠'  # dot 6
+OMISSION_SECOND_FINGERING_CELL: str = '⠄' # dot 3
+

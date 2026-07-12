@@ -33,10 +33,19 @@ from dottednotes.parser.input_pipeline import decode_literary_braille
 @dataclass
 class BrailleToken:
     """A single classified braille cell (or multi-cell sequence) with source location."""
-    character: str          # raw Unicode braille character(s) U+2800–U+28FF
+    character: str          # decoded/classified value (raw cells for most categories;
+                             # plain decoded text for WORD_SIGN)
     category: SymbolCategory
     position: int           # 0-based character index in the source string
     line: int               # 1-based line number
+    raw: str = ""           # original, undecoded Unicode braille cells this token came
+                             # from. Defaults to `character` (already raw for every
+                             # category except WORD_SIGN, where `character` is decoded
+                             # plain text and `raw` must be set explicitly at creation).
+
+    def __post_init__(self) -> None:
+        if not self.raw:
+            self.raw = self.character
 
 
 class BrailleTokenizer:
@@ -90,12 +99,17 @@ class BrailleTokenizer:
     _NUMBER_SIGN: str = '⠼'       # U+283C  dots 3,4,5,6
     _SHARP_CELL: str = '⠩'        # U+2829  dots 1,4,6
 
-    def tokenize(self, text: str) -> list[BrailleToken]:
+    def tokenize(self, text: str, at_line_start: bool = True) -> list[BrailleToken]:
         tokens: list[BrailleToken] = []
         line = 1
         i = 0
         at_measure_start = True   # True at start-of-piece and after bar lines
-        at_line_start = True      # True at start-of-piece and after each newline
+        # True at start-of-piece and after each newline. Callers tokenizing a
+        # fragment that is known NOT to be a genuine physical line start (e.g.
+        # EnsembleParser re-tokenizing an abbreviation-stripped mid-stream
+        # measure fragment) should pass at_line_start=False -- otherwise a
+        # real first note that happens to share a cell with a literary digit
+        # gets misread as a measure-number token and silently dropped.
         # True until the first key sig / time sig / clef / note / rest / bar line
         # is emitted.  CAPITAL_INDICATOR (⠠) is only valid as a literary capital
         # in the piece header; after that point ⠠ reverts to the octave-7 mark.
@@ -190,21 +204,40 @@ class BrailleTokenizer:
                 start_pos = i
                 buf = char
                 i += 1
+                consumed_end_word_sign = False
                 while i < len(text):
                     c = text[i]
                     if c == END_WORD_SIGN:
                         i += 1  # consume end word sign, exclude from buffer
+                        consumed_end_word_sign = True
                         break
                     if c in OCTAVE_MARKS:
                         break  # leave octave mark for note parsing
+                    if c in ARTICULATION_CELLS or c == MEASURE_REPEAT_CELL:
+                        # A word-sign/dynamic expression missing its closing
+                        # END_WORD_SIGN (a real transcription gap -- confirmed
+                        # against Fengyang_Flower_Drum.brf, e.g. an unclosed
+                        # ">MP" immediately followed by a staccato mark or a
+                        # measure-repeat sign) must not swallow an unrelated
+                        # articulation/repeat cell into the buffer: neither
+                        # ever legitimately appears inside literary word text
+                        # or any DYNAMIC_CELLS entry, so treat them as
+                        # terminators too, leaving them for note parsing.
+                        break
                     buf += c
                     i += 1
+                # raw_cells preserves the true original cells (including the
+                # end word sign, when present) so callers that need to
+                # round-trip this token back to braille (e.g. EnsembleParser
+                # reconstructing a per-instrument stream) don't have to
+                # re-encode already-decoded text — see BrailleToken.raw.
+                raw_cells = buf + (END_WORD_SIGN if consumed_end_word_sign else "")
                 # Classify the collected buffer.
                 if buf in DYNAMIC_CELLS:
-                    tokens.append(BrailleToken(buf, SymbolCategory.DYNAMIC, start_pos, line))
+                    tokens.append(BrailleToken(buf, SymbolCategory.DYNAMIC, start_pos, line, raw=raw_cells))
                 else:
                     decoded = decode_literary_braille(buf[1:])  # strip ⠜ prefix
-                    tokens.append(BrailleToken(decoded, SymbolCategory.WORD_SIGN, start_pos, line))
+                    tokens.append(BrailleToken(decoded, SymbolCategory.WORD_SIGN, start_pos, line, raw=raw_cells))
                 continue
 
             # --- number sign ⠼: key/time signature at measure boundary;
@@ -432,7 +465,7 @@ class BrailleTokenizer:
                     text_chars.append(letter)
                     i += 1
                 decoded_text = ''.join(text_chars).strip()
-                tokens.append(BrailleToken(decoded_text, SymbolCategory.WORD_SIGN, start_pos, line))
+                tokens.append(BrailleToken(decoded_text, SymbolCategory.WORD_SIGN, start_pos, line, raw=text[start_pos:i]))
                 continue
 
             # --- multi-measure rests ⠍⠍, ⠍⠍⠍ at measure start ---

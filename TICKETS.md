@@ -4166,7 +4166,7 @@ measures it wasn't mentioned in.
 
 ---
 
-### [ ] S5b-6: Implement transposing instrument table and concert pitch flag
+### [x] S5b-6: Implement transposing instrument table and concert pitch flag
 
 **Why:** `CLAUDE.md`'s existing Key Design Decision #4 already commits to
 this: "Concert pitch: Default to concert pitch output; transposing
@@ -4207,13 +4207,13 @@ Manual section) can skip the wrap.
    correctly in both concert-pitch and written-pitch output modes.
 
 **Definition of Done:**
-- [ ] Transposition interval table built and each interval verified (not
+- [x] Transposition interval table built and each interval verified (not
       assumed from memory)
-- [ ] Instrument key parsed from the §33.2 name text
-- [ ] Concert-pitch flag controls whether `\transpose` is applied,
+- [x] Instrument key parsed from the §33.2 name text
+- [x] Concert-pitch flag controls whether `\transpose` is applied,
       defaulting to concert pitch per Decision #4
-- [ ] `\transpose` syntax verified against the LilyPond Notation Reference
-- [ ] Tests pass for at least horn and clarinet transpositions
+- [x] `\transpose` syntax verified against the LilyPond Notation Reference
+- [x] Tests pass for at least horn and clarinet transpositions
 
 **Senior note:** Get the transposition direction and interval verified,
 not assumed — a backwards transposition is a silent musical error, not a
@@ -4222,7 +4222,7 @@ or a reference score checking the output.
 
 ---
 
-### [ ] S5b-7: Implement OrchestraScore class
+### [x] S5b-7: Implement OrchestraScore class
 
 **Why:** `Score.to_lilypond()` (`models/score.py` ~19-27) currently only
 handles exactly one staff or exactly two (the Sprint 4/5 piano-hands
@@ -4296,15 +4296,15 @@ materialize a complete, gap-free per-instrument part for
    Fengyang and Bartók fixtures (S5b-8).
 
 **Definition of Done:**
-- [ ] `OrchestraScore` models an ordered list of named, independently-
+- [x] `OrchestraScore` models an ordered list of named, independently-
       keyed instrument parts with gap-free per-instrument measure lists
-- [ ] §33.4's parallel structure (vertical alignment, run-over lines,
+- [x] §33.4's parallel structure (vertical alignment, run-over lines,
       mid-measure division) parses correctly
-- [ ] §33.6 parallel movement and §33.7 consolidated parts avoid
+- [x] §33.6 parallel movement and §33.7 consolidated parts avoid
       duplicating already-parsed music
-- [ ] `to_lilypond()` emits an arbitrary number of staves, removing
+- [x] `to_lilypond()` emits an arbitrary number of staves, removing
       `Score`'s current 1-or-2-staff ceiling
-- [ ] Tests pass, building up to the fixtures in S5b-8
+- [x] Tests pass, building up to the fixtures in S5b-8
 
 **Senior note:** This is the sprint's centerpiece and by far its largest
 ticket — budget accordingly, and expect it to surface refinements needed
@@ -4313,7 +4313,7 @@ fixture's full orchestral roster.
 
 ---
 
-### [ ] S5b-8: Integration test using Fengyang orchestral score
+### [x] S5b-8: Integration test using Fengyang orchestral score
 
 **Why:** `fengyang_flower_drum.brf` (flute and strings) is already in the
 repo (`tests/fixtures/`, also `examples/`) and is, per `CLAUDE.md`, "the
@@ -4355,11 +4355,11 @@ was done for `children_s_piece.brf` measures 1 and 22 in S5-6/S5-7).
    S5-6/S5-7.
 
 **Definition of Done:**
-- [ ] `fengyang_flower_drum.brf` parses through `OrchestraScore` and
+- [x] `fengyang_flower_drum.brf` parses through `OrchestraScore` and
       matches developer-confirmed LilyPond output for its representative
       sample measures
-- [ ] Zero unexpected beat-count warnings on `fengyang_flower_drum.brf`
-- [ ] Bartók/Beethoven/Fauré smoke tests pass (no crash) with warning
+- [x] Zero unexpected beat-count warnings on `fengyang_flower_drum.brf`
+- [x] Bartók/Beethoven/Fauré smoke tests pass (no crash) with warning
       counts recorded as a regression baseline
 
 **Senior note:** This ticket is the sprint's acceptance test, not new
@@ -4369,18 +4369,118 @@ same role `children_s_piece.brf`'s tests played across S5-6/S5-7.
 
 ---
 
-# Sprint 6: Ornaments and Advanced Idioms
+# Sprint 6: Fingering Notation
 
-Estimated time: 1–1.5 weeks.
+Estimated time: 4–6 days.
 
-### [ ] S6-1: Implement Ornament class (trill, mordent, turn, tremolo)
-### [ ] S6-2: Implement fingering notation
-### [ ] S6-3: Implement repeat signs
-### [ ] S6-4: Implement tempo markings
-### [ ] S6-5: Implement grace notes and acciaccatura
-### [ ] S6-6: Integration test suite covering all implemented idioms
+**Research basis for this sprint:** BANA *Music Braille Code, 2015*, Section 15 "Fingering" (print pp. 147-152, §§15.1-15.4.1) and Table 15 "Fingerings" (print p. 28), plus the LilyPond Notation Reference v2.26, §1.7.2 "Fingering". Section/page citations below refer to this edition.
 
-*Detailed steps to be written when Sprint 5b is complete.*
+**Known codebase gap this sprint must close:** There is currently no domain representation for musical fingering, nor any parser support to consume fingering symbols from the braille stream. Because fingering cells (such as `⠁`, `⠃`, `⠇`, `⠂`, `⠅`, `⠉`, `⠠`, `⠄`) collide directly with note, octave, duration, or word sign markings in a stateless tokenizer, they must be resolved contextually in the parser when they follow a note/chord (and optional dot).
+
+### [x] S6-1: Implement Fingering Models and Symbol Recognition
+
+**Why:** We need a domain representation for fingerings (which compile to post-events like `-1` or `-\markup ...` in LilyPond) and helper structures to map them to the BANA symbols defined in Table 15.
+
+**Research (Table 15):**
+- Fingerings use specific left-side cell configurations:
+  - First finger (thumb): `⠁` (dot 1) -> LilyPond `-1`
+  - Second finger (index): `⠃` (dots 1,2) -> LilyPond `-2`
+  - Third finger (middle): `⠇` (dots 1,2,3) -> LilyPond `-3`
+  - Fourth finger (ring): `⠂` (dot 2) -> LilyPond `-4`
+  - Fifth finger (little): `⠅` (dots 1,3) -> LilyPond `-5`
+- These cells collide with other categories but are unique when parsed immediately following a note, chord, or dot.
+
+**Steps:**
+1. Add `FINGERING` to `SymbolCategory` in `src/dottednotes/bana_symbols.py`.
+2. Define a `FINGERING_CELLS` dict mapping Unicode cells to their finger values (1 to 5).
+3. Create a `Fingering` domain model class representing a finger mark, with a `to_lilypond()` method.
+4. Attach a list of `fingerings` to the `Note` and `Chord` domain classes.
+
+**Definition of Done:**
+- [x] `FINGERING` added to `SymbolCategory`
+- [x] `Fingering` domain model class implemented and attached to `Note` and `Chord`
+- [x] Table 15 basic finger cell mappings registered in `bana_symbols.py`
+
+---
+
+### [x] S6-2: Parse Single Fingerings and Handle Dotted/Tied Notes
+
+**Why:** §15.1 "Placing Fingering Signs": basic fingerings are brailled immediately after the note (or after the dot if the note is dotted). If a note is tied, the fingering is placed before the tie.
+
+**Steps:**
+1. Update `BrailleParser` to inspect the token stream immediately following a note or chord.
+2. If any of the basic finger cells are found, parse and consume them as a `Fingering` and attach them to the current note/chord.
+3. If an `AUGMENTATION_DOT` (`⠄`) is present, ensure the fingering is parsed after the dot.
+4. If a note is tied, ensure the fingering is attached to the note itself before compiling the tie event.
+5. Implement basic fingering serialization in `to_lilypond()` (e.g. `c4-1`).
+
+**Definition of Done:**
+- [x] Parser extracts single fingerings for notes and chords
+- [x] Dotted notes place their fingerings after the dot (e.g. `c4.-1`)
+- [x] Tied notes place their fingerings before the tie (e.g. `c4-1 ~ c4`)
+- [x] Unit tests cover notes, chords, dots, and ties with single fingerings
+
+---
+
+### [x] S6-3: Parse Change of Fingering and Adjacent Notes
+
+**Why:** §15.2 "Change of Fingering": a change of fingers on a single note or interval is indicated by placing the "change of fingers" sign (`⠉`, dots 1,4) between two finger signs. §15.3 "Adjacent Notes with One Finger" requires that if a finger plays two adjacent notes, the fingering is written after each note.
+
+**Research (§15.2, §15.3):**
+- Transition sign: `⠉` (dots 1,4). Example: `⠁⠉⠃` (finger 1 changed to finger 2).
+- In LilyPond, change of fingering can be represented using markup or a dash-separated sequence (e.g. `c4-1-2` or `c4-1_2`). We will implement it as `c4-1-2` or standard stacked lyric/dash notation.
+- §15.3 requires no special syntax: the single finger is simply written after both notes consecutively, which is parsed naturally.
+
+**Steps:**
+1. Define `FINGERING_CHANGE_CELL = '⠉'` (dots 1,4) in `bana_symbols.py`.
+2. Update the parser's fingering loop: if a finger sign is followed by `⠉`, consume the `⠉` and the subsequent finger sign.
+3. Represent this change in the `Fingering` model (e.g., as `FingerChange(first=1, second=2)`).
+4. Update `to_lilypond()` to output the transition format.
+5. Add unit tests for change of fingering.
+
+**Definition of Done:**
+- [x] `FINGERING_CHANGE_CELL` registered in `bana_symbols.py`
+- [x] Parser correctly handles the change transition `⠉` and consumes both finger signs
+- [x] LilyPond rendering correctly outputs change transitions (e.g. `c4-1-2`)
+
+---
+
+### [x] S6-4: Parse Alternative Fingerings and Omission Place-markers
+
+**Why:** §15.4 "Alternative Fingerings": alternative fingerings are brailled consecutively with no symbol or space between them (e.g. `⠁⠃` representing alternatives 1 and 2). If one alternative is omitted, place-markers are used: dot 6 (`⠠`) for the first omission, dot 3 (`⠄`) for the second.
+
+**Research (§15.4, §15.4.1):**
+- First alternative omitted placeholder: `⠠` (dot 6). Example: `⠠⠃` (first omitted, second is finger 2).
+- Second alternative omitted placeholder: `⠄` (dot 3). Example: `⠁⠄` (first is finger 1, second omitted).
+- LilyPond renders alternative fingerings as stacked columns, e.g. `-\markup \center-column { "2" "1" }`. Omissions render with empty space or placeholders.
+- §15.4.1: If more than two fingerings are present, they are split into in-accord voices, which are handled naturally by standard in-accord parsing.
+
+**Steps:**
+1. Define `OMISSION_FIRST_FINGERING_CELL = '⠠'` and `OMISSION_SECOND_FINGERING_CELL = '⠄'` in `bana_symbols.py`.
+2. Update the parser to support alternative fingerings by checking for a second consecutive fingering or omission cell.
+3. Store both alternatives in the `Fingering` model, keeping track of any omitted slots (`None`).
+4. Update `to_lilypond()` to generate stacked LilyPond column markup for alternative fingerings.
+
+**Definition of Done:**
+- [x] Omission placeholder cells registered in `bana_symbols.py`
+- [x] Parser correctly extracts alternative fingering pairs, including those with omission placeholders
+- [x] Stacked markup (e.g. `-\markup \center-column { "2" "1" }`) generated for alternative fingerings in LilyPond
+- [x] Unit tests cover all combinations of alternative fingerings and omissions
+
+---
+
+### [x] S6-5: Integration and Regression Test Suite
+
+**Why:** We must verify the end-to-end flow of all fingering rules, ensuring they compile correctly to LilyPond and do not introduce regressions on solo or ensemble scores.
+
+**Steps:**
+1. Create a synthetic test file `tests/fixtures/fingering_test_suite.brf`.
+2. Write integration tests loading and parsing this suite, asserting the expected LilyPond structures.
+3. Run the full test suite to guarantee zero regression.
+
+**Definition of Done:**
+- [x] Integration test suite passes on the new fingering fixture
+- [x] Zero regressions across existing solo/orchestral test files
 
 ---
 
@@ -4389,13 +4489,177 @@ Estimated time: 1–1.5 weeks.
 Estimated time: 4–5 days.
 
 ### [ ] S7-1: Implement Score and Staff to_lilypond() with full header block
+
+**Why:** The `Score` model has `title` and `composer` attributes, but its
+`to_lilypond()` method currently does not output a `\header` block containing
+this metadata. Additionally, the CLI currently relies on `LilypondRenderer`
+(which has a legacy, simplified staff rendering format that does not match
+the actual structured layout in `Score.to_lilypond()`). We must integrate the
+two so that `Score.to_lilypond()` handles all rendering including `\version`
+and the `\header` block, and update `LilypondRenderer` to use the model's
+rendering method.
+
+**Steps:**
+1. Update `Score.to_lilypond()` in `src/dottednotes/models/score.py` to output
+   the `\header` block containing `title` and `composer` if either is set. The
+   block should be placed after the `\version` line and before the staff/musical
+   content.
+2. Refactor `LilypondRenderer` in `src/dottednotes/renderers/lilypond_renderer.py`
+   to delegate directly to `Score.to_lilypond()`.
+3. Update `tests/test_renderers.py` to ensure all rendering tests verify
+   `Score.to_lilypond()` output formatting and the new header behavior.
+4. Verify that existing tests pass and no regression occurs in score structure,
+   relative octave calculations, or transposition.
+
+**Definition of Done:**
+- [ ] `Score.to_lilypond()` formats and includes the `\header` block containing
+      title and composer when present
+- [ ] `LilypondRenderer.render()` is refactored to delegate to `Score.to_lilypond()`
+- [ ] All tests in `tests/test_renderers.py` pass and assert correct behavior
+- [ ] All package unit tests pass
+
+---
+
 ### [ ] S7-2: Implement CLI with convert command
+
+**Why:** The CLI should support the commands outlined in `CLAUDE.md`. We need
+to expand the CLI in `dottednotes/cli.py` to support the `convert` subcommand
+explicitly, parse and pass through flags, support the `--compile` flag to
+automatically run LilyPond on output files, and support the `--version` flag.
+
+**Steps:**
+1. Update the argument parser in `src/dottednotes/cli.py` to support:
+   - A `convert` subcommand taking `input` and optional `output` arguments.
+   - A `--compile` flag on the `convert` subcommand.
+   - A `--version` flag at the top-level to print the package version.
+2. Update the `convert` command execution to:
+   - Load the file via `InputPipeline(input_path).read()`.
+   - Parse using the correct parser (Ensemble or Solo).
+   - Render to LilyPond using `LilypondRenderer` or `Score.to_lilypond()`.
+   - If an output file is specified, write to it; otherwise print to standard
+     output.
+   - If `--compile` is specified, invoke `lilypond <output_file>` (or write to
+     a temporary file if output was stdout) using Python's `subprocess` module
+     to compile the LilyPond file to PDF and MIDI.
+3. Write CLI unit tests in `tests/test_cli.py` checking argument parsing,
+   version output, and subcommand invocation.
+
+**Definition of Done:**
+- [ ] CLI supports `convert` subcommand with optional output file path
+- [ ] CLI supports `--compile` flag to run `lilypond` on the output
+- [ ] CLI supports `--version` flag printing the version from `pyproject.toml`
+- [ ] `tests/test_cli.py` is implemented and covers the CLI arguments
+
+---
+
 ### [ ] S7-3: Add error handling and meaningful plain-text error messages
+
+**Why:** For accessibility, especially for blind composers using VoiceOver,
+all error messages must be plain text and meaningful. Unhandled exceptions
+should not crash the command-line interface with long, confusing Python
+tracebacks. We must define clean custom exception classes and catch failures
+to report them cleanly.
+
+**Steps:**
+1. Define custom exceptions (e.g. `BrailleParseError`, `BrailleTokenizeError`)
+   under a common base exception in a new or existing module (e.g.,
+   `src/dottednotes/exceptions.py` or within parser modules).
+2. Update tokenizer and parser stages to raise these exceptions with clear
+   context (e.g., line numbers, character indices, or token content) when
+   encountering invalid cells, invalid voice counts, or syntax violations.
+3. Update `cli.py` to wrap the entry points in a try-except block that catches
+   these custom exceptions (and generic file access errors) and writes a
+   concise, plain-text error description to `stderr`, returning a non-zero exit
+   code.
+4. Ensure no visual-only progress bars or raw tracebacks are printed under
+   normal error conditions.
+5. Add unit tests verifying that malformed inputs raise the custom exceptions,
+   and that the CLI formats these failures correctly.
+
+**Definition of Done:**
+- [ ] Custom parse/tokenize exceptions defined and used
+- [ ] CLI catches exceptions and outputs clear, plain-text error messages to
+      `stderr` instead of tracebacks
+- [ ] Compilation or missing `lilypond` binary failures are caught and reported
+      cleanly
+- [ ] Unit tests verify screen-reader friendly error reporting
+
+---
+
 ### [ ] S7-4: Add --verbose flag
+
+**Why:** Diagnosing issues in braille translation requires inspecting what the
+tokenizer and parser have done. The `--verbose` flag will print a detailed trace
+of the processed tokens, the identified notes/markings, and any validation
+warnings (like measure beat count discrepancies).
+
+**Steps:**
+1. Add the `--verbose` flag to the `convert` subcommand in `cli.py`.
+2. Implement logging or tracing statements throughout `BrailleTokenizer` and
+   `BrailleParser` that output trace information when the verbose flag is set.
+3. Output the following details to `stderr` in a clear, screen-reader friendly
+   format:
+   - Input encoding details and normalization results.
+   - List of identified tokens with their categories and raw braille characters.
+   - Validation warnings (e.g., if a measure's total duration doesn't match the
+     active time signature).
+4. Add unit tests that capture `stderr` and verify that the verbose trace is
+   emitted and correct.
+
+**Definition of Done:**
+- [ ] CLI supports `--verbose` flag
+- [ ] Tokenizer and parser output detailed process logs to `stderr` under
+      `--verbose`
+- [ ] Validation warnings and token classifications are formatted in
+      VoiceOver-friendly plain text
+- [ ] Unit tests verify verbose output
+
+---
+
 ### [ ] S7-5: End-to-end test: .brf in, compiled PDF out
+
+**Why:** We need an integration test verifying the complete pipeline from a
+braille `.brf` input file to a fully-compiled PDF and MIDI output using the
+system's `lilypond` compiler.
+
+**Steps:**
+1. Implement `test_e2e_conversion` in `tests/test_cli.py`.
+2. The test should locate `tests/fixtures/fengyang_flower_drum.brf`, call the
+   CLI conversion command with `--compile`, and verify that the corresponding
+   `.ly`, `.pdf`, and `.midi` files are generated.
+3. Check if the `lilypond` executable is available in the system PATH. If not,
+   skip the compilation portion of the test using `@pytest.mark.skipif`.
+4. Ensure the test cleans up all generated files (including the compiled PDF
+   and MIDI artifacts) after execution.
+
+**Definition of Done:**
+- [ ] End-to-end integration test successfully parses a fixture file and
+      outputs a LilyPond file
+- [ ] Subprocess compilation is tested and produces PDF/MIDI files when
+      `lilypond` is installed
+- [ ] Test cleans up all output files upon completion or failure
+
+---
+
 ### [ ] S7-6: Write user-facing README with installation and usage
 
-*Detailed steps to be written when Sprint 6 is complete.*
+**Why:** Composers using the tool need clear instructions on installation,
+external dependencies (specifically LilyPond), and CLI commands.
+
+**Steps:**
+1. Update `README.md` to document the newly implemented Python CLI interface.
+2. Provide step-by-step instructions on setting up a virtual environment,
+   installing package dependencies, and installing the `lilypond` binary on
+   macOS, Windows, and Linux.
+3. List CLI command examples for standard conversion, printing to stdout,
+   compiling to PDF/MIDI, and verbose logging.
+4. Verify that the formatting is accessible for VoiceOver users.
+
+**Definition of Done:**
+- [ ] `README.md` updated with correct setup and Python install instructions
+- [ ] CLI command options (`convert`, `--compile`, `--verbose`, `--version`)
+      fully documented with examples
+- [ ] External dependencies (LilyPond installation) documented
 
 ---
 **Sprint 7b: LilyPond Formatting Library**

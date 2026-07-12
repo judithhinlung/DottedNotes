@@ -996,3 +996,80 @@ def test_score_staff_grouping():
     assert r'\new StaffGroup <<' in ly4
     assert ly4.count(r'\new Staff {') == 3
 
+
+def test_get_transposition():
+    from dottednotes.models.transposition import get_transposition
+
+    # Horn in F sounds a perfect 5th lower than written.
+    assert get_transposition("Horn in F") == ("c'", 'f')
+    # Clarinet in B-flat sounds a major 2nd lower than written.
+    assert get_transposition("Clarinet in B-flat") == ("c'", 'bes')
+    # Alternate flat spellings normalize to the same entry.
+    assert get_transposition("Clarinet in Bb") == ("c'", 'bes')
+    # Clarinet in A sounds a minor 3rd lower than written.
+    assert get_transposition("Clarinet in A") == ("c'", 'a')
+    # Trumpet in C is non-transposing (written == concert).
+    assert get_transposition("Trumpet in C") == ("c'", "c'")
+    # Non-transposing / unrecognized instrument names.
+    assert get_transposition("Violin I") is None
+    assert get_transposition("Flute") is None
+
+
+def test_score_transposes_horn_to_concert_pitch_by_default():
+    staff = Staff(name="Horn in F")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score()
+    score.add_staff(staff)
+
+    concert_ly = score.to_lilypond()
+    assert r"\transpose c' f {" in concert_ly
+    assert "c4" in concert_ly  # written pitch is untouched; \transpose does the work
+
+    written_ly = score.to_lilypond(concert_pitch=False)
+    assert r'\transpose' not in written_ly
+    assert "c4" in written_ly
+
+
+def test_score_transposes_clarinet_in_bflat_to_concert_pitch():
+    staff = Staff(name="Clarinet in B-flat")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score()
+    score.add_staff(staff)
+
+    concert_ly = score.to_lilypond()
+    assert r"\transpose c' bes {" in concert_ly
+
+    written_ly = score.to_lilypond(concert_pitch=False)
+    assert r'\transpose' not in written_ly
+
+
+def test_score_does_not_transpose_non_transposing_staves():
+    staff = Staff(name="Violin I")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score()
+    score.add_staff(staff)
+
+    assert r'\transpose' not in score.to_lilypond()
+
+
+def test_score_transpose_wrapping_in_multi_staff_group():
+    def make_staff(name):
+        staff = Staff(name=name)
+        m = Measure(number=1)
+        m.add_note(_make_note('C', 4, 4))
+        staff.add_measure(m)
+        return staff
+
+    score = Score()
+    score.add_staff(make_staff("Horn in F"))
+    score.add_staff(make_staff("Flute"))
+    ly = score.to_lilypond()
+    assert r"\transpose c' f {" in ly
+    assert ly.count(r'\new Staff {') == 2
+

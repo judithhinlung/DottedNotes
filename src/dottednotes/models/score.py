@@ -1,10 +1,9 @@
 from dataclasses import dataclass, field
 
 from .staff import Staff
+from .transposition import get_transposition
 
 _LILYPOND_VERSION = "2.24.0"
-# C4 (middle C) as MIDI pitch — the reference for \relative c' { ... }
-_C4_MIDI = 60
 
 
 @dataclass
@@ -16,35 +15,21 @@ class Score:
     def add_staff(self, staff: Staff) -> None:
         self.staves.append(staff)
 
-    def to_lilypond(self) -> str:
-        """Return a complete LilyPond document string for this score.
-
-        Uses \\relative c' mode (reference pitch = C4) for all staves.
-        Single-staff scores are wrapped directly. Multiple staves are grouped
-        by instrument families (e.g. winds, brass, strings, keyboard/harp)
-        and wrapped in \\new StaffGroup or \\new PianoStaff contexts.
+    @staticmethod
+    def _group_by_family(staves: list[Staff]) -> list[tuple["InstrumentFamily | None", list[Staff]]]:
+        """Group staves into contiguous runs by instrument family (e.g. winds,
+        brass, strings, keyboard/harp), preserving order. A None family never
+        merges with a neighboring run, even another None -- each such staff
+        gets its own single-staff run. Shared by Score.to_lilypond() and
+        OrchestraScore.to_lilypond() (S5b-8).
         """
-        version_line = f'\\version "{_LILYPOND_VERSION}"'
-        if not self.staves:
-            return version_line + '\n'
-
-        if len(self.staves) == 1:
-            staff_content = self.staves[0].to_lilypond(start_midi=_C4_MIDI)
-            lines = [
-                version_line,
-                "\\relative c' {",
-                staff_content,
-                '}',
-            ]
-            return '\n'.join(lines) + '\n'
-
         from .instrument import get_instrument_family, InstrumentFamily
 
         runs: list[tuple[InstrumentFamily | None, list[Staff]]] = []
         current_run: list[Staff] = []
         current_family: InstrumentFamily | None = None
 
-        for staff in self.staves:
+        for staff in staves:
             family = get_instrument_family(staff.name)
             if not current_run:
                 current_run = [staff]
@@ -57,16 +42,77 @@ class Score:
                 current_family = family
         if current_run:
             runs.append((current_family, current_run))
+        return runs
+
+    @staticmethod
+    def _wrap_transpose(
+        staff: Staff, relative_block: list[str], indent: str, concert_pitch: bool
+    ) -> list[str]:
+        """Wrap a \\relative-mode block in \\transpose (S5b-6) if `staff.name`
+        is a recognized transposing-instrument key and concert_pitch is True.
+        Returns relative_block unchanged otherwise (unknown/non-transposing
+        instrument, or concert_pitch=False for written-pitch output).
+        """
+        if not concert_pitch:
+            return relative_block
+        transposition = get_transposition(staff.name)
+        if transposition is None:
+            return relative_block
+        written, concert = transposition
+        if written == concert:
+            return relative_block
+        return [
+            f"{indent}\\transpose {written} {concert} {{",
+            *(f"  {line}" for line in relative_block),
+            f"{indent}}}",
+        ]
+
+    def to_lilypond(self, concert_pitch: bool = True) -> str:
+        """Return a complete LilyPond document string for this score.
+
+        Uses \\relative c' mode (reference pitch = C4) for all staves.
+        Single-staff scores are wrapped directly. Multiple staves are grouped
+        by instrument families (e.g. winds, brass, strings, keyboard/harp)
+        and wrapped in \\new StaffGroup or \\new PianoStaff contexts.
+
+        Per CLAUDE.md Key Design Decision #4, concert pitch is the default:
+        a staff whose name is a recognized transposing-instrument key (e.g.
+        "Horn in F", "Clarinet in B-flat" -- see models/transposition.py)
+        has its \\relative block wrapped in \\transpose to convert the
+        parsed *written* pitch into concert (sounding) pitch. Pass
+        concert_pitch=False to emit written pitch as-is (e.g. for
+        generating an individual player's part).
+        """
+        version_line = f'\\version "{_LILYPOND_VERSION}"'
+        if not self.staves:
+            return version_line + '\n'
+
+        if len(self.staves) == 1:
+            staff = self.staves[0]
+            anchor, start_midi = staff.relative_anchor()
+            staff_content = staff.to_lilypond(start_midi=start_midi)
+            relative_block = [f"\\relative {anchor} {{", staff_content, '}']
+            body = self._wrap_transpose(staff, relative_block, '', concert_pitch)
+            lines = [version_line, *body]
+            return '\n'.join(lines) + '\n'
+
+        from .instrument import InstrumentFamily
+
+        runs = self._group_by_family(self.staves)
 
         top_level_blocks: list[list[str]] = []
         for family, run_staves in runs:
             if len(run_staves) == 1:
                 staff = run_staves[0]
+                anchor, start_midi = staff.relative_anchor()
+                relative_block = [
+                    f"  \\relative {anchor} {{",
+                    staff.to_lilypond(start_midi=start_midi),
+                    "  }",
+                ]
                 block_lines = [
                     "\\new Staff {",
-                    "  \\relative c' {",
-                    staff.to_lilypond(start_midi=_C4_MIDI),
-                    "  }",
+                    *self._wrap_transpose(staff, relative_block, '  ', concert_pitch),
                     "}"
                 ]
                 top_level_blocks.append(block_lines)
@@ -74,12 +120,14 @@ class Score:
                 group_context = "PianoStaff" if family == InstrumentFamily.KEYBOARD_HARP else "StaffGroup"
                 block_lines = [f"\\new {group_context} <<"]
                 for staff in run_staves:
+                    anchor, start_midi = staff.relative_anchor()
                     block_lines.append("  \\new Staff {")
-                    block_lines.append("    \\relative c' {")
-                    staff_ly = staff.to_lilypond(start_midi=_C4_MIDI)
+                    relative_block = [f"    \\relative {anchor} {{"]
+                    staff_ly = staff.to_lilypond(start_midi=start_midi)
                     for line in staff_ly.splitlines():
-                        block_lines.append("      " + line.strip())
-                    block_lines.append("    }")
+                        relative_block.append("      " + line.strip())
+                    relative_block.append("    }")
+                    block_lines.extend(self._wrap_transpose(staff, relative_block, '    ', concert_pitch))
                     block_lines.append("  }")
                 block_lines.append(">>")
                 top_level_blocks.append(block_lines)
