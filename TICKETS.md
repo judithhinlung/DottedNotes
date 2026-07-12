@@ -5112,7 +5112,7 @@ which `\header` fields Mutopia scores actually use in practice.
 - [x] Unit tests cover all-fields-present, some-fields-present, and
       no-fields-present cases
 
-### [ ] S7b-7: Integration test: generate a formatted score and verify it compiles to a professional-looking PDF
+### [x] S7b-7: Integration test: generate a formatted score and verify it compiles to a professional-looking PDF
 
 **Why:** Prove the formatting pipeline (S7b-2 through S7b-6) produces
 LilyPond that actually compiles — the same "don't just check the string,
@@ -5135,11 +5135,11 @@ check it really works" principle as S7-5.
    PDF per category before closing this ticket.
 
 **Definition of Done:**
-- [ ] Integration test compiles a formatted score per template category
+- [x] Integration test compiles a formatted score per template category
       (skipped when `lilypond` isn't installed)
-- [ ] Compile log is checked for LilyPond-side warnings/errors, not just
+- [x] Compile log is checked for LilyPond-side warnings/errors, not just
       process exit code
-- [ ] At least one generated PDF per category has been manually visually
+- [x] At least one generated PDF per category has been manually visually
       reviewed (documented in the PR, not automated)
 
 ### [ ] S7b-8: Document all formatting rules in docs/lilypond_conventions.md with source citations
@@ -5251,6 +5251,129 @@ code.
 - [ ] CLI tests cover valid and invalid format option strings
 - [ ] Integration tests verify compiled output has the specified custom paper
       settings and margins
+
+---
+
+### [ ] S7b-11: Fix grace-note slur and hairpin-termination rendering bugs (found via S7b-7)
+
+**Why:** S7b-7's integration test compiles `children_s_piece.brf` and checks
+LilyPond's actual compile *log*, not just its exit code — and caught 4 real
+warnings that every earlier test missed, because nothing before it looked
+past a 0 exit code: three `warning: cannot end slur` and one
+`warning: unterminated decrescendo`. `children_s_piece.brf` compiles
+successfully despite these, so S7b-7 currently uses `fingering_melody.brf`
+for its Solo Piano case instead (see that file's comments) — this ticket is
+what unblocks switching it back, per the developer's request to compare the
+current output against `Children_s_Piece.ly` (the hand-authored ground
+truth) before assuming which side — the `.brf` transcription or the parser
+— is wrong. That comparison is done below; it turns out to be two distinct
+answers for two distinct bugs.
+
+**Investigation (verified by tokenizing the exact raw `.brf` measures with
+the real `BrailleTokenizer` — not by guessing BANA meanings):**
+
+1. **Measures 11, 14, and 15 (right hand) — genuine parser bug.** Each
+   measure's raw braille tokenizes as
+   `ORNAMENT(grace) NOTE(grace pitch) SLUR NOTE(main note) ...` — a `SLUR`
+   token really is present in the source, sitting between a grace note's
+   pitch and the main note it decorates. `Children_s_Piece.ly` confirms
+   this is meaningful: `\grace {c8(} b4)` (measure 11), `\grace {b'8(}
+   a4\<)` (measure 14), `\grace {d8(} c4)` (measure 15) — a slur from the
+   grace note into the main note, closed immediately. DottedNotes's output
+   only ever emits the closing `)` on the main note; the grace note never
+   gets the matching `(`.
+
+   Root cause pinned down precisely: `Note.slur_start` and `GraceNote`
+   (`models/note.py`, `models/ornament.py`) already fully support this —
+   `GraceNote.to_lilypond()` just calls `to_lilypond()` on each contained
+   `Note`, and a `Note` with `slur_start=True` already renders correctly
+   elsewhere in this exact file (e.g. `f8( e8)` in measure 2). The gap is
+   entirely in the parser: `_build_grace_note_cell()`
+   (`braille_parser.py:934`) constructs the grace note's `Note` object but
+   never sets `slur_start` on it, unlike the regular (non-grace) note path,
+   which does exactly that (`pending[-1].slur_start = True` at
+   `braille_parser.py:277` and `:669`) when a `SLUR` token is encountered
+   in the right position. Grace notes go through a completely separate
+   construction path that was never wired up to slur detection.
+
+2. **Measure 10 (right hand) — looks like a real transcription gap, not a
+   parser bug.** Tokenizing this measure's raw content produces
+   `ORNAMENT NOTE INTERVAL NOTE INTERVAL ARTICULATION ARTICULATION NOTE
+   INTERVAL INTERVAL NOTE NOTE ARTICULATION NOTE INTERVAL` — **no `SLUR`
+   token anywhere**, even though `Children_s_Piece.ly` shows the identical
+   grace-note-slur pattern here too (`\grace {a8(} g4\<)`). DottedNotes
+   correctly renders no slur for this measure, because there genuinely is
+   no slur cell in the `.brf` source to parse. Per `CLAUDE.md`'s "never
+   guess dot patterns" rule, **do not add a slur cell to the fixture to
+   make this match** — confirm with the developer first whether this is a
+   real omission from the original braille transcription (worth fixing in
+   the fixture) or an editorial addition made only in the hand-authored
+   `.ly` reference (in which case the `.brf`, and DottedNotes's output for
+   it, are both already correct, and it's `Children_s_Piece.ly` that's the
+   outlier for this one measure).
+
+3. **Measure 26 (right hand) — hairpin termination, a separate bug from
+   both of the above.** The `DYNAMIC` word-sign block here opens a
+   decrescendo (matching `Children_s_Piece.ly`'s `g8(\>`), but no cell
+   anywhere in this measure or the next explicitly closes it. The ground
+   truth closes it by hand with an explicit `\!` on the last note before
+   the next dynamic marking (`\p`, measure 27) — standard defensive
+   engraving practice. DottedNotes's renderer never emits a closing `\!`
+   for any hairpin, so it's still open when LilyPond reaches the end of
+   the piece. The same gap exists at measures 10 and 14's crescendo
+   hairpins too (also missing `\!`) but doesn't trigger its own warning —
+   LilyPond only flags the one hairpin still open at end-of-score.
+
+**Steps:**
+1. Confirm with the developer whether measure 10's missing slur cell is a
+   transcription gap in `children_s_piece.brf` (check against the original
+   BrailleNotetaker export if available) or an intentional `.ly`-only
+   addition, before touching the fixture at all.
+2. Fix `_build_grace_note_cell()` (`braille_parser.py:934`) to set
+   `slur_start=True` on the grace note it builds when a `SLUR` token
+   immediately follows the grace note's pitch cell — mirroring the
+   existing `pending[-1].slur_start = True` pattern already used for
+   regular notes.
+3. Fix hairpin rendering so an open crescendo/decrescendo gets an explicit
+   `\!` terminator emitted (end of the hairpin's phrase, or immediately
+   before the next dynamic marking) instead of being left open
+   indefinitely.
+4. Once both are fixed, switch S7b-7's `test_formatted_solo_piano_score_compiles_cleanly`
+   (`tests/test_lilypond_formatter.py`) back to `children_s_piece.brf`
+   (removing the `fingering_melody.brf` workaround and its explanatory
+   comment) and confirm zero LilyPond warnings in the compile log.
+5. Extend `tests/test_parser.py`'s existing `test_children_s_piece_*`
+   suite with a case asserting the exact slur/hairpin output at measures
+   11, 14, 15, and 26 matches `Children_s_Piece.ly`'s ground truth, so this
+   can't silently regress again.
+
+**Definition of Done:**
+- [ ] Developer has confirmed whether measure 10's missing slur is a
+      transcription gap or an intentional `.ly`-only addition, and the
+      fixture (if wrong) or this ticket's scope (if not) updated accordingly
+- [ ] Grace notes immediately followed by a `SLUR` token render with the
+      slur spanning grace-note-to-main-note, matching
+      `Children_s_Piece.ly`'s `\grace {X8(} Y4)` pattern
+- [ ] Open crescendo/decrescendo hairpins get an explicit `\!` terminator
+      in rendered output
+- [ ] `children_s_piece.brf` compiles via `lilypond` with zero warnings in
+      the log (not just exit code 0)
+- [ ] S7b-7's Solo Piano integration test uses `children_s_piece.brf`
+      again, matching that ticket's original suggestion, with no
+      workaround needed
+- [ ] New regression tests lock in correct slur/hairpin output for the
+      specific measures identified above
+
+**Senior note:** The three "cannot end slur" warnings and the "unterminated
+decrescendo" warning read like one bug because they share a fixture, but
+they're two unrelated defects at different points in the pipeline (`SLUR`
+token handling in grace-note construction vs. hairpin-close emission) —
+fix and test them separately rather than assuming one fix resolves both.
+Also don't skip step 1: measure 10 looks identical to measures 11/14/15 on
+the surface (same grace-note-into-main-note shape in the ground truth
+`.ly`), but the tokenizer evidence shows its `.brf` source is genuinely
+different from the other three. Treating all four measures as "the same
+bug" would be the wrong fix for measure 10 specifically.
 
 ---
 
