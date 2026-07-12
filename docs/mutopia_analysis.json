@@ -1,0 +1,498 @@
+{
+  "total_analyzed": 48,
+  "category_counts": {
+    "Solo Piano": 12,
+    "Art Song": 12,
+    "Chamber": 12,
+    "Orchestral": 12
+  },
+  "header_fields_frequency": {
+    "meter": 1,
+    "title": 11,
+    "subtitle": 1,
+    "composer": 11,
+    "mutopiatitle": 2,
+    "mutopiacomposer": 2,
+    "opus": 6,
+    "mutopiainstrument": 2,
+    "date": 2,
+    "style": 5,
+    "copyright": 9,
+    "source": 5,
+    "maintainer": 5,
+    "maintainerEmail": 1,
+    "maintainerWeb": 1,
+    "footer": 2,
+    "tagline": 2,
+    "instrument": 6,
+    "mutopiaopus": 1,
+    "lastupdated": 1,
+    "version": 1,
+    "poet": 4,
+    "instrumentHeader": 4,
+    "piece": 5
+  },
+  "paper_settings_frequency": {
+    "indent": {
+      "2.5\\cm": 1
+    },
+    "short-indent": {
+      "0.8\\cm": 1
+    },
+    "ragged-last-bottom": {
+      "##f": 10
+    },
+    "page-limit-inter-system-space": {
+      "##t": 1
+    },
+    "system-separator-markup": {
+      "\\slashSeparator": 1
+    },
+    "print-page-number": {
+      "##t": 1
+    },
+    "tagline": {
+      "": 1
+    },
+    "after-title-space": {
+      "5\\cm": 1,
+      "5.0": 4
+    },
+    "top-margin": {
+      "0\\cm": 1,
+      "3.0": 7,
+      "5.0": 2
+    },
+    "bottom-margin": {
+      "0.5\\cm": 1,
+      "3.0": 7,
+      "5.0": 2
+    },
+    "left-margin": {
+      "2.0\\cm": 1
+    },
+    "paper-width": {
+      "22\\cm": 1
+    },
+    "before-title-space": {
+      "10.0": 4
+    },
+    "oddHeaderMarkup": {
+      " ": 4
+    },
+    "evenHeaderMarkup": {
+      " ": 4
+    },
+    "oddFooterMarkup": {
+      "\\markup \\fill-line \\teeny { \\fromproperty #'header:copyright }": 4,
+      "Le Concert - 1032  Gossec - Symphonie n\u00b02 en mi b\u00e9mol ": 2,
+      "Gossec - Symphonie n\u00b01 en si b\u00e9mol ": 3
+    },
+    "obsolete-before-title-space": {
+      "3.0  score-markup-spacing #'basic-distance = #(/ obsolete-before-title-space staff-space)": 5
+    },
+    "obsolete-between-system-padding": {
+      "3.0  system-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)  score-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)": 5
+    },
+    "first-page-number": {
+      "2": 4
+    },
+    "obsolete-page-top-space": {
+      "5.0  top-system-spacing #'basic-distance = #(/ obsolete-page-top-space staff-space)": 2
+    }
+  },
+  "average_staff_size_by_category": {
+    "Solo Piano": 20.0,
+    "Art Song": 20.0,
+    "Chamber": 22.22222222222222,
+    "Orchestral": 21.0
+  },
+  "rehearsal_mark_frequencies": {
+    "default": 10,
+    "explicit_letters": 0,
+    "explicit_numbers": 0,
+    "none": 38
+  },
+  "raw_records": [
+    {
+      "path": "ftp/BachJS/BWV1047/brandenburg_2/brandenburg_2-lys/violino-2.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BeethovenLv/O55/BeethovenSymphony3/BeethovenSymphony3-lys/Bass.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O95/Sym9/Sym9-lys/Mvt4_conFuoco.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {
+        "indent": "2.5\\cm",
+        "short-indent": "0.8\\cm",
+        "ragged-last-bottom": "##f",
+        "page-limit-inter-system-space": "##t",
+        "system-separator-markup": "\\slashSeparator"
+      }
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M2/DvorakSYMPH7M2_musique-Corno_G_III_IV.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7_part_Oboe_I.ly",
+      "category": "Chamber",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-sib/Gossec-Symphonie-sib-lys/Basse_3.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M1/DvorakSYMPH7M1_musique-Violino_I.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BachJS/BWV1046/Brandenburg1-1/Brandenburg1-1-lys/oboeone.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BeethovenLv/O92/Symphony7_1/Symphony7_1-lys/corni.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BeethovenLv/O92/Symphony7_2/Symphony7_2-lys/clarinetti.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/Common/Variables.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/MozartWA/KV620/magicflute-00-overture/magicflute-00-overture-lys/header.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M2/DvorakSYMPH7M2_Staves.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M2/DvorakSYMPH7M2_musique-Oboe_G_I_II.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M4/DvorakSYMPH7M4_musique-Oboe_G_I_II.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M1/DvorakSYMPH7M1_musique-Timpani.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-mib/Gossec-Symphonie-mib-lys/Hautbois1_2.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-mib/Gossec-Symphonie-mib-lys/Basse_1.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M4/DvorakSYMPH7M4_musique-Oboe_I_II.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/Common/Properties.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/PorporaN/Semiramide_riconosciuta/Semiramide_riconosciuta-lys/Sinfonia-1/Basso.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BachJS/BWV1047/brandenburg_2/brandenburg_2-lys/tromba.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M1/DvorakSYMPH7M1_musique-Flauto_G_I_II.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BeethovenLv/O67/Symphony5_2/Symphony5_2-lys/beethoven-s5.2-va.ly",
+      "category": "Orchestral",
+      "staff_size": 21.0,
+      "paper_settings": {
+        "print-page-number": "##t",
+        "tagline": ""
+      }
+    },
+    {
+      "path": "ftp/BachJS/BWV1046/Brandenburg1-1/Brandenburg1-1-lys/violinoone.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-sib/Gossec-Symphonie-sib-lys/Violon1_2.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M1/DvorakSYMPH7M1_musique-Corno_G_III_IV.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/Common/Version.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/MozartWA/KV183/Symphony25_2/Symphony25_2-lys/Symphony25_2.ly",
+      "category": "Orchestral",
+      "staff_size": null,
+      "paper_settings": {
+        "after-title-space": "5\\cm",
+        "top-margin": "0\\cm",
+        "bottom-margin": "0.5\\cm",
+        "left-margin": "2.0\\cm",
+        "paper-width": "22\\cm"
+      }
+    },
+    {
+      "path": "ftp/BachJS/BWV1046/Brandenburg1-1/Brandenburg1-1-lys/fagotto.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BachJS/BWV1046/Brandenburg1-1/Brandenburg1-1-lys/oboethree.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/MehulEN/Symphonie-1/Symphonie-1-lys/Basson1.ly",
+      "category": "Chamber",
+      "staff_size": 20.0,
+      "paper_settings": {
+        "top-margin": "3.0",
+        "bottom-margin": "3.0",
+        "before-title-space": "10.0",
+        "after-title-space": "5.0",
+        "oddHeaderMarkup": " ",
+        "evenHeaderMarkup": " ",
+        "oddFooterMarkup": "\\markup \\fill-line \\teeny { \\fromproperty #'header:copyright }",
+        "ragged-last-bottom": "##f"
+      }
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M4/DvorakSYMPH7M4_musique-Flauto_I_II.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M3/DvorakSYMPH7M3_musique-Clarinetto_G_I_II.ly",
+      "category": "Art Song",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/MozartWA/KV620/magicflute-00-overture/magicflute-00-overture-lys/oboi.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/BachJS/BWV1046/Brandenburg1-1/Brandenburg1-1-lys/cornotwo.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7M3/DvorakSYMPH7M3_Tempi.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7_part_Fagotto_I.ly",
+      "category": "Chamber",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-mib/Gossec-Symphonie-mib-lys/Hautbois2.ly",
+      "category": "Chamber",
+      "staff_size": 24.0,
+      "paper_settings": {
+        "top-margin": "3.0",
+        "bottom-margin": "3.0",
+        "obsolete-before-title-space": "3.0  score-markup-spacing #'basic-distance = #(/ obsolete-before-title-space staff-space)",
+        "obsolete-between-system-padding": "3.0  system-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)  score-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)",
+        "oddFooterMarkup": "Le Concert - 1032  Gossec - Symphonie n\u00b02 en mi b\u00e9mol ",
+        "first-page-number": "2",
+        "ragged-last-bottom": "##f"
+      }
+    },
+    {
+      "path": "ftp/MehulEN/Symphonie-1/Symphonie-1-lys/Timbales.ly",
+      "category": "Chamber",
+      "staff_size": 20.0,
+      "paper_settings": {
+        "top-margin": "5.0",
+        "bottom-margin": "5.0",
+        "before-title-space": "10.0",
+        "after-title-space": "5.0",
+        "oddHeaderMarkup": " ",
+        "evenHeaderMarkup": " ",
+        "oddFooterMarkup": "\\markup \\fill-line \\teeny { \\fromproperty #'header:copyright }",
+        "ragged-last-bottom": "##f",
+        "first-page-number": "2"
+      }
+    },
+    {
+      "path": "ftp/DvorakA/O70/DvorakSYMPH7/DvorakSYMPH7-lys/DvorakSYMPH7_part_Fagotto_II.ly",
+      "category": "Chamber",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-sib/Gossec-Symphonie-sib-lys/Hautbois1.ly",
+      "category": "Chamber",
+      "staff_size": 24.0,
+      "paper_settings": {
+        "top-margin": "3.0",
+        "bottom-margin": "3.0",
+        "obsolete-before-title-space": "3.0  score-markup-spacing #'basic-distance = #(/ obsolete-before-title-space staff-space)",
+        "obsolete-between-system-padding": "3.0  system-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)  score-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)",
+        "oddFooterMarkup": "Gossec - Symphonie n\u00b01 en si b\u00e9mol ",
+        "ragged-last-bottom": "##f"
+      }
+    },
+    {
+      "path": "ftp/BachJS/BWV1046/Brandenburg1-2/Brandenburg1-2-lys/oboethree.ly",
+      "category": "Solo Piano",
+      "staff_size": null,
+      "paper_settings": {}
+    },
+    {
+      "path": "ftp/MehulEN/Symphonie-1/Symphonie-1-lys/Basson2.ly",
+      "category": "Chamber",
+      "staff_size": 20.0,
+      "paper_settings": {
+        "top-margin": "3.0",
+        "bottom-margin": "3.0",
+        "before-title-space": "10.0",
+        "after-title-space": "5.0",
+        "oddHeaderMarkup": " ",
+        "evenHeaderMarkup": " ",
+        "oddFooterMarkup": "\\markup \\fill-line \\teeny { \\fromproperty #'header:copyright }",
+        "ragged-last-bottom": "##f"
+      }
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-mib/Gossec-Symphonie-mib-lys/Violon1.ly",
+      "category": "Chamber",
+      "staff_size": 24.0,
+      "paper_settings": {
+        "top-margin": "3.0",
+        "bottom-margin": "3.0",
+        "obsolete-before-title-space": "3.0  score-markup-spacing #'basic-distance = #(/ obsolete-before-title-space staff-space)",
+        "obsolete-between-system-padding": "3.0  system-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)  score-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)",
+        "oddFooterMarkup": "Le Concert - 1032  Gossec - Symphonie n\u00b02 en mi b\u00e9mol ",
+        "ragged-last-bottom": "##f"
+      }
+    },
+    {
+      "path": "ftp/MehulEN/Symphonie-1/Symphonie-1-lys/Clarinette2.ly",
+      "category": "Chamber",
+      "staff_size": 20.0,
+      "paper_settings": {
+        "top-margin": "5.0",
+        "bottom-margin": "5.0",
+        "before-title-space": "10.0",
+        "after-title-space": "5.0",
+        "oddHeaderMarkup": " ",
+        "evenHeaderMarkup": " ",
+        "oddFooterMarkup": "\\markup \\fill-line \\teeny { \\fromproperty #'header:copyright }",
+        "ragged-last-bottom": "##f"
+      }
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-sib/Gossec-Symphonie-sib-lys/Violon1.ly",
+      "category": "Chamber",
+      "staff_size": 24.0,
+      "paper_settings": {
+        "top-margin": "3.0",
+        "bottom-margin": "3.0",
+        "obsolete-before-title-space": "3.0  score-markup-spacing #'basic-distance = #(/ obsolete-before-title-space staff-space)",
+        "obsolete-page-top-space": "5.0  top-system-spacing #'basic-distance = #(/ obsolete-page-top-space staff-space)",
+        "obsolete-between-system-padding": "3.0  system-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)  score-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)",
+        "oddFooterMarkup": "Gossec - Symphonie n\u00b01 en si b\u00e9mol ",
+        "first-page-number": "2",
+        "ragged-last-bottom": "##f"
+      }
+    },
+    {
+      "path": "ftp/GossecFJ/Gossec-Symphonie-sib/Gossec-Symphonie-sib-lys/Alto.ly",
+      "category": "Chamber",
+      "staff_size": 24.0,
+      "paper_settings": {
+        "top-margin": "3.0",
+        "bottom-margin": "3.0",
+        "obsolete-before-title-space": "3.0  score-markup-spacing #'basic-distance = #(/ obsolete-before-title-space staff-space)",
+        "obsolete-page-top-space": "5.0  top-system-spacing #'basic-distance = #(/ obsolete-page-top-space staff-space)",
+        "obsolete-between-system-padding": "3.0  system-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)  score-system-spacing #'padding = #(/ obsolete-between-system-padding staff-space)",
+        "oddFooterMarkup": "Gossec - Symphonie n\u00b01 en si b\u00e9mol ",
+        "first-page-number": "2",
+        "ragged-last-bottom": "##f"
+      }
+    }
+  ]
+}

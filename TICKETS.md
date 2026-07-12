@@ -4887,7 +4887,7 @@ from the `.ly` source (header field usage, paper/margin values, spacing
 numbers) — it does not need to redistribute or commit any of the
 downloaded scores themselves into this repository, and shouldn't.
 
-### [ ] S7b-1: Download and analyze representative Mutopia scores for formatting patterns
+### [x] S7b-1: Download and analyze representative Mutopia scores for formatting patterns
 
 **Why:** Tickets S7b-2 through S7b-6 need real numbers (margins, staff
 spacing, common header fields) to build evidence-based defaults from,
@@ -4917,15 +4917,15 @@ elsewhere in this project applies here too.
    cache directory, gitignored) — only the extracted summary is committed.
 
 **Definition of Done:**
-- [ ] Download/analysis script exists and is runnable independently of the
+- [x] Download/analysis script exists and is runnable independently of the
       main package
-- [ ] A representative, roughly-balanced sample across the four target
+- [x] A representative, roughly-balanced sample across the four target
       instrumentation categories has been analyzed (document the actual
       count and category breakdown achieved — it does not need to hit an
       exact number if Mutopia's catalog doesn't support even coverage)
-- [ ] A committed summary artifact (not the raw corpus) captures
+- [x] A committed summary artifact (not the raw corpus) captures
       header/paper/spacing/rehearsal-mark patterns per category
-- [ ] Mutopia's terms of use for bulk download were checked before running
+- [x] Mutopia's terms of use for bulk download were checked before running
       the script at scale
 
 **Senior note:** Resist treating "50 scores" as a hard requirement handed
