@@ -113,6 +113,47 @@ def test_convert_malformed_input_reports_plain_text_parse_error(monkeypatch, tmp
     assert captured.out == ""
 
 
+# --- S7-4: --verbose trace ---
+
+
+def test_convert_verbose_prints_encoding_and_tokens_to_stderr(monkeypatch, tmp_path, capsys):
+    brf = _write_simple_brf(tmp_path)
+    _run_main(monkeypatch, ["convert", str(brf), "--verbose"])
+
+    captured = capsys.readouterr()
+    assert "Detected encoding: unicode" in captured.err
+    assert "Token: NOTE" in captured.err
+    # The rendered LilyPond must still be the only thing on stdout -- a
+    # composer piping `dottednotes convert piece.brf --verbose | lilypond -`
+    # must not have the trace corrupt the piped source.
+    assert "Token:" not in captured.out
+    assert "Detected encoding" not in captured.out
+    assert r'\version' in captured.out
+
+
+def test_convert_verbose_prints_beat_count_warning(monkeypatch, tmp_path, capsys):
+    # _SIMPLE_BRF is a 4/4 measure with a single quarter note -- 1 of 4
+    # beats -- which triggers the existing beat-count validation warning.
+    brf = _write_simple_brf(tmp_path)
+    _run_main(monkeypatch, ["convert", str(brf), "--verbose"])
+
+    captured = capsys.readouterr()
+    assert "Warning: Measure 1: expected 4.0 beats but counted 1.0" in captured.err
+    # Verbose mode replaces Python's default warning formatting with its
+    # own clean line -- the default "path:line: UserWarning: ..." format
+    # must not also leak through.
+    assert "UserWarning" not in captured.err
+
+
+def test_convert_without_verbose_omits_trace(monkeypatch, tmp_path, capsys):
+    brf = _write_simple_brf(tmp_path)
+    _run_main(monkeypatch, ["convert", str(brf)])
+
+    captured = capsys.readouterr()
+    assert "Detected encoding" not in captured.err
+    assert "Token:" not in captured.err
+
+
 # --- Regression: real fixtures, both ends of the ensemble/solo dispatch ---
 
 

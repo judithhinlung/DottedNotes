@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Optional
 
 from .staff import Staff
 from .transposition import get_transposition
@@ -10,6 +11,8 @@ _LILYPOND_VERSION = "2.24.0"
 class Score:
     title: str = ""
     composer: str = ""
+    copyright: str = ""
+    tagline: str = ""
     staves: list[Staff] = field(default_factory=list)
 
     def add_staff(self, staff: Staff) -> None:
@@ -52,17 +55,18 @@ class Score:
         return value.replace('\\', '\\\\').replace('"', '\\"')
 
     def _header_lines(self) -> list[str]:
-        """Return \\header {} block lines for title/composer, or [] if
-        neither is set. Fields are omitted individually when empty, so a
-        title-only or composer-only score doesn't get a blank line for
-        the other field."""
-        if not self.title and not self.composer:
-            return []
+        """Return \\header {} block lines, or [] if no header fields are set."""
         fields: list[str] = []
         if self.title:
             fields.append(f'  title = "{self._escape_header_field(self.title)}"')
         if self.composer:
             fields.append(f'  composer = "{self._escape_header_field(self.composer)}"')
+        if self.copyright:
+            fields.append(f'  copyright = "{self._escape_header_field(self.copyright)}"')
+        if self.tagline:
+            fields.append(f'  tagline = "{self._escape_header_field(self.tagline)}"')
+        if not fields:
+            return []
         return [r'\header {', *fields, '}']
 
     @staticmethod
@@ -99,7 +103,12 @@ class Score:
             f"{indent}}}",
         ]
 
-    def to_lilypond(self, concert_pitch: bool = True) -> str:
+    def to_lilypond(
+        self,
+        concert_pitch: bool = True,
+        paper_size: Optional[str] = None,
+        category_override: Optional[str] = None,
+    ) -> str:
         """Return a complete LilyPond document string for this score.
 
         Uses \\relative c' mode (reference pitch = C4) for all staves.
@@ -115,11 +124,40 @@ class Score:
         concert_pitch=False to emit written pitch as-is (e.g. for
         generating an individual player's part).
         """
+        from ..renderers.lilypond_formatter import LilyPondFormatter
+        formatter = LilyPondFormatter()
+        settings = formatter.get_settings(self, category_override=category_override)
+
         version_line = f'\\version "{_LILYPOND_VERSION}"'
+        staff_size_line = f"#(set-global-staff-size {settings.staff_size})"
+
+        size_name = paper_size if paper_size is not None else "letter"
+        paper_lines = [
+            r"\paper {",
+            f'  #(set-paper-size "{size_name.lower().strip()}")',
+            f"  top-margin = {settings.margin_mm}\\mm",
+            f"  bottom-margin = {settings.margin_mm}\\mm",
+            f"  left-margin = {settings.margin_mm}\\mm",
+            f"  right-margin = {settings.margin_mm}\\mm",
+            f"  system-system-spacing = #'((basic-distance . {settings.system_system_spacing_basic_distance})",
+            f"                             (minimum-distance . {settings.system_system_spacing_basic_distance - 4.0})",
+            f"                             (padding . {settings.system_system_spacing_padding})",
+            "                             (stretchability . 60))",
+            "}"
+        ]
+
         header_lines = self._header_lines()
+
+        parts = [
+            version_line,
+            staff_size_line,
+            "\n".join(paper_lines),
+        ]
+        if header_lines:
+            parts.append("\n".join(header_lines))
+
         if not self.staves:
-            lines = [version_line, *header_lines]
-            return '\n'.join(lines) + '\n'
+            return "\n\n".join(parts) + "\n"
 
         if len(self.staves) == 1:
             staff = self.staves[0]
@@ -134,8 +172,8 @@ class Score:
                 '  \\midi { }',
                 '}',
             ]
-            lines = [version_line, *header_lines, *score_lines]
-            return '\n'.join(lines) + '\n'
+            parts.append("\n".join(score_lines))
+            return "\n\n".join(parts) + "\n"
 
         from .instrument import InstrumentFamily
 
@@ -188,8 +226,8 @@ class Score:
             '  \\midi { }',
             '}',
         ]
-        lines = [version_line, *header_lines, *score_lines]
-        return '\n'.join(lines) + '\n'
+        parts.append("\n".join(score_lines))
+        return "\n\n".join(parts) + "\n"
 
     def reconstruct_omitted_rests(self) -> None:
         """Fill in any missing measures across all staves with full-measure rests,

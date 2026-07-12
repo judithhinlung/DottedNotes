@@ -991,7 +991,8 @@ def test_score_staff_grouping():
     score4.add_staff(make_staff("Violin II"))
     ly4 = score4.to_lilypond()
     # Should have a global << >> wrapping the single Flute staff and the String StaffGroup
-    assert ly4.strip().startswith('\\version "2.24.0"\n\\score {\n  <<')
+    assert r'\score {' in ly4
+    assert '  <<\n    \\new Staff {' in ly4
     assert r'\new Staff {' in ly4
     assert r'\new StaffGroup <<' in ly4
     assert ly4.count(r'\new Staff {') == 3
@@ -1084,9 +1085,27 @@ def test_score_to_lilypond_includes_version():
 
 def test_score_to_lilypond_empty_score_has_no_header_or_score_block():
     ly = Score().to_lilypond()
-    assert ly == '\\version "2.24.0"\n'
+    assert r'\version "2.24.0"' in ly
+    assert r'#(set-global-staff-size 20.0)' in ly
+    assert r'\paper {' in ly
     assert r'\header' not in ly
     assert r'\score' not in ly
+
+
+def test_score_to_lilypond_header_includes_copyright_and_tagline():
+    score = Score(title="Title", copyright="© 2026", tagline="Mutopia Tagline")
+    ly = score.to_lilypond()
+    assert 'copyright = "© 2026"' in ly
+    assert 'tagline = "Mutopia Tagline"' in ly
+
+
+def test_score_to_lilypond_custom_paper_size():
+    score = Score()
+    ly_letter = score.to_lilypond(paper_size="letter")
+    assert '#(set-paper-size "letter")' in ly_letter
+
+    ly_a4 = score.to_lilypond(paper_size="a4")
+    assert '#(set-paper-size "a4")' in ly_a4
 
 
 def test_score_to_lilypond_no_header_when_title_and_composer_unset():

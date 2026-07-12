@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from dottednotes.bana_symbols import TABLE_29_ENGLISH
 
@@ -44,12 +45,47 @@ class OrchestraScore(Score):
     matches tests/fixtures/fengyang_flower_drum.ly's hand-authored structure.
     """
 
-    def to_lilypond(self, concert_pitch: bool = True) -> str:
+    def to_lilypond(
+        self,
+        concert_pitch: bool = True,
+        paper_size: Optional[str] = None,
+        category_override: Optional[str] = None,
+    ) -> str:
+        from ..renderers.lilypond_formatter import LilyPondFormatter
+        formatter = LilyPondFormatter()
+        settings = formatter.get_settings(self, category_override=category_override)
+        short_names = settings.short_instrument_names
+
         version_line = f'\\version "{_LILYPOND_VERSION}"'
+        staff_size_line = f"#(set-global-staff-size {settings.staff_size})"
+
+        size_name = paper_size if paper_size is not None else "letter"
+        paper_lines = [
+            r"\paper {",
+            f'  #(set-paper-size "{size_name.lower().strip()}")',
+            f"  top-margin = {settings.margin_mm}\\mm",
+            f"  bottom-margin = {settings.margin_mm}\\mm",
+            f"  left-margin = {settings.margin_mm}\\mm",
+            f"  right-margin = {settings.margin_mm}\\mm",
+            f"  system-system-spacing = #'((basic-distance . {settings.system_system_spacing_basic_distance})",
+            f"                             (minimum-distance . {settings.system_system_spacing_basic_distance - 4.0})",
+            f"                             (padding . {settings.system_system_spacing_padding})",
+            "                             (stretchability . 60))",
+            "}"
+        ]
+
         header_lines = self._header_lines()
+
+        parts = [
+            version_line,
+            staff_size_line,
+            "\n".join(paper_lines),
+        ]
+        if header_lines:
+            parts.append("\n".join(header_lines))
+
         if not self.staves:
-            lines = [version_line, *header_lines]
-            return '\n'.join(lines) + '\n'
+            return "\n\n".join(parts) + "\n"
 
         variable_defs: list[str] = []
         var_names: dict[int, str] = {}
@@ -81,12 +117,12 @@ class OrchestraScore(Score):
         for family, run_staves in runs:
             if len(run_staves) == 1:
                 staff = run_staves[0]
-                top_level_blocks.append(self._staff_with_block(staff, var_names[id(staff)], '  '))
+                top_level_blocks.append(self._staff_with_block(staff, var_names[id(staff)], '  ', short_names))
             else:
                 group_context = 'PianoStaff' if family == InstrumentFamily.KEYBOARD_HARP else 'StaffGroup'
                 block_lines = [f'\\new {group_context} <<']
                 for staff in run_staves:
-                    block_lines.extend(self._staff_with_block(staff, var_names[id(staff)], '    '))
+                    block_lines.extend(self._staff_with_block(staff, var_names[id(staff)], '    ', short_names))
                 block_lines.append('>>')
                 top_level_blocks.append(block_lines)
 
@@ -99,14 +135,16 @@ class OrchestraScore(Score):
         score_lines.append('  \\midi { }')
         score_lines.append('}')
 
-        lines = [version_line, *header_lines, ''] + variable_defs + score_lines
-        return '\n'.join(lines) + '\n'
+        parts.append("\n".join(variable_defs))
+        parts.append("\n".join(score_lines))
+
+        return "\n\n".join(parts) + "\n"
 
     @staticmethod
-    def _staff_with_block(staff: Staff, var_name: str, indent: str) -> list[str]:
+    def _staff_with_block(staff: Staff, var_name: str, indent: str, short_names: bool = True) -> list[str]:
         """Return the \\new Staff \\with {...} { ... } block for one staff,
         referencing its already-defined music variable by name."""
-        abbrev = TABLE_29_ENGLISH.get(staff.name)
+        abbrev = TABLE_29_ENGLISH.get(staff.name) if short_names else None
 
         lines = [f'{indent}\\new Staff \\with {{']
         lines.append(f'{indent}  instrumentName = "{staff.name}"')

@@ -4986,7 +4986,7 @@ matters for S7b-2 through S7b-6 is category coverage (having enough
 orchestral examples to derive orchestral defaults, not just piano ones),
 not hitting a specific total count.
 
-### [ ] S7b-2: Implement `LilyPondFormatter` class with evidence-based defaults
+### [x] S7b-2: Implement `LilyPondFormatter` class with evidence-based defaults
 
 **Why:** Centralize the formatting decisions derived from S7b-1's analysis
 into one class that S7b-3 through S7b-6 build on, rather than scattering
@@ -5005,13 +5005,13 @@ magic numbers across `Score.to_lilypond()`.
    the value).
 
 **Definition of Done:**
-- [ ] `LilyPondFormatter` exists with defaults sourced from
+- [x] `LilyPondFormatter` exists with defaults sourced from
       `docs/mutopia_analysis.md` (or equivalent), not invented values
-- [ ] Each default is traceable to the S7b-1 summary that justifies it
-- [ ] Unit tests cover default selection for at least one case per
+- [x] Each default is traceable to the S7b-1 summary that justifies it
+- [x] Unit tests cover default selection for at least one case per
       instrumentation category
 
-### [ ] S7b-3: Implement instrumentation detection and template selection
+### [x] S7b-3: Implement instrumentation detection and template selection
 
 **Why:** `LilyPondFormatter` (S7b-2) needs to know which of the four
 S7b-4 templates applies to a given `Score` without the caller specifying
@@ -5031,10 +5031,10 @@ it manually every time.
 3. Add a manual override parameter for the cases the heuristic gets wrong.
 
 **Definition of Done:**
-- [ ] `Score` → template-category classification implemented, reusing
+- [x] `Score` → template-category classification implemented, reusing
       existing `InstrumentFamily` grouping
-- [ ] Manual override supported
-- [ ] Unit tests cover all four categories plus at least one
+- [x] Manual override supported
+- [x] Unit tests cover all four categories plus at least one
       ambiguous/edge case
 
 **Senior note:** If art-song detection turns out to need a vocal-staff
@@ -5042,7 +5042,7 @@ concept that doesn't exist yet in the domain model, don't invent one
 silently inside this ticket — surface it back as a blocking dependency
 rather than papering over it with a heuristic guess.
 
-### [ ] S7b-4: Curate 4 formatting templates from Mutopia examples
+### [x] S7b-4: Curate 4 formatting templates from Mutopia examples
 
 **Why:** Concrete, per-category presets (solo piano, art song, chamber,
 orchestral) are what S7b-3's classification actually selects between.
@@ -5061,13 +5061,13 @@ orchestral) are what S7b-3's classification actually selects between.
 3. Document the source examples each template was drawn from.
 
 **Definition of Done:**
-- [ ] 4 templates defined (solo piano, art song, chamber, orchestral) with
+- [x] 4 templates defined (solo piano, art song, chamber, orchestral) with
       concrete paper/margin/spacing values
-- [ ] Each template cites the specific Mutopia example(s) it was derived
+- [x] Each template cites the specific Mutopia example(s) it was derived
       from
-- [ ] Templates are consumable by `LilyPondFormatter` (S7b-2)
+- [x] Templates are consumable by `LilyPondFormatter` (S7b-2)
 
-### [ ] S7b-5: Implement page layout defaults (paper size, margins, system spacing) per template
+### [x] S7b-5: Implement page layout defaults (paper size, margins, system spacing) per template
 
 **Why:** Translate S7b-4's curated template values into actual LilyPond
 `\paper {}` block output.
@@ -5084,12 +5084,12 @@ orchestral) are what S7b-3's classification actually selects between.
    same orchestral template shouldn't be forced into one paper size).
 
 **Definition of Done:**
-- [ ] `\paper {}` generation implemented and verified against the
+- [x] `\paper {}` generation implemented and verified against the
       Notation Reference's actual field syntax
-- [ ] A4/Letter selectable independently of template
-- [ ] Unit tests assert generated `\paper {}` content per template
+- [x] A4/Letter selectable independently of template
+- [x] Unit tests assert generated `\paper {}` content per template
 
-### [ ] S7b-6: Implement `\header` block generation with title, composer, copyright, and Mutopia-style tagline
+### [x] S7b-6: Implement `\header` block generation with title, composer, copyright, and Mutopia-style tagline
 
 **Why:** Extends S7-1's minimal `\header` (title/composer only) with the
 fuller field set common in well-engraved scores, per the S7b-1 analysis of
@@ -5106,10 +5106,10 @@ which `\header` fields Mutopia scores actually use in practice.
    helper, reuse it rather than reimplementing it here).
 
 **Definition of Done:**
-- [ ] `\header {}` supports title, composer, copyright, tagline, each
+- [x] `\header {}` supports title, composer, copyright, tagline, each
       optional
-- [ ] Field values are quote-escaped
-- [ ] Unit tests cover all-fields-present, some-fields-present, and
+- [x] Field values are quote-escaped
+- [x] Unit tests cover all-fields-present, some-fields-present, and
       no-fields-present cases
 
 ### [ ] S7b-7: Integration test: generate a formatted score and verify it compiles to a professional-looking PDF
@@ -5208,6 +5208,49 @@ real vocal test fixture.
       aligned and paired with the accompaniment staves
 - [ ] Integration tests verify the end-to-end translation of `vocal_test.brf`
       to the correct LilyPond art song structure
+
+---
+
+### [ ] S7b-10: Command-Line Overrides for Formatting Options via `--format`
+
+**Why:** While `LilyPondFormatter` heuristically detects the layout category and
+applies high-quality defaults, users should be able to override these settings
+directly from the command line. This allows custom formatting (e.g. setting
+margins, paper size, or staff size explicitly) without modifying the source
+code.
+
+**Steps:**
+1. Update `cli.py` to add a new command-line argument `--format` to the
+   `convert` parser, accepting a comma-separated list of key-value pairs (e.g.
+   `--format "paper_size=a4,margin_mm=12,staff_size=18"`).
+2. Write a helper function in `cli.py` or a utility module to parse the
+   `--format` option string into a dictionary of formatting overrides (e.g.,
+   `{"paper_size": "a4", "margin_mm": 12.0, "staff_size": 18.0}`). Support
+   validation and type conversion for keys like `paper_size` (str), `margin_mm`
+   (float), `staff_size` (float), `basic_distance` (float), and `padding`
+   (float).
+3. Update `to_lilypond()` of `Score` and `OrchestraScore` to accept a dictionary
+   or custom settings object containing these formatting overrides and apply
+   them directly instead of or on top of the template defaults.
+4. Integrate the `--format` overrides in the CLI handler, passing the resolved
+   options to the score rendering pipeline.
+5. Write unit tests in `tests/test_cli.py` to verify that invalid `--format`
+   arguments raise appropriate error messages and that valid keys are correctly
+   parsed.
+6. Write integration tests verifying that converting a BRF file with `--format
+   "paper_size=a4,margin_mm=10"` renders LilyPond output with the requested
+   formatting overrides.
+
+**Definition of Done:**
+- [ ] `--format` CLI option added to the `convert` command and documented in CLI
+      help
+- [ ] Key-value option parser handles correct type casting and warns/errors on
+      unknown/invalid keys
+- [ ] `Score.to_lilypond()` and `OrchestraScore.to_lilypond()` apply format
+      overrides
+- [ ] CLI tests cover valid and invalid format option strings
+- [ ] Integration tests verify compiled output has the specified custom paper
+      settings and margins
 
 ---
 

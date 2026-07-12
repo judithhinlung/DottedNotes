@@ -19,6 +19,7 @@ def test_formatter_defaults_exist():
         assert settings.margin_mm > 0
         assert settings.system_system_spacing_basic_distance > 0
         assert settings.system_system_spacing_padding > 0
+        assert settings.source_citation.startswith("ftp/")
 
 def test_formatter_override():
     formatter = LilyPondFormatter()
@@ -26,8 +27,9 @@ def test_formatter_override():
     
     settings = formatter.get_settings(score, category_override="Chamber")
     assert settings.category == "Chamber"
-    assert settings.staff_size == 22.2
+    assert settings.staff_size == 16.0
     assert settings.margin_mm == 15.0
+    assert settings.short_instrument_names is True
 
 def test_formatter_detects_solo_piano_fixture():
     # Use fingering_melody.brf for Solo Piano testing
@@ -40,6 +42,7 @@ def test_formatter_detects_solo_piano_fixture():
     settings = formatter.get_settings(score)
     assert settings.category == "Solo Piano"
     assert settings.staff_size == 20.0
+    assert settings.short_instrument_names is False
 
 def test_formatter_detects_chamber_fixture():
     # Use fengyang_flower_drum.brf for Chamber testing
@@ -50,7 +53,8 @@ def test_formatter_detects_chamber_fixture():
     assert formatter.detect_category(score) == "Chamber"
     settings = formatter.get_settings(score)
     assert settings.category == "Chamber"
-    assert settings.staff_size == 22.2
+    assert settings.staff_size == 16.0
+    assert settings.short_instrument_names is True
 
 def test_formatter_detects_orchestral_bartok():
     # Use instruments from Bartok Romanian Folk Dances for Orchestral testing
@@ -70,4 +74,5 @@ def test_formatter_detects_orchestral_bartok():
     assert formatter.detect_category(score) == "Orchestral"
     settings = formatter.get_settings(score)
     assert settings.category == "Orchestral"
-    assert settings.staff_size == 21.0
+    assert settings.staff_size == 14.1
+    assert settings.short_instrument_names is True

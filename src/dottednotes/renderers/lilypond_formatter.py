@@ -13,27 +13,37 @@ class FormattingSettings:
       - margin_mm: 20.0 mm
       - basic_distance: 12.0
       - padding: 2.0
+      - short_instrument_names: False
+      - source_citation: ftp/BeethovenLv/Op49/Sonate-20/Sonate-20.ly
     - Art Song: Derived from Schubert An die Musik (D547)
-      - staff_size: 20.0 pt (Mutopia average: 20.0)
+      - staff_size: 18.0 pt
       - margin_mm: 18.0 mm
       - basic_distance: 14.0
       - padding: 3.0
+      - short_instrument_names: False
+      - source_citation: ftp/SchubertF/D547/an-die-musik/an-die-musik.ly
     - Chamber: Derived from Mozart String Quartet No. 14 (KV387)
-      - staff_size: 22.2 pt (Mutopia average: 22.2)
+      - staff_size: 16.0 pt
       - margin_mm: 15.0 mm
       - basic_distance: 16.0
       - padding: 4.0
+      - short_instrument_names: True
+      - source_citation: ftp/MozartWA/KV387/kv387-1/kv387-1.ly
     - Orchestral: Derived from Mozart Symphony No. 40 (KV550)
-      - staff_size: 21.0 pt (Mutopia average: 21.0)
+      - staff_size: 14.1 pt
       - margin_mm: 12.0 mm
       - basic_distance: 18.0
       - padding: 5.0
+      - short_instrument_names: True
+      - source_citation: ftp/MozartWA/KV550/kv550-1/kv550-1.ly
     """
     category: str
     staff_size: float
     margin_mm: float
     system_system_spacing_basic_distance: float
     system_system_spacing_padding: float
+    short_instrument_names: bool
+    source_citation: str
 
 class LilyPondFormatter:
     """Selects and applies formatting settings derived from Mutopia Project analysis."""
@@ -45,27 +55,35 @@ class LilyPondFormatter:
             margin_mm=20.0,
             system_system_spacing_basic_distance=12.0,
             system_system_spacing_padding=2.0,
+            short_instrument_names=False,
+            source_citation="ftp/BeethovenLv/Op49/Sonate-20/Sonate-20.ly",
         ),
         "Art Song": FormattingSettings(
             category="Art Song",
-            staff_size=20.0,
+            staff_size=18.0,
             margin_mm=18.0,
             system_system_spacing_basic_distance=14.0,
             system_system_spacing_padding=3.0,
+            short_instrument_names=False,
+            source_citation="ftp/SchubertF/D547/an-die-musik/an-die-musik.ly",
         ),
         "Chamber": FormattingSettings(
             category="Chamber",
-            staff_size=22.2,
+            staff_size=16.0,
             margin_mm=15.0,
             system_system_spacing_basic_distance=16.0,
             system_system_spacing_padding=4.0,
+            short_instrument_names=True,
+            source_citation="ftp/MozartWA/KV387/kv387-1/kv387-1.ly",
         ),
         "Orchestral": FormattingSettings(
             category="Orchestral",
-            staff_size=21.0,
+            staff_size=14.1,
             margin_mm=12.0,
             system_system_spacing_basic_distance=18.0,
             system_system_spacing_padding=5.0,
+            short_instrument_names=True,
+            source_citation="ftp/MozartWA/KV550/kv550-1/kv550-1.ly",
         ),
     }
 

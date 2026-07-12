@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import warnings
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
@@ -22,6 +23,23 @@ def _parse_score(text: str):
         return EnsembleParser().parse(text)
     tokens = BrailleTokenizer().tokenize(text)
     return BrailleParser(tokens=tokens).parse()
+
+
+def _print_verbose_trace(input_path: str, text: str) -> None:
+    """Print a plain-text diagnostic trace to stderr: detected input
+    encoding, every token the tokenizer produced for the top-level text,
+    and category/raw braille character for each. Ensemble scores are
+    tokenized further, per-instrument, inside EnsembleParser itself --
+    this trace only covers the top-level pass every input goes through,
+    which is still the most useful single view for diagnosing why a cell
+    was mis-tokenized.
+    """
+    pipeline = BRLInputPipeline()
+    raw = Path(input_path).read_text(encoding="utf-8", errors="replace")
+    print(f"Detected encoding: {pipeline._detect_encoding(raw)}", file=sys.stderr)
+
+    for token in BrailleTokenizer().tokenize(text):
+        print(f"Token: {token.category.name} {token.raw}", file=sys.stderr)
 
 
 def _compile_with_lilypond(ly_path: Path) -> None:
@@ -53,7 +71,17 @@ def _compile_with_lilypond(ly_path: Path) -> None:
 
 def _run_convert(args: argparse.Namespace) -> None:
     text = BRLInputPipeline().load(args.input)
-    score = _parse_score(text)
+
+    if args.verbose:
+        _print_verbose_trace(args.input, text)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            score = _parse_score(text)
+        for w in caught:
+            print(f"Warning: {w.message}", file=sys.stderr)
+    else:
+        score = _parse_score(text)
+
     rendered = score.to_lilypond()
 
     output_path = args.output
@@ -97,6 +125,12 @@ def main() -> None:
         "--compile",
         action="store_true",
         help="Compile the output to PDF and MIDI using the lilypond binary",
+    )
+    convert_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print a diagnostic trace (encoding, tokens, validation "
+             "warnings) to stderr",
     )
     convert_parser.set_defaults(func=_run_convert)
 
