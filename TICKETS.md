@@ -5521,7 +5521,7 @@ the one ticket in this sprint that is not a code change at all.
 
 ---
 
-### [ ] S8-1: Audit all CLI output for screen reader friendliness
+### [x] S8-1: Audit all CLI output for screen reader friendliness
 
 **Why:** CLAUDE.md's Developer Context section is explicit — the developer
 uses VoiceOver on Mac with VS Code, and "no progress bars, ASCII art, or
@@ -5576,18 +5576,18 @@ at the time, not verified under an actual screen reader.
    each fixed message so it can't silently regress.
 
 **Definition of Done:**
-- [ ] Every stdout/stderr write site in `cli.py` is catalogued and reviewed
-- [ ] `LilyPondCompileError.stderr` passthrough reviewed and, if needed,
+- [x] Every stdout/stderr write site in `cli.py` is catalogued and reviewed
+- [x] `LilyPondCompileError.stderr` passthrough reviewed and, if needed,
       reformatted so it doesn't rely on visual column alignment
-- [ ] `--verbose` token trace reviewed with the developer for whether raw
+- [x] `--verbose` token trace reviewed with the developer for whether raw
       braille glyphs alone are sufficient or need accompanying dot-number
       notation
-- [ ] `argparse`'s built-in `--help`/usage/error output confirmed acceptable
+- [x] `argparse`'s built-in `--help`/usage/error output confirmed acceptable
       under VoiceOver, or a follow-up ticket filed if not
-- [ ] Developer has run a VoiceOver pass over `convert`, `--compile`,
+- [x] Developer has run a VoiceOver pass over `convert`, `--compile`,
       `--verbose`, and all error paths and confirmed no screen-reader-hostile
       output remains
-- [ ] Any fixes made are covered by new or updated tests in `test_cli.py`
+- [x] Any fixes made are covered by new or updated tests in `test_cli.py`
 
 **Senior note:** Don't mark this done off a text-only review of the code.
 The whole point of the ticket is that no one has verified these messages
