@@ -94,16 +94,30 @@ def _decode_abbreviation(cells: str) -> tuple[str, str | None, str | None]:
 
 def _parse_line(line: str) -> InstrumentInfo | None:
     """Parse one §33.2 header line, or return None if it doesn't contain a
-    WORD_SIGN ... END_WORD_SIGN abbreviation (i.e. isn't a header line)."""
-    start = line.find(WORD_SIGN)
-    if start == -1:
-        return None
-    end = line.find(END_WORD_SIGN, start + 1)
+    word-sign or capital-indicated abbreviation (i.e. isn't a header line)."""
+    end = line.rfind(END_WORD_SIGN)
     if end == -1:
         return None
 
+    # Scan backwards from end - 1 to find the start of the abbreviation block
+    start = end
+    for idx in range(end - 1, -1, -1):
+        c = line[idx]
+        if c == '⠀' or c == _GUIDE_DOT:
+            break
+        start = idx
+
+    if start == end:
+        return None
+
     name = _decode_name_column(line[:start])
-    abbreviation, part_number, sub_number = _decode_abbreviation(line[start + 1:end])
+    abbrev_cells = line[start:end]
+    while abbrev_cells and abbrev_cells[0] in (WORD_SIGN, CAPITAL_INDICATOR):
+        abbrev_cells = abbrev_cells[1:]
+    if not abbrev_cells:
+        return None
+
+    abbreviation, part_number, sub_number = _decode_abbreviation(abbrev_cells)
     return InstrumentInfo(
         name=name,
         abbreviation=abbreviation,

@@ -189,3 +189,106 @@ def test_convert_fingering_melody_not_misrouted_to_ensemble_parser(
     assert r'\new PianoStaff <<' in content
     assert content.count(r'\new Staff {') == 2
     assert "instrumentName" not in content  # not an OrchestraScore
+
+
+# --- S7b-10: category and formatting overrides ---
+
+
+def test_cli_convert_valid_category_applies(monkeypatch, tmp_path):
+    brf = _write_simple_brf(tmp_path)
+    out = tmp_path / "category_solo.ly"
+    # By default, a 1-staff score is Solo Piano, which has staff size 20.0
+    # Let's override category to Chamber, which has staff size 16.0
+    _run_main(monkeypatch, ["convert", str(brf), str(out), "--category", "Chamber"])
+
+    assert out.exists()
+    content = out.read_text(encoding="utf-8")
+    assert "set-global-staff-size 16.0" in content
+
+
+def test_cli_convert_invalid_category_exits_nonzero(monkeypatch, tmp_path, capsys):
+    brf = _write_simple_brf(tmp_path)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), "--category", "InvalidCategory"])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert "Error: Invalid category: 'InvalidCategory'" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_convert_valid_format_overrides(monkeypatch, tmp_path):
+    brf = _write_simple_brf(tmp_path)
+    out = tmp_path / "format_overridden.ly"
+    _run_main(
+        monkeypatch,
+        [
+            "convert",
+            str(brf),
+            str(out),
+            "--format",
+            "paper_size=a4,margin_mm=10,staff_size=15.5,basic_distance=11.2,padding=1.5",
+        ],
+    )
+
+    assert out.exists()
+    content = out.read_text(encoding="utf-8")
+    assert 'set-paper-size "a4"' in content
+    assert "top-margin = 10.0\\mm" in content
+    assert "set-global-staff-size 15.5" in content
+    assert "basic-distance . 11.2" in content
+    assert "padding . 1.5" in content
+
+
+def test_cli_convert_invalid_format_keys_exits_nonzero(monkeypatch, tmp_path, capsys):
+    brf = _write_simple_brf(tmp_path)
+
+    # 1. Unknown key
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), "--format", "unknown_key=10"])
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Unknown/invalid format key: 'unknown_key'" in captured.err
+
+    # 2. Invalid float value
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), "--format", "margin_mm=not_float"])
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Invalid float value for margin_mm: 'not_float'" in captured.err
+
+    # 3. Malformed format option (missing `=`)
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), "--format", "margin_mm"])
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "Must be in key=value format" in captured.err
+
+
+def test_cli_convert_category_override_affects_lyrics_parsing(monkeypatch, tmp_path):
+    # A simple vocal + piano accompaniment BRF score, same as in test_vocal.py
+    brf_text = (
+        "⠠⠎⠕⠏⠗⠁⠝⠕⠀⠀⠀⠜⠎⠄\n"
+        "⠠⠏⠊⠁⠝⠕⠀⠀⠀⠜⠏⠄\n"
+        "\n"
+        "⠼⠁\n"
+        "⠠⠓⠕⠤⠇⠽⠀⠔\n"
+        "⠜⠎⠄⠀⠐⠽⠉⠐⠵⠐⠯\n"
+        "⠜⠏⠄⠀⠐⠽⠐⠵⠐⠯\n"
+    )
+    brf = tmp_path / "vocal.brf"
+    brf.write_text(brf_text, encoding="utf-8")
+
+    # 1. Normal conversion: Soprano is VOCAL, so lyrics are parsed and mapped
+    out_default = tmp_path / "vocal_default.ly"
+    _run_main(monkeypatch, ["convert", str(brf), str(out_default)])
+    content_default = out_default.read_text(encoding="utf-8")
+    assert "\\new Lyrics \\lyricsto" in content_default
+
+    # 2. Overridden conversion to "Chamber" (non-vocal category override)
+    # This should skip/suppress lyrics parsing and mapping, and not emit lyrics in output
+    out_override = tmp_path / "vocal_chamber.ly"
+    _run_main(monkeypatch, ["convert", str(brf), str(out_override), "--category", "Chamber"])
+    content_override = out_override.read_text(encoding="utf-8")
+    assert "\\new Lyrics" not in content_override

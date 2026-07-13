@@ -108,8 +108,9 @@ class LilyPondFormatter:
         # Check if we have keyboard instruments
         has_keyboard = any(get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP for s in staves)
         
-        # Check if we have vocal staves (name has voice/vocal/soprano/alto/tenor/bass/lyrics)
+        # Check if we have vocal staves
         has_vocal = any(
+            get_instrument_family(s.name) == InstrumentFamily.VOCAL or
             any(kw in s.name.lower() for kw in ["voice", "vocal", "lyrics", "soprano", "alto", "tenor", "bass", "lied"])
             for s in staves
         )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+import warnings
 
 from ..bana_symbols import (
     SymbolCategory,
@@ -11,7 +12,7 @@ from ..bana_symbols import (
     NUMBER_SIGN,
 )
 from ..exceptions import BrailleParseError
-from ..models.instrument import InstrumentInfo
+from ..models.instrument import InstrumentInfo, InstrumentFamily
 from ..models.orchestra_score import OrchestraScore
 from ..models.staff import Staff
 from ..models.measure import Measure
@@ -33,7 +34,6 @@ LITERARY_DIGIT_MAP = {
     '⠁': '1', '⠃': '2', '⠉': '3', '⠙': '4', '⠑': '5',
     '⠋': '6', '⠛': '7', '⠓': '8', '⠊': '9', '⠚': '0'
 }
-
 
 def extract_measure_number(line_str: str) -> tuple[int | None, str]:
     """Extract a leading measure number and return (measure_number, remaining_line).
@@ -316,23 +316,172 @@ class ParallelSystem:
         # abbrev_cells -> raw music cells
         self.parts: dict[str, str] = {}
         self.last_abbrev: str | None = None
+        # A word (lyric) line, per BANA Sec. 35.1, has no instrument
+        # abbreviation at all when there's only one voice (Sec. 37.2) --
+        # it's plain literary text at the margin, immediately followed by
+        # its paired music line. `pending_word_line` holds such a line
+        # until the next abbreviated line arrives and tells us (via
+        # `word_lines`, keyed the same way as `.parts`) which vocal
+        # instrument it belongs to.
+        self.pending_word_line: str | None = None
+        self.word_lines: dict[str, str] = {}
 
-    def add_line(self, line_str: str) -> bool:
-        """Process a line within the system. Returns True if successfully handled."""
+    def add_line(
+        self,
+        line_str: str,
+        instruments: list[InstrumentInfo] | None = None,
+        category_override: str | None = None,
+    ) -> bool:
+        """Process a line within the system. Returns True if successfully handled.
+
+        `instruments` (when supplied) resolves a pending word line: once the
+        next abbreviated line arrives, if its instrument is
+        `InstrumentFamily.VOCAL`, the stashed line becomes that instrument's
+        lyrics (`word_lines`); otherwise it's dropped (not a real word line).
+        """
         abbrev_cells, music_cells = extract_line_abbreviation(line_str)
         if abbrev_cells is not None:
+            if self.pending_word_line is not None:
+                if instruments is not None:
+                    prefix, digits = decode_instrument_abbreviation(abbrev_cells)
+                    matched = match_instruments(prefix, digits, instruments)
+                    is_vocal = False
+                    if matched and matched[0].family == InstrumentFamily.VOCAL:
+                        is_vocal = True
+                        if category_override is not None and category_override not in ("Art Song", "Vocal"):
+                            is_vocal = False
+                    if is_vocal:
+                        self.word_lines[abbrev_cells] = self.pending_word_line
+                self.pending_word_line = None
             self.parts[abbrev_cells] = music_cells
             self.last_abbrev = abbrev_cells
             return True
         elif self.last_abbrev is not None:
             self.parts[self.last_abbrev] += " " + music_cells.lstrip('⠀ ')
             return True
+        elif self.pending_word_line is None and music_cells.strip('⠀ '):
+            # No abbreviation yet established for this system -- this is a
+            # candidate word line (Sec. 35.1), stashed until the next line
+            # resolves it (see EnsembleParser.parse()'s parallel_lines loop).
+            self.pending_word_line = music_cells.lstrip('⠀ ')
+            return True
         return False
 
 
+# ASCII BRF characters for punctuation cells that double as LOWER_DIGIT_CELLS
+# in a numbering context -- lyrics are always literary prose, so these
+# always read as punctuation. Verified against vocal_test.brf.
+_LYRIC_PUNCTUATION = {
+    '1': ',',  # dot 2       -- comma
+    '4': '.',  # dots 2,5,6  -- period
+}
+
+
+def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
+    """Decode a sequence of BANA Unicode braille cells as uncontracted literary lyrics.
+    Returns a list of (syllable_text, has_hyphen) tuples.
+    """
+    from .input_pipeline import ASCII_TO_DOTS
+    dots_to_ascii = {v: k for k, v in ASCII_TO_DOTS.items()}
+    
+    ascii_chars = []
+    for c in lyric_cells:
+        offset = ord(c) - 0x2800
+        if 0 <= offset < 64:
+            ascii_chars.append(dots_to_ascii.get(offset, ' '))
+        else:
+            ascii_chars.append(' ')
+            
+    ascii_str = "".join(ascii_chars)
+    
+    # Process capital indicators and reconstruct words
+    words = []
+    current_word = []
+    i = 0
+    n = len(ascii_str)
+    cap_next_char = False
+    cap_all_word = False
+    
+    while i < n:
+        char = ascii_str[i]
+        
+        if char == ' ':
+            if current_word:
+                words.append("".join(current_word))
+                current_word = []
+            cap_all_word = False
+            cap_next_char = False
+            i += 1
+            continue
+            
+        if char == ',':  # UEB Capital indicator (dot 6)
+            if i + 1 < n and ascii_str[i + 1] == ',':
+                cap_all_word = True
+                i += 2
+            else:
+                cap_next_char = True
+                i += 1
+            continue
+            
+        if char == '-':
+            current_word.append('-')
+            cap_all_word = False
+            cap_next_char = False
+            i += 1
+            continue
+
+        if char in _LYRIC_PUNCTUATION:
+            # These cells are the same dot patterns as LOWER_DIGIT_CELLS
+            # 1/4 (§33.2.2 part-numbering context), reused in plain literary
+            # text for comma/period -- lyrics are always literary prose,
+            # never a numbering context, so always read them that way.
+            # Only comma and period are confirmed against a real fixture
+            # (vocal_test.brf) so far; treat the rest of the digit-shaped
+            # cells with the same caution as any un-exercised entry.
+            current_word.append(_LYRIC_PUNCTUATION[char])
+            i += 1
+            continue
+
+        char_lower = char.lower()
+        if cap_all_word or cap_next_char:
+            current_word.append(char_lower.upper())
+            cap_next_char = False
+        else:
+            current_word.append(char_lower)
+        i += 1
+        
+    if current_word:
+        words.append("".join(current_word))
+        
+    # Expand repetitions (dots 3-5 / ASCII '9')
+    expanded_words = []
+    for word in words:
+        if word and all(c == '9' for c in word):
+            rep_count = len(word)
+            if expanded_words:
+                prev_word = expanded_words[-1]
+                for _ in range(rep_count):
+                    expanded_words.append(prev_word)
+        else:
+            expanded_words.append(word)
+            
+    # Split words into syllables (text, has_hyphen)
+    syllables = []
+    for word in expanded_words:
+        parts = word.split('-')
+        for idx, part in enumerate(parts):
+            if not part:
+                continue
+            is_last = (idx == len(parts) - 1)
+            syllables.append((part, not is_last))
+            
+    return syllables
+
+
 class EnsembleParser:
-    def __init__(self, overrides: dict[str, str] | None = None):
+    def __init__(self, overrides: dict[str, str] | None = None, category_override: str | None = None):
         self.overrides = overrides or {}
+        self.category_override = category_override
 
     def parse(self, text: str) -> OrchestraScore:
         pipeline = BRLInputPipeline()
@@ -381,6 +530,16 @@ class EnsembleParser:
             line = lines[i]
             m_num, _ = extract_measure_number(line)
             if m_num is not None:
+                break
+            if extract_all_measure_numbers(line) is not None:
+                break
+            # BANA Sec. 35.9: vocal music commonly omits measure numbers
+            # entirely, so a margin-start (column 0) unprefixed line is
+            # also a genuine system boundary (a word line, Sec. 35.1) --
+            # same rule as the parallel_lines loop below, needed here too
+            # so the heading-collection loop doesn't swallow the whole
+            # rest of the piece when no measure number ever appears.
+            if line.strip() and line[0] not in ('⠀', ' ') and extract_line_abbreviation(line)[0] is None:
                 break
             if line.strip():
                 heading_lines.append(line)
@@ -443,7 +602,7 @@ class EnsembleParser:
                 group_systems = []
                 current_system = ParallelSystem(m_num)
                 systems.append(current_system)
-                current_system.add_line(remaining)
+                current_system.add_line(remaining, instruments, self.category_override)
             elif group_boundaries is not None:
                 abbrev_cells, _ = extract_line_abbreviation(line)
                 cols = [col for col, _ in group_boundaries]
@@ -456,8 +615,25 @@ class EnsembleParser:
                         marker_system.last_abbrev = abbrev_cells
                     elif marker_system.last_abbrev is not None:
                         marker_system.parts[marker_system.last_abbrev] += " " + chunk
+            elif (
+                line[0] not in ('⠀', ' ')
+                and extract_line_abbreviation(line)[0] is None
+            ):
+                # BANA Sec. 35.9: measure numbers are commonly omitted
+                # entirely in vocal music ("the word text serving as the
+                # point of reference") -- when a file never emits one, a
+                # new system boundary is instead recognized the same way a
+                # human reader would: a word line always begins at the
+                # margin (Sec. 35.1), while every content/continuation
+                # line is indented (this codebase's own convention, cell 3+
+                # for music lines). Auto-number systems 1, 2, 3... in the
+                # order they appear.
+                next_num = (systems[-1].measure_number + 1) if systems else 1
+                current_system = ParallelSystem(next_num)
+                systems.append(current_system)
+                current_system.add_line(line, instruments, self.category_override)
             elif current_system is not None:
-                current_system.add_line(line)
+                current_system.add_line(line, instruments, self.category_override)
 
         if not systems:
             raise BrailleParseError("No parallel systems found in ensemble score.")
@@ -564,7 +740,12 @@ class EnsembleParser:
             # header_str is present.
             tokens = BrailleTokenizer().tokenize(cells_stream, at_line_start=False)
             parser = BrailleParser(tokens=tokens, instruments=instruments, ensemble=True)
-            score = parser.parse()
+            try:
+                score = parser.parse()
+            except Exception as e:
+                print(f"FAILED INSTRUMENT: {inst.name}")
+                print(f"CELLS STREAM: {cells_stream}")
+                raise e
 
             if score.staves:
                 staff = score.staves[0]
@@ -641,6 +822,94 @@ class EnsembleParser:
                 staff.clef = first_staff.clef
             if staff.tempo is None:
                 staff.tempo = first_staff.tempo
+
+        # Collect and parse lyrics for vocal instruments
+        for inst in instruments:
+            if self.category_override is not None and self.category_override not in ("Art Song", "Vocal"):
+                continue
+            if inst.family == InstrumentFamily.VOCAL:
+                staff = instrument_staves[inst.name]
+                # A word line (Sec. 35.1) was stashed on `sys.word_lines`,
+                # keyed by the same abbreviation as this instrument's own
+                # `.parts` music-line entry (see ParallelSystem.add_line).
+                lyric_chunks = []
+                for sys in systems:
+                    for key in sys.parts:
+                        prefix, digits = decode_instrument_abbreviation(key)
+                        if inst.abbreviation.lower() == prefix.lower():
+                            if not digits or inst.part_number in digits:
+                                if key in sys.word_lines:
+                                    lyric_chunks.append(sys.word_lines[key])
+                                break
+
+                if lyric_chunks:
+                    lyric_cells_str = " ".join(lyric_chunks)
+                    syllables = parse_lyrics(lyric_cells_str)
+                    
+                    # Flatten pitched elements of the staff
+                    pitched_elements = []
+                    
+                    def collect_pitched(item):
+                        from dottednotes.models.note import Note
+                        from dottednotes.models.chord import Chord
+                        from dottednotes.models.tuplet import Tuplet
+                        from dottednotes.models.in_accord import InAccord
+                        if isinstance(item, (Note, Chord)):
+                            pitched_elements.append(item)
+                        elif isinstance(item, Tuplet):
+                            for sub in item.items:
+                                collect_pitched(sub)
+                        elif isinstance(item, InAccord):
+                            if item.parts:
+                                for sub in item.parts[0]:
+                                    collect_pitched(sub)
+                                    
+                    for measure in staff.measures:
+                        for note_item in measure.notes:
+                            collect_pitched(note_item)
+                            
+                    # Group pitched elements by BANA slur flags
+                    groups = []
+                    current_group = []
+                    in_slur = False
+                    
+                    for elem in pitched_elements:
+                        if elem.slur_start:
+                            if current_group:
+                                groups.append(current_group)
+                            current_group = [elem]
+                            in_slur = True
+                        elif in_slur:
+                            current_group.append(elem)
+                            if elem.slur_end:
+                                groups.append(current_group)
+                                current_group = []
+                                in_slur = False
+                        else:
+                            groups.append([elem])
+                    if current_group:
+                        groups.append(current_group)
+
+                    # Map syllables to note groups 1-to-1
+                    mapped_lyrics = []
+                    num_mappings = min(len(syllables), len(groups))
+                    if len(syllables) != len(groups):
+                        warnings.warn(
+                            f"{inst.name}: {len(syllables)} lyric syllable(s) "
+                            f"but {len(groups)} note/slur-group(s) -- lyrics "
+                            "will be misaligned past the shorter of the two. "
+                            "Check for a missing syllable or an extra/missing "
+                            "syllabic slur.",
+                            stacklevel=2,
+                        )
+                    for idx in range(num_mappings):
+                        syllable, has_hyphen = syllables[idx]
+                        ly_syllable = syllable
+                        if has_hyphen:
+                            ly_syllable += " --"
+                        mapped_lyrics.append(ly_syllable)
+                        
+                    staff.lyrics = mapped_lyrics
 
         score = OrchestraScore()
         for inst in instruments:

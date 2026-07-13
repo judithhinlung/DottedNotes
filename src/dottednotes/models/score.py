@@ -108,6 +108,7 @@ class Score:
         concert_pitch: bool = True,
         paper_size: Optional[str] = None,
         category_override: Optional[str] = None,
+        format_overrides: Optional[dict] = None,
     ) -> str:
         """Return a complete LilyPond document string for this score.
 
@@ -129,19 +130,26 @@ class Score:
         settings = formatter.get_settings(self, category_override=category_override)
 
         version_line = f'\\version "{_LILYPOND_VERSION}"'
-        staff_size_line = f"#(set-global-staff-size {settings.staff_size})"
 
-        size_name = paper_size if paper_size is not None else "letter"
+        size_name = paper_size if paper_size is not None else ((format_overrides or {}).get("paper_size") or "letter")
+
+        staff_size = (format_overrides or {}).get("staff_size", settings.staff_size)
+        margin_mm = (format_overrides or {}).get("margin_mm", settings.margin_mm)
+        basic_distance = (format_overrides or {}).get("basic_distance", settings.system_system_spacing_basic_distance)
+        padding = (format_overrides or {}).get("padding", settings.system_system_spacing_padding)
+
+        staff_size_line = f"#(set-global-staff-size {staff_size})"
+
         paper_lines = [
             r"\paper {",
             f'  #(set-paper-size "{size_name.lower().strip()}")',
-            f"  top-margin = {settings.margin_mm}\\mm",
-            f"  bottom-margin = {settings.margin_mm}\\mm",
-            f"  left-margin = {settings.margin_mm}\\mm",
-            f"  right-margin = {settings.margin_mm}\\mm",
-            f"  system-system-spacing = #'((basic-distance . {settings.system_system_spacing_basic_distance})",
-            f"                             (minimum-distance . {settings.system_system_spacing_basic_distance - 4.0})",
-            f"                             (padding . {settings.system_system_spacing_padding})",
+            f"  top-margin = {margin_mm}\\mm",
+            f"  bottom-margin = {margin_mm}\\mm",
+            f"  left-margin = {margin_mm}\\mm",
+            f"  right-margin = {margin_mm}\\mm",
+            f"  system-system-spacing = #'((basic-distance . {basic_distance})",
+            f"                             (minimum-distance . {basic_distance - 4.0})",
+            f"                             (padding . {padding})",
             "                             (stretchability . 60))",
             "}"
         ]
@@ -163,8 +171,22 @@ class Score:
             staff = self.staves[0]
             anchor, start_midi = staff.relative_anchor()
             staff_content = staff.to_lilypond(start_midi=start_midi)
-            relative_block = [f"\\relative {anchor} {{", staff_content, '}']
-            body = self._wrap_transpose(staff, relative_block, '', concert_pitch)
+            if staff.lyrics:
+                relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
+                transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
+                voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
+                lyrics_content = " ".join(staff.lyrics)
+                body = [
+                    "\\new Staff <<",
+                    f"  \\new Voice = \"{voice_name}\" {{",
+                    *transposed,
+                    "  }",
+                    f"  \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}",
+                    ">>"
+                ]
+            else:
+                relative_block = [f"\\relative {anchor} {{", staff_content, '}']
+                body = self._wrap_transpose(staff, relative_block, '', concert_pitch)
             score_lines = [
                 r'\score {',
                 *self._indent_lines(body),
@@ -184,30 +206,64 @@ class Score:
             if len(run_staves) == 1:
                 staff = run_staves[0]
                 anchor, start_midi = staff.relative_anchor()
-                relative_block = [
-                    f"  \\relative {anchor} {{",
-                    staff.to_lilypond(start_midi=start_midi),
-                    "  }",
-                ]
-                block_lines = [
-                    "\\new Staff {",
-                    *self._wrap_transpose(staff, relative_block, '  ', concert_pitch),
-                    "}"
-                ]
+                if staff.lyrics:
+                    relative_block = [
+                        f"    \\relative {anchor} {{",
+                        staff.to_lilypond(start_midi=start_midi),
+                        "    }",
+                    ]
+                    transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
+                    voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
+                    lyrics_content = " ".join(staff.lyrics)
+                    block_lines = [
+                        "\\new Staff <<",
+                        f"  \\new Voice = \"{voice_name}\" {{",
+                        *transposed,
+                        "  }",
+                        f"  \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}",
+                        ">>"
+                    ]
+                else:
+                    relative_block = [
+                        f"  \\relative {anchor} {{",
+                        staff.to_lilypond(start_midi=start_midi),
+                        "  }",
+                    ]
+                    block_lines = [
+                        "\\new Staff {",
+                        *self._wrap_transpose(staff, relative_block, '  ', concert_pitch),
+                        "}"
+                    ]
                 top_level_blocks.append(block_lines)
             else:
                 group_context = "PianoStaff" if family == InstrumentFamily.KEYBOARD_HARP else "StaffGroup"
                 block_lines = [f"\\new {group_context} <<"]
                 for staff in run_staves:
                     anchor, start_midi = staff.relative_anchor()
-                    block_lines.append("  \\new Staff {")
-                    relative_block = [f"    \\relative {anchor} {{"]
-                    staff_ly = staff.to_lilypond(start_midi=start_midi)
-                    for line in staff_ly.splitlines():
-                        relative_block.append("      " + line.strip())
-                    relative_block.append("    }")
-                    block_lines.extend(self._wrap_transpose(staff, relative_block, '    ', concert_pitch))
-                    block_lines.append("  }")
+                    if staff.lyrics:
+                        relative_block = [f"      \\relative {anchor} {{"]
+                        staff_ly = staff.to_lilypond(start_midi=start_midi)
+                        for line in staff_ly.splitlines():
+                            relative_block.append("        " + line.strip())
+                        relative_block.append("      }")
+                        transposed = self._wrap_transpose(staff, relative_block, '      ', concert_pitch)
+                        voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
+                        lyrics_content = " ".join(staff.lyrics)
+                        block_lines.append("  \\new Staff <<")
+                        block_lines.append(f"    \\new Voice = \"{voice_name}\" {{")
+                        block_lines.extend(transposed)
+                        block_lines.append("    }")
+                        block_lines.append(f"    \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}")
+                        block_lines.append("  >>")
+                    else:
+                        block_lines.append("  \\new Staff {")
+                        relative_block = [f"    \\relative {anchor} {{"]
+                        staff_ly = staff.to_lilypond(start_midi=start_midi)
+                        for line in staff_ly.splitlines():
+                            relative_block.append("      " + line.strip())
+                        relative_block.append("    }")
+                        block_lines.extend(self._wrap_transpose(staff, relative_block, '    ', concert_pitch))
+                        block_lines.append("  }")
                 block_lines.append(">>")
                 top_level_blocks.append(block_lines)
 

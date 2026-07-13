@@ -35,6 +35,7 @@ def test_bartok_smoke_parses_without_crashing():
     # unrelated to S5b-9's measure-numbering scope, so this only checks
     # enough of each name to confirm instrument identity/order survived.
     expected_first_words = [
+        "Piccolo?",
         "Clarinets",
         "Bassoons",
         "Horns",

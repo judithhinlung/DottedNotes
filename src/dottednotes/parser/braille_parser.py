@@ -231,6 +231,7 @@ class BrailleParser:
         ensemble: bool = False,
         preserve_state: bool = False,
         initial_state: dict | None = None,
+        category_override: str | None = None,
     ) -> None:
         self._tokens = tokens
         # S5b-3 / BANA 33.4.2: "Intervals and in-accords are read upward in
@@ -244,6 +245,7 @@ class BrailleParser:
         self._ensemble_opt = ensemble
         self._preserve_state = preserve_state
         self._initial_state = initial_state
+        self.category_override = category_override
 
     def parse(self) -> Score:
         self._reset_state()
@@ -554,7 +556,9 @@ class BrailleParser:
             value = 16 if self._triplet_run_active else 8
         elif pnote.base_duration == 1:
             value = 16
-        else:  # base_duration == 2
+        elif pnote.base_duration == 2:
+            value = 32 if self._triplet_run_active else 2
+        else:
             value = 2
         return Duration(value=value, is_triplet=True).duration_in_ticks()
 
@@ -1428,7 +1432,25 @@ class BrailleParser:
                     "first measure of a segment, section, or piece."
                 )
             previous = staff.measures[-1]
-            for item in repeat.expand(previous.notes, source_line=previous.line):
+            expanded = repeat.expand(previous.notes, source_line=previous.line)
+            # A dynamic marking placed before a whole-measure repeat sign
+            # (no notes of its own to attach to at buffer-time, since the
+            # sign carries no note tokens) belongs to the repeated measure,
+            # not whichever later measure happens to buffer the next note --
+            # attach it to the first note/chord this repeat expands to,
+            # replacing whatever dynamics that note carried as a deep copy
+            # of the original passage (the new mark supersedes the
+            # restated one; BANA repeats copy pitch/rhythm, not dynamics),
+            # rather than leaving it in self._pending_dynamics to leak
+            # into a subsequent measure's own dynamic marking.
+            if self._pending_dynamics:
+                for item in expanded:
+                    target = item.notes[0] if isinstance(item, Chord) else item
+                    if isinstance(target, Note):
+                        target.dynamics = self._pending_dynamics
+                        break
+                self._pending_dynamics = []
+            for item in expanded:
                 measure.add_note(item)
         else:
             original_items = self._finalize_voice_part(pending)

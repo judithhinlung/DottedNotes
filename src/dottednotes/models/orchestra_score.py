@@ -20,12 +20,22 @@ def _music_variable_name(instrument_name: str) -> str:
     an attempt to reproduce a composer's own hand-chosen abbreviations (e.g.
     "cello"/"bass") -- those are cosmetic and don't affect the rendered
     output either way.
+
+    Non-letter characters (digits, punctuation -- including a stray '?'
+    from decode_literary_braille's fallback for a cell it doesn't know) are
+    stripped from each word: LilyPond identifiers are letters only, and
+    silently passing one through unfiltered produces music that doesn't
+    compile rather than a clear error.
     """
     words = [w for w in instrument_name.strip().split() if w]
     if not words:
         return 'music'
     if words[-1] in _ROMAN_TO_WORD:
         words[-1] = _ROMAN_TO_WORD[words[-1]]
+    words = [''.join(c for c in w if c.isalpha()) for w in words]
+    words = [w for w in words if w]
+    if not words:
+        return 'music'
     camel = words[0].lower() + ''.join(w.capitalize() for w in words[1:])
     return camel + 'Music'
 
@@ -50,6 +60,7 @@ class OrchestraScore(Score):
         concert_pitch: bool = True,
         paper_size: Optional[str] = None,
         category_override: Optional[str] = None,
+        format_overrides: Optional[dict] = None,
     ) -> str:
         from ..renderers.lilypond_formatter import LilyPondFormatter
         formatter = LilyPondFormatter()
@@ -57,19 +68,26 @@ class OrchestraScore(Score):
         short_names = settings.short_instrument_names
 
         version_line = f'\\version "{_LILYPOND_VERSION}"'
-        staff_size_line = f"#(set-global-staff-size {settings.staff_size})"
 
-        size_name = paper_size if paper_size is not None else "letter"
+        size_name = paper_size if paper_size is not None else ((format_overrides or {}).get("paper_size") or "letter")
+
+        staff_size = (format_overrides or {}).get("staff_size", settings.staff_size)
+        margin_mm = (format_overrides or {}).get("margin_mm", settings.margin_mm)
+        basic_distance = (format_overrides or {}).get("basic_distance", settings.system_system_spacing_basic_distance)
+        padding = (format_overrides or {}).get("padding", settings.system_system_spacing_padding)
+
+        staff_size_line = f"#(set-global-staff-size {staff_size})"
+
         paper_lines = [
             r"\paper {",
             f'  #(set-paper-size "{size_name.lower().strip()}")',
-            f"  top-margin = {settings.margin_mm}\\mm",
-            f"  bottom-margin = {settings.margin_mm}\\mm",
-            f"  left-margin = {settings.margin_mm}\\mm",
-            f"  right-margin = {settings.margin_mm}\\mm",
-            f"  system-system-spacing = #'((basic-distance . {settings.system_system_spacing_basic_distance})",
-            f"                             (minimum-distance . {settings.system_system_spacing_basic_distance - 4.0})",
-            f"                             (padding . {settings.system_system_spacing_padding})",
+            f"  top-margin = {margin_mm}\\mm",
+            f"  bottom-margin = {margin_mm}\\mm",
+            f"  left-margin = {margin_mm}\\mm",
+            f"  right-margin = {margin_mm}\\mm",
+            f"  system-system-spacing = #'((basic-distance . {basic_distance})",
+            f"                             (minimum-distance . {basic_distance - 4.0})",
+            f"                             (padding . {padding})",
             "                             (stretchability . 60))",
             "}"
         ]
@@ -150,15 +168,32 @@ class OrchestraScore(Score):
         lines.append(f'{indent}  instrumentName = "{staff.name}"')
         if abbrev is not None:
             lines.append(f'{indent}  shortInstrumentName = "{abbrev}"')
-        lines.append(f'{indent}}} {{')
 
-        clef = staff.resolve_clef()
-        if clef is not None:
-            lines.append(f'{indent}  {clef}')
-        lines.append(f'{indent}  \\set Staff.instrumentName = "{staff.name}"')
-        midi_name = get_midi_instrument_name(staff.name)
-        if midi_name is not None:
-            lines.append(f'{indent}  \\set Staff.midiInstrument = "{midi_name}"')
-        lines.append(f'{indent}  \\{var_name}')
-        lines.append(f'{indent}}}')
+        if staff.lyrics:
+            lines.append(f'{indent}}} <<')
+            voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
+            lines.append(f'{indent}  \\new Voice = "{voice_name}" {{')
+            clef = staff.resolve_clef()
+            if clef is not None:
+                lines.append(f'{indent}    {clef}')
+            lines.append(f'{indent}    \\set Staff.instrumentName = "{staff.name}"')
+            midi_name = get_midi_instrument_name(staff.name)
+            if midi_name is not None:
+                lines.append(f'{indent}    \\set Staff.midiInstrument = "{midi_name}"')
+            lines.append(f'{indent}    \\{var_name}')
+            lines.append(f'{indent}  }}')
+            lyrics_content = " ".join(staff.lyrics)
+            lines.append(f'{indent}  \\new Lyrics \\lyricsto "{voice_name}" {{ {lyrics_content} }}')
+            lines.append(f'{indent}>>')
+        else:
+            lines.append(f'{indent}}} {{')
+            clef = staff.resolve_clef()
+            if clef is not None:
+                lines.append(f'{indent}  {clef}')
+            lines.append(f'{indent}  \\set Staff.instrumentName = "{staff.name}"')
+            midi_name = get_midi_instrument_name(staff.name)
+            if midi_name is not None:
+                lines.append(f'{indent}  \\set Staff.midiInstrument = "{midi_name}"')
+            lines.append(f'{indent}  \\{var_name}')
+            lines.append(f'{indent}}}')
         return lines

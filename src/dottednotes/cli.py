@@ -14,15 +14,15 @@ from .parser.tokenizer import BrailleTokenizer
 from .parser.input_pipeline import BRLInputPipeline
 
 
-def _parse_score(text: str):
+def _parse_score(text: str, category_override: str | None = None):
     """Parse normalized Unicode braille text into a Score, choosing the
     ensemble or solo parser based on whether an instrument-list header
     (BANA §33.2) is present.
     """
     if has_ensemble_header(text):
-        return EnsembleParser().parse(text)
+        return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)
-    return BrailleParser(tokens=tokens).parse()
+    return BrailleParser(tokens=tokens, category_override=category_override).parse()
 
 
 def _print_verbose_trace(input_path: str, text: str) -> None:
@@ -69,20 +69,69 @@ def _compile_with_lilypond(ly_path: Path) -> None:
     )
 
 
+def _parse_format(format_str: str) -> dict:
+    """Parse comma-separated key=value pairs into a dictionary of formatting overrides."""
+    if not format_str.strip():
+        return {}
+
+    overrides = {}
+    valid_keys = {"paper_size", "margin_mm", "staff_size", "basic_distance", "padding"}
+
+    parts = format_str.split(",")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise DottedNotesError(f"Invalid format option '{part}'. Must be in key=value format.")
+
+        subparts = part.split("=")
+        if len(subparts) != 2:
+            raise DottedNotesError(f"Invalid format option '{part}'. Must be in key=value format.")
+
+        key, val = subparts[0].strip(), subparts[1].strip()
+        if key not in valid_keys:
+            raise DottedNotesError(f"Unknown/invalid format key: '{key}'.")
+
+        if key == "paper_size":
+            overrides[key] = val
+        else:
+            try:
+                overrides[key] = float(val)
+            except ValueError:
+                raise DottedNotesError(f"Invalid float value for {key}: '{val}'")
+
+    return overrides
+
+
 def _run_convert(args: argparse.Namespace) -> None:
     text = BRLInputPipeline().load(args.input)
+
+    category_override = args.category
+    valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral"}
+    if category_override is not None and category_override not in valid_categories:
+        raise DottedNotesError(
+            f"Invalid category: '{category_override}'. Must be one of {sorted(list(valid_categories))}"
+        )
+
+    format_overrides = None
+    if args.format is not None:
+        format_overrides = _parse_format(args.format)
 
     if args.verbose:
         _print_verbose_trace(args.input, text)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            score = _parse_score(text)
+            score = _parse_score(text, category_override=category_override)
         for w in caught:
             print(f"Warning: {w.message}", file=sys.stderr)
     else:
-        score = _parse_score(text)
+        score = _parse_score(text, category_override=category_override)
 
-    rendered = score.to_lilypond()
+    rendered = score.to_lilypond(
+        category_override=category_override,
+        format_overrides=format_overrides
+    )
 
     output_path = args.output
     if args.compile and output_path is None:
@@ -131,6 +180,14 @@ def main() -> None:
         action="store_true",
         help="Print a diagnostic trace (encoding, tokens, validation "
              "warnings) to stderr",
+    )
+    convert_parser.add_argument(
+        "--category",
+        help="Override the layout category (e.g. Solo Piano, Art Song, Chamber, Orchestral)",
+    )
+    convert_parser.add_argument(
+        "--format",
+        help="Comma-separated formatting overrides (e.g. paper_size=a4,margin_mm=12)",
     )
     convert_parser.set_defaults(func=_run_convert)
 

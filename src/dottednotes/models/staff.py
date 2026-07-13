@@ -22,6 +22,8 @@ class Staff:
     time_signature: TimeSignature | None = None
     clef: Clef | None = None
     tempo: TextMarking | None = None
+    lyrics: list[str] = field(default_factory=list)
+
 
     def add_measure(self, measure: Measure) -> None:
         self.measures.append(measure)

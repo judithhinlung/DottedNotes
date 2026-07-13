@@ -10,6 +10,7 @@ class InstrumentFamily(Enum):
     PERCUSSION = "Percussion"
     KEYBOARD_HARP = "KeyboardHarp"
     STRING = "String"
+    VOCAL = "Vocal"
 
 
 _NAME_TO_FAMILY: dict[str, InstrumentFamily] = {
@@ -39,6 +40,12 @@ _NAME_TO_FAMILY: dict[str, InstrumentFamily] = {
     'Viola': InstrumentFamily.STRING,
     'Violoncello': InstrumentFamily.STRING,
     'Double bass': InstrumentFamily.STRING,
+    'Soprano': InstrumentFamily.VOCAL,
+    'Alto': InstrumentFamily.VOCAL,
+    'Tenor': InstrumentFamily.VOCAL,
+    'Bass': InstrumentFamily.VOCAL,
+    'Voice': InstrumentFamily.VOCAL,
+    'Vocal': InstrumentFamily.VOCAL,
 }
 
 
@@ -74,6 +81,13 @@ def get_instrument_family(name: str) -> InstrumentFamily | None:
     # Percussion
     if any(k in lower_name for k in ['drum', 'cymbal', 'triangle', 'percussion', 'timpani', 'kettledrum', 'xylophone', 'marimba', 'gong', 'snare', 'bass drum']):
         return InstrumentFamily.PERCUSSION
+
+    # Vocal
+    # Note: bare 'bass' is deliberately excluded here (unlike the exact-match
+    # 'Bass': VOCAL entry above) -- it would misclassify names like "Basso
+    # continuo" or an orchestral "Bass" (double bass) shorthand.
+    if any(k in lower_name for k in ['voice', 'vocal', 'soprano', 'alto', 'tenor', 'baritone', 'contralto', 'mezzo', 'cantus', 'singing', 'chorus', 'choir']):
+        return InstrumentFamily.VOCAL
 
     return None
 

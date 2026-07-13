@@ -4561,6 +4561,55 @@ Estimated time: 4–6 days.
 
 ---
 
+### [ ] S6-6: Implement Tremolo Notation (Repeated-Note and Alternating-Note Tremolos)
+
+**Why:** We need to support repeated-note tremolos (fractioning) and alternating-note tremolos. This enables blind composers to transcribe orchestral and keyboard tremolo shorthand to standard LilyPond output.
+
+**Research (BANA Section 14, Table 14 / Table 10 & LilyPond §1.4.2 "Short repeats"):**
+- **Repeated-Note Tremolo (Fractioning, §14.2):** Indicates a single note or chord repeated rapidly.
+  - Prefix cell is `⠘` (dots 4,5, ASCII `^`).
+  - Followed by a rhythmic value indicator cell:
+    - 8ths: `⠃` (dots 1,2, ASCII `b`) -> `⠘⠃`
+    - 16ths: `⠇` (dots 1,2,3, ASCII `l`) -> `⠘⠇`
+    - 32nds: `⠂` (dot 2, ASCII `1`) -> `⠘⠂`
+    - 64ths: `⠅` (dots 1,3, ASCII `k`) -> `⠘⠅`
+    - 128ths: `⠄` (dot 3, ASCII `'`) -> `⠘⠄`
+  - Placement: Placed immediately after the affected note or last interval of a chord (only separated by dots or fingerings).
+  - Doubling: If 4+ successive notes are fractioned in the same value, write the second cell twice (`bb`, `ll`, `11`, `kk`, `''`) to start the doubling, and the full sign (`^b`, `^l`, etc.) after the last fractioned note.
+- **Alternating-Note Tremolo (§14.3):** Indicates alternation between two notes or chords.
+  - Prefix cell is `⠨` (dots 4,6, ASCII `.`).
+  - Followed by a rhythmic value indicator cell:
+    - 8ths: `⠃` (dots 1,2, ASCII `b`) -> `⠨⠃`
+    - 16ths: `⠇` (dots 1,2,3, ASCII `l`) -> `⠨⠇`
+    - 32nds: `⠂` (dot 2, ASCII `1`) -> `⠨⠂`
+    - 64ths: `⠁` (dot 1, ASCII `a`) -> `⠨⠁` (Note: `.a` is used instead of `.k` to avoid collision with "Measure division" `.k`).
+    - 128ths: `⠄` (dot 3, ASCII `'`) -> `⠨⠄`
+  - Placement: Placed after the first of the pair of alternating notes/chords. The two notes/chords are written in their full print values. Cannot be doubled.
+- **LilyPond Rendering:**
+  - Single repeated-note tremolo compiles to: `note:subdivision` (e.g., `c4:16`).
+  - Alternating tremolo compiles to: `\repeat tremolo <count> { note1 note2 }` where `<count>` = (duration of note1) / (tremolo subdivision). For example, a pair of half notes (duration 2) with 16th-note alternation compiles to `\repeat tremolo 4 { a16 b16 }`.
+
+**Steps:**
+1. Add `TREMOLO` to `SymbolCategory` in `src/dottednotes/bana_symbols.py`.
+2. Register the prefix cells (`⠘` and `⠨`) and value cells (`⠃`, `⠇`, `⠂`, `⠅`, `⠄`, `⠁`) in `bana_symbols.py`.
+3. Create a `Tremolo` domain model class representing repeated-note or alternating-note tremolo.
+4. Attach `tremolo` attribute to `Note` and `Chord` models.
+5. Update `BrailleParser` to parse repeated-note tremolos immediately following a note, chord, or fingering. Implement doubling detection (consuming doubled value cells and parsing the terminating sign).
+6. Update `BrailleParser` to parse alternating-note tremolos (which link the current note/chord and the next note/chord in the sequence).
+7. Update `Note.to_lilypond()` and `Chord.to_lilypond()` to serialize single-note repeated tremolos using the colon syntax (e.g. `c4:16`).
+8. Update the parser or staff formatter to serialize alternating tremolos using the `\repeat tremolo` structure, calculating the correct repeat count.
+9. Write unit and integration tests covering both types of tremolos (including doubled fractioning and alternating chords).
+
+**Definition of Done:**
+- [ ] `TREMOLO` category and all associated symbols registered in `bana_symbols.py`
+- [ ] Parser correctly handles repeated-note tremolos with/without doubling and compiles them (e.g. `c4:16`)
+- [ ] Parser correctly handles alternating-note tremolos and compiles them to `\repeat tremolo count { note1 note2 }`
+- [ ] Unit tests cover 8th, 16th, 32nd, 64th, and 128th subdivision values for both repeated and alternating tremolos
+- [ ] Zero regressions across the existing test suite
+
+---
+
+
 # Sprint 7: Score Assembly and Full Pipeline
 
 Estimated time: 4–5 days.
@@ -4955,7 +5004,7 @@ every other fixture is a `.brf`/`.brl` input paired with a hand-authored
 
 ---
 
-### [ ] S7-6: Write user-facing README with installation and usage
+### [x] S7-6: Write user-facing README with installation and usage
 
 **Why:** Composers using the tool need clear instructions on installation,
 the external LilyPond dependency, and the actual CLI surface — which,
@@ -5244,7 +5293,7 @@ happens to do.
 
 ---
 
-### [ ] S7b-9: Implement Vocal Support and Art Song Rendering
+### [x] S7b-9: Implement Vocal Support and Art Song Rendering
 
 **Why:** The `LilyPondFormatter` layout templates include `"Art Song"` (voice +
 piano), but the codebase currently lacks any domain concept or parsing rules
@@ -5274,21 +5323,21 @@ real vocal test fixture.
    LilyPond code matching `vocal_test.ly`.
 
 **Definition of Done:**
-- [ ] `InstrumentFamily.VOCAL` is added and integrated into instrument family
+- [x] `InstrumentFamily.VOCAL` is added and integrated into instrument family
       matching
-- [ ] Vocal parts (Soprano, Alto, Tenor, Bass, Voice) are recognized as `VOCAL`
-- [ ] `vocal_test.brf` and `vocal_test.ly` fixtures are added to
+- [x] Vocal parts (Soprano, Alto, Tenor, Bass, Voice) are recognized as `VOCAL`
+- [x] `vocal_test.brf` and `vocal_test.ly` fixtures are added to
       `tests/fixtures/`
-- [ ] Parser extracts lyrics from the braille stream and associates them with
+- [x] Parser extracts lyrics from the braille stream and associates them with
       Note objects
-- [ ] `to_lilypond()` outputs `\addlyrics` blocks for vocal staves, correctly
+- [x] `to_lilypond()` outputs `\addlyrics` blocks for vocal staves, correctly
       aligned and paired with the accompaniment staves
-- [ ] Integration tests verify the end-to-end translation of `vocal_test.brf`
+- [x] Integration tests verify the end-to-end translation of `vocal_test.brf`
       to the correct LilyPond art song structure
 
 ---
 
-### [ ] S7b-10: Command-Line Overrides for Formatting Options and Category via `--format` and `--category`
+### [x] S7b-10: Command-Line Overrides for Formatting Options and Category via `--format` and `--category`
 
 **Why:** While `LilyPondFormatter` heuristically detects the layout category and
 applies high-quality defaults, users should be able to override these settings
@@ -5324,18 +5373,18 @@ between braille lyrics and braille music once vocal scores are supported.
    Chamber` or `--format "paper_size=a4,margin_mm=10"` applies the overrides.
 
 **Definition of Done:**
-- [ ] `--category` CLI option added to the `convert` command and documented in CLI help
-- [ ] `--format` CLI option added to the `convert` command and documented in CLI help
-- [ ] CLI passes `--category` override to the parser to assist in distinguishing braille lyrics and braille music
-- [ ] Key-value option parser handles correct type casting and warns/errors on unknown/invalid keys
-- [ ] `Score.to_lilypond()` and `OrchestraScore.to_lilypond()` apply category and format overrides
-- [ ] CLI tests cover valid and invalid category and format option strings
-- [ ] Integration tests verify compiled output has the specified category and custom paper settings/margins
+- [x] `--category` CLI option added to the `convert` command and documented in CLI help
+- [x] `--format` CLI option added to the `convert` command and documented in CLI help
+- [x] CLI passes `--category` override to the parser to assist in distinguishing braille lyrics and braille music
+- [x] Key-value option parser handles correct type casting and warns/errors on unknown/invalid keys
+- [x] `Score.to_lilypond()` and `OrchestraScore.to_lilypond()` apply category and format overrides
+- [x] CLI tests cover valid and invalid category and format option strings
+- [x] Integration tests verify compiled output has the specified category and custom paper settings/margins
 
 
 ---
 
-### [ ] S7b-11: Fix grace-note slur and hairpin-termination rendering bugs (found via S7b-7)
+### [x] S7b-11: Fix grace-note slur and hairpin-termination rendering bugs (found via S7b-7)
 
 **Why:** S7b-7's integration test compiles `children_s_piece.brf` and checks
 LilyPond's actual compile *log*, not just its exit code — and caught 4 real
@@ -5429,20 +5478,20 @@ the real `BrailleTokenizer` — not by guessing BANA meanings):**
    can't silently regress again.
 
 **Definition of Done:**
-- [ ] Developer has confirmed whether measure 10's missing slur is a
+- [x] Developer has confirmed whether measure 10's missing slur is a
       transcription gap or an intentional `.ly`-only addition, and the
       fixture (if wrong) or this ticket's scope (if not) updated accordingly
-- [ ] Grace notes immediately followed by a `SLUR` token render with the
+- [x] Grace notes immediately followed by a `SLUR` token render with the
       slur spanning grace-note-to-main-note, matching
       `Children_s_Piece.ly`'s `\grace {X8(} Y4)` pattern
-- [ ] Open crescendo/decrescendo hairpins get an explicit `\!` terminator
+- [x] Open crescendo/decrescendo hairpins get an explicit `\!` terminator
       in rendered output
-- [ ] `children_s_piece.brf` compiles via `lilypond` with zero warnings in
+- [x] `children_s_piece.brf` compiles via `lilypond` with zero warnings in
       the log (not just exit code 0)
-- [ ] S7b-7's Solo Piano integration test uses `children_s_piece.brf`
+- [x] S7b-7's Solo Piano integration test uses `children_s_piece.brf`
       again, matching that ticket's original suggestion, with no
       workaround needed
-- [ ] New regression tests lock in correct slur/hairpin output for the
+- [x] New regression tests lock in correct slur/hairpin output for the
       specific measures identified above
 
 **Senior note:** The three "cannot end slur" warnings and the "unterminated
@@ -5494,17 +5543,6 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-# Sprint 10: MusicXML Bridge
-
-Estimated time: 1–1.5 weeks.
-
-### [ ] S10-1: Integrate music21 for MusicXML parsing
-### [ ] S10-2: Implement MusicXML to Internal Model translation
-### [ ] S10-3: Implement Internal Model to MusicXML translation
-### [ ] S10-4: Integration test: import MuseScore MusicXML, export as BRF
-### [ ] S10-5: Integration test: import BRF, export as MusicXML for MuseScore
-
-*Detailed steps to be written when Sprint 9 is complete.*
 **Sprint 9b: BANA Validator (between Sprint 9 and Sprint 10)**
 - [ ] S9b-1: Implement `BANAValidator` class with rule registry
 - [ ] S9b-2: Implement articulation series shorthand rule (your specific case)
@@ -5524,6 +5562,18 @@ Estimated time: 1–1.5 weeks.
 - [ ] S9b-16: Implement `compression_level` parameter with full, minimal, and none modes
 
 
+
+# Sprint 10: MusicXML Bridge
+
+Estimated time: 1–1.5 weeks.
+
+### [ ] S10-1: Integrate music21 for MusicXML parsing
+### [ ] S10-2: Implement MusicXML to Internal Model translation
+### [ ] S10-3: Implement Internal Model to MusicXML translation
+### [ ] S10-4: Integration test: import MuseScore MusicXML, export as BRF
+### [ ] S10-5: Integration test: import BRF, export as MusicXML for MuseScore
+
+*Detailed steps to be written when Sprint 9 is complete.*
 **Sprint 11: Web Interface (2–3 weeks after Sprint 7)**
 - [ ] S11-1: Add FastAPI to project dependencies and create `web.py`
 - [ ] S11-2: Implement file upload endpoint with DottedNotes conversion

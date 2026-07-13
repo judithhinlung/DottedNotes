@@ -472,6 +472,7 @@ DYNAMIC_CELLS: dict[str, str] = {
 SLUR_CELLS: dict[str, str] = {
     '⠈⠉': 'tie',               # dots 4 + dots 1,4 — placed after tied note
     '⠉':  'slur',              # dots 1,4 — between notes (simple) or doubled for carry
+    '⠸⠉': 'slur',              # dots 4,5,6 + dots 1,4 — alternative syllabic slur
     '⠰⠃': 'slur_bracket_open', # dots 5,6 + dots 1,2 — before first bracketed note
     '⠘⠆': 'slur_bracket_close', # dots 4,5 + dots 2,3 — after last bracketed note
 }

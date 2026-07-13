@@ -84,13 +84,14 @@ _BRAILLE_TO_LETTER: dict[int, str] = {
     v: k.lower() for k, v in ASCII_TO_DOTS.items() if k.isalpha()
 }
 _BRAILLE_TO_LETTER[0] = ' '   # blank cell = word separator
+_BRAILLE_TO_LETTER[ASCII_TO_DOTS['-']] = '-'  # dots 3,6 -- literary hyphen (e.g. "Left-Hand")
 
 
 def decode_literary_braille(cells: str) -> str:
-    """Decode a sequence of Unicode braille cells as literary braille (a–z + space).
+    """Decode a sequence of Unicode braille cells as literary braille (a–z, space, hyphen).
 
     Each cell is mapped via _BRAILLE_TO_LETTER.  Cells that do not correspond
-    to a letter or space are replaced with '?' so callers can detect them.
+    to a letter, space, or hyphen are replaced with '?' so callers can detect them.
     """
     return ''.join(_BRAILLE_TO_LETTER.get(ord(c) - 0x2800, '?') for c in cells)
 
