@@ -27,6 +27,10 @@ from ..bana_symbols import (
     FINGERING_CHANGE_CELL,
     OMISSION_FIRST_FINGERING_CELL,
     OMISSION_SECOND_FINGERING_CELL,
+    TREMOLO_REPEATED_PREFIX,
+    TREMOLO_ALTERNATING_PREFIX,
+    TREMOLO_REPEATED_VALUE_CELLS,
+    TREMOLO_ALTERNATING_VALUE_CELLS,
 )
 from ..models.accidental import Accidental, AccidentalType
 from ..models.chord import Chord
@@ -46,6 +50,7 @@ from ..models.score import Score
 from ..models.staff import Staff
 from ..models.text_marking import TEMPO_TERMS, TextMarking, TextMarkingType
 from ..models.time_signature import TimeSignature
+from ..models.tremolo import RepeatedTremolo, AlternatingTremolo
 from ..models.tuplet import Tuplet
 from ..exceptions import BrailleParseError
 from .tokenizer import BrailleToken
@@ -187,6 +192,15 @@ class _PendingNote:
     # divisi-in-octaves passage is active on a string part (word-sign
     # "div" followed by a doubled octave-interval sign). Set during
     # streaming; see BrailleParser._handle_interval/_buffer_note.
+    tremolo: RepeatedTremolo | None = None  # S6-6: repeated-note tremolo
+    # (BANA 14.2), set by _parse_tremolo_after_note_or_chord -- either from
+    # an explicit sign following this note, or carried over silently from
+    # an open doubled-sign run (see BrailleParser._tremolo_carry_active).
+    alternating_tremolo_subdivision: int | None = None  # S6-6: set on the
+    # FIRST note/chord of an alternating-tremolo pair (BANA 14.3); the
+    # second note/chord of the pair is identified purely positionally (the
+    # very next item), so it needs no flag of its own -- see
+    # BrailleParser._group_alternating_tremolos.
 
 
 @dataclass
@@ -284,6 +298,7 @@ class BrailleParser:
                     self._apply_triplet_flag(pending[-1])
                     self._last_item_was_interval = False
                     i = self._parse_fingering_after_note_or_interval(i, pending)
+                    i = self._parse_tremolo_after_note_or_chord(i, pending)
             elif token.category == SymbolCategory.HAND_SIGN:
                 # Octave state is tracked per hand: a BRF that interleaves
                 # right/left-hand systems without restating the octave mark
@@ -356,6 +371,7 @@ class BrailleParser:
                 self._handle_interval(token, pending)
                 self._last_item_was_interval = True
                 i = self._parse_fingering_after_note_or_interval(i, pending)
+                i = self._parse_tremolo_after_note_or_chord(i, pending)
             elif token.category == SymbolCategory.IN_ACCORD:
                 self._handle_in_accord(token, pending)
                 pending = []
@@ -417,6 +433,7 @@ class BrailleParser:
                     )
                 self._last_item_was_interval = False
                 i = self._parse_fingering_after_note_or_interval(i, pending)
+                i = self._parse_tremolo_after_note_or_chord(i, pending)
             elif token.category == SymbolCategory.TRIPLET_INDICATOR:
                 self._pending_triplet_signs += 1
             # UNKNOWN — handled in later tickets
@@ -824,6 +841,21 @@ class BrailleParser:
         if f1 is None and not is_om1:
             return current_idx
 
+        # A basic finger cell doubled with itself (e.g. ⠃⠃) is never a real
+        # fingering -- "alternative fingering" means a choice between two
+        # DIFFERENT fingers, so identical finger/alternative values never
+        # occur in real BANA fingering. BANA instead reuses this exact
+        # doubled-cell shape as the repeated-note tremolo doubling sign
+        # (S6-6, BANA 14.2: "write the second cell twice ... to start the
+        # doubling"). Defer entirely to
+        # BrailleParser._parse_tremolo_after_note_or_chord in that case.
+        idx_peek2 = idx + 1
+        if (idx_peek2 < len(self._tokens)
+                and self._tokens[idx_peek2].character == t1.character
+                and t1.character in TREMOLO_REPEATED_VALUE_CELLS
+                and t1.character != '⠄'):
+            return current_idx
+
         # We found a fingering sequence!
         idx2 = idx + 1
         if idx2 < len(self._tokens):
@@ -888,6 +920,68 @@ class BrailleParser:
             ifings.append(f_obj)
         else:
             pnote.fingerings.append(f_obj)
+
+    def _parse_tremolo_after_note_or_chord(self, current_idx: int, pending: list[_PendingNote]) -> int:
+        """Recognize a tremolo sign immediately following a note/chord (S6-6).
+
+        Unlike fingering attachment, a tremolo mark always belongs to the
+        note/chord as a whole -- even mid-chord (i.e. right after the last
+        interval), it attaches to `pnote` itself, never into
+        `pnote.interval_notes`, since Chord.to_lilypond() reads `tremolo`
+        off `notes[0]` (the written note), which is built from `pnote`.
+
+        Three signs are recognized here (BANA 14.2/14.3), all positional --
+        none of these cells are tokenized as TREMOLO by BrailleTokenizer,
+        exactly like FINGERING_CELLS:
+          - doubled repeated-tremolo value cell (e.g. ⠃⠃): starts a carry
+            run -- attaches to this note and activates
+            self._tremolo_carry_active for subsequent bare notes.
+          - full repeated-tremolo sign (prefix + value cell, e.g. ⠘⠃):
+            a plain single-note tremolo, or -- if a carry run is open --
+            the terminating sign that closes it.
+          - full alternating-tremolo sign (prefix + value cell, e.g. ⠨⠃):
+            marks this note as the FIRST of an alternating pair; the
+            second note is identified purely by position (the very next
+            item) during _group_alternating_tremolos at measure-finalization
+            time.
+        """
+        if not pending or not isinstance(pending[-1], _PendingNote):
+            return current_idx
+        pnote = pending[-1]
+
+        idx = current_idx + 1
+        if idx < len(self._tokens):
+            t1 = self._tokens[idx]
+            t2 = self._tokens[idx + 1] if idx + 1 < len(self._tokens) else None
+
+            if (t2 is not None and t1.character == t2.character
+                    and t1.character in TREMOLO_REPEATED_VALUE_CELLS
+                    and t1.character != '⠄'):
+                subdivision = TREMOLO_REPEATED_VALUE_CELLS[t1.character]
+                pnote.tremolo = RepeatedTremolo(subdivision=subdivision)
+                self._tremolo_carry_active = True
+                self._tremolo_carry_subdivision = subdivision
+                return idx + 1
+
+            if (t1.character == TREMOLO_REPEATED_PREFIX and t2 is not None
+                    and t2.character in TREMOLO_REPEATED_VALUE_CELLS):
+                pnote.tremolo = RepeatedTremolo(subdivision=TREMOLO_REPEATED_VALUE_CELLS[t2.character])
+                self._tremolo_carry_active = False
+                self._tremolo_carry_subdivision = None
+                return idx + 1
+
+            if (t1.character == TREMOLO_ALTERNATING_PREFIX and t2 is not None
+                    and t2.character in TREMOLO_ALTERNATING_VALUE_CELLS):
+                pnote.alternating_tremolo_subdivision = TREMOLO_ALTERNATING_VALUE_CELLS[t2.character]
+                return idx + 1
+
+        # No explicit sign here -- silently inherit an open repeated-tremolo
+        # carry run (the notes between a doubling's start and terminating
+        # sign carry no braille mark of their own).
+        if self._tremolo_carry_active and pnote.tremolo is None:
+            pnote.tremolo = RepeatedTremolo(subdivision=self._tremolo_carry_subdivision)
+
+        return current_idx
 
     def _handle_ornament(self, token: BrailleToken, pending: list[_PendingNote]) -> None:
         char = token.character
@@ -1232,6 +1326,7 @@ class BrailleParser:
                 slur_bracket_open=pnote.slur_bracket_open,
                 slur_bracket_close=pnote.slur_bracket_close,
                 fingerings=list(pnote.fingerings),
+                tremolo=pnote.tremolo,
             )
             if pnote.is_divisi_octave and pnote.interval_notes:
                 # Divisi-in-octaves (BANA 33.4.2): the octave partner is a
@@ -1268,7 +1363,54 @@ class BrailleParser:
             else:
                 items.append(written)
                 divisi_partners.append(None)
+        items, pending, divisi_partners = self._group_alternating_tremolos(items, pending, divisi_partners)
         return self._group_triplets(items, pending, divisi_partners)
+
+    def _group_alternating_tremolos(
+        self, items: list, pending: list[_PendingNote], divisi_partners: list
+    ) -> tuple[list, list, list]:
+        """Wrap each alternating-tremolo pair into an AlternatingTremolo (S6-6,
+        BANA 14.3).
+
+        pending[i].alternating_tremolo_subdivision, set during streaming by
+        _parse_tremolo_after_note_or_chord, marks the FIRST note/chord of a
+        pair; the second is simply the very next item (alternating tremolo
+        "cannot be doubled" per BANA, so pairs are never longer than two).
+        Rests can't carry the flag (only _PendingNote does), so a pair can
+        only ever form between two already-built Note/Chord items.
+
+        Combining with triplets or a divisi-octave run is not a real BANA
+        construct and isn't attempted here -- pairing is skipped (items
+        pass through unchanged) whenever either note of a would-be pair is
+        mid-triplet or mid-divisi, which keeps this pass a strict no-op for
+        every score that doesn't use alternating tremolo.
+        """
+        result_items: list = []
+        result_pending: list = []
+        result_partners: list = []
+        i = 0
+        n = len(items)
+        while i < n:
+            pnote = pending[i]
+            if (isinstance(pnote, _PendingNote)
+                    and pnote.alternating_tremolo_subdivision is not None
+                    and not pnote.is_triplet and not pnote.is_divisi_octave
+                    and i + 1 < n
+                    and not pending[i + 1].is_triplet
+                    and not pending[i + 1].is_divisi_octave):
+                result_items.append(AlternatingTremolo(
+                    items=[items[i], items[i + 1]],
+                    subdivision=pnote.alternating_tremolo_subdivision,
+                ))
+                result_pending.append(pnote)
+                result_partners.append(None)
+                i += 2
+            else:
+                result_items.append(items[i])
+                result_pending.append(pnote)
+                result_partners.append(divisi_partners[i])
+                i += 1
+        return result_items, result_pending, result_partners
 
     def _group_triplets(
         self, items: list, pending: list[_PendingNote], divisi_partners: list | None = None
@@ -1646,9 +1788,16 @@ class BrailleParser:
 
     def _item_ticks(self, item) -> int:
         """Duration, in ticks, of a single measure item -- Note/Rest/Chord
-        read `.duration` directly; a Tuplet sums its own items recursively."""
+        read `.duration` directly; a Tuplet sums its own items recursively.
+
+        An AlternatingTremolo (S6-6) occupies only the FIRST item's written
+        duration -- BANA's printed duration describes the whole alternating
+        pair, which together take up one written note's worth of time, not
+        two (see models/tremolo.py's _repeat_count for the same reasoning)."""
         if isinstance(item, Tuplet):
             return sum(self._item_ticks(sub) for sub in item.items)
+        if isinstance(item, AlternatingTremolo):
+            return item.items[0].duration.duration_in_ticks()
         return item.duration.duration_in_ticks()
 
     def _validate_measure_beat_count(self, measure: Measure) -> None:
@@ -1733,6 +1882,8 @@ class BrailleParser:
             '_current_hand': self._current_hand,
             '_pending_repeat_count': self._pending_repeat_count,
             '_pending_repeat_line': self._pending_repeat_line,
+            '_tremolo_carry_active': self._tremolo_carry_active,
+            '_tremolo_carry_subdivision': self._tremolo_carry_subdivision,
         }
 
     def set_state(self, state: dict) -> None:
@@ -1886,6 +2037,14 @@ class BrailleParser:
         self._triplet_group_smallest_ticks: int | None = None
         self._triplet_block_smallest_ticks: int | None = None
         self._triplet_block_has_ambiguous: bool = False
+        # Tremolo state (S6-6, BANA 14.2). Mirrors the trill-span carry
+        # pattern, but postfix (the sign follows the note, not precedes it):
+        # a doubled value-cell right after a note activates carry mode and
+        # records which subdivision is running; every following bare note
+        # silently inherits it until a terminating full sign (prefix +
+        # value cell) closes the run. See _parse_tremolo_after_note_or_chord.
+        self._tremolo_carry_active: bool = False
+        self._tremolo_carry_subdivision: int | None = None
 
         if self._preserve_state and self._initial_state is not None:
             self.set_state(self._initial_state)

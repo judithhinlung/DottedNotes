@@ -61,6 +61,7 @@ def _compile_with_lilypond(ly_path: Path) -> None:
         ["lilypond", "-o", str(output_basename), str(ly_path)],
         capture_output=True,
         text=True,
+        timeout=60,
     )
     if result.returncode != 0:
         raise LilyPondCompileError("lilypond compilation failed", stderr=result.stderr)

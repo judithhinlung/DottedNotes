@@ -33,8 +33,9 @@ class Chord:
             for n in self.notes
         ]
         dur = self.duration.to_lilypond()
+        tremolo_str = self.notes[0].tremolo.to_lilypond() if self.notes[0].tremolo else ''
         extra = _chord_extras(self.notes[0])
-        return f"<{' '.join(parts)}>{dur}{extra}"
+        return f"<{' '.join(parts)}>{dur}{tremolo_str}{extra}"
 
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
@@ -50,11 +51,12 @@ class Chord:
             parts.append(pitch_str)
 
         dur = self.duration.to_lilypond()
+        tremolo_str = self.notes[0].tremolo.to_lilypond() if self.notes[0].tremolo else ''
         extra = _chord_extras(self.notes[0])
 
         # After the chord, reference advances to the first note (LilyPond rule).
         ref_midi = self.notes[0]._midi_pitch()
-        return f"<{' '.join(parts)}>{dur}{extra}", ref_midi
+        return f"<{' '.join(parts)}>{dur}{tremolo_str}{extra}", ref_midi
 
 
 def NOTE_PITCH_ONLY(note: Note) -> str:

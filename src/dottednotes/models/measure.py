@@ -7,10 +7,11 @@ from .chord import Chord
 from .in_accord import InAccord
 from .note import Note, Rest
 from .text_marking import TextMarking
+from .tremolo import AlternatingTremolo
 from .tuplet import Tuplet
 
 NoteOrChord = Union[Note, Chord]
-MeasureItem = Union[Note, Rest, Chord, InAccord, Tuplet]
+MeasureItem = Union[Note, Rest, Chord, InAccord, Tuplet, AlternatingTremolo]
 
 _BAR_LINE_TO_LY: dict[str, str] = {
     'measure_separator': '|',

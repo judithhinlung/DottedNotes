@@ -61,6 +61,7 @@ class SymbolCategory(Enum):
     TRIPLET_INDICATOR = auto()
     MULTI_MEASURE_REST = auto()
     FINGERING = auto()
+    TREMOLO = auto()
     UNKNOWN = auto()
 
 
@@ -700,4 +701,52 @@ FINGERING_CHANGE_CELL: str = '⠉'  # dots 1,4
 
 OMISSION_FIRST_FINGERING_CELL: str = '⠠'  # dot 6
 OMISSION_SECOND_FINGERING_CELL: str = '⠄' # dot 3
+
+# ---------------------------------------------------------------------------
+# Tremolo notation (S6-6, BANA Music Braille Code 2015, Section 14, Table
+# 14 / Table 10; LilyPond Notation Reference v2.24 SS1.4.2 "Short repeats" ->
+# "Tremolo repeats").
+#
+# Repeated-note tremolo (fractioning, SS14.2): a single note or chord repeated
+# rapidly. Written as a prefix cell + a rhythmic value indicator cell, placed
+# immediately after the affected note (or the last interval of a chord) --
+# only augmentation dots or a fingering may come between. Renders in
+# LilyPond as colon syntax, e.g. c4:16.
+#
+# Alternating-note tremolo (SS14.3): alternation between two notes or chords,
+# each written at its own full print value. The prefix + value cell is
+# placed after the first of the pair; cannot be doubled. Renders in
+# LilyPond as \repeat tremolo <count> { note1 note2 }.
+#
+# Neither prefix cell nor any value cell is looked up by BrailleTokenizer:
+# TREMOLO_REPEATED_PREFIX (⠘) and TREMOLO_ALTERNATING_PREFIX (⠨) are already
+# OCTAVE_MARKS entries (great/two-line octave), and every value cell below
+# collides with either NOTE_CELLS-adjacent cells or FINGERING_CELLS (⠃/⠇/⠂/⠅
+# are fingers 2/3/4/5; ⠁ is finger 1). Exactly like FINGERING_CELLS, these
+# are recognized positionally by BrailleParser (only immediately after a
+# note/chord/fingering), never by the tokenizer -- see
+# BrailleParser._parse_tremolo_after_note_or_chord.
+# ---------------------------------------------------------------------------
+
+TREMOLO_REPEATED_PREFIX: str = '⠘'      # dots 4,5 (ASCII '^')
+TREMOLO_ALTERNATING_PREFIX: str = '⠨'   # dots 4,6 (ASCII '.')
+
+TREMOLO_REPEATED_VALUE_CELLS: dict[str, int] = {
+    '⠃': 8,    # dots 1,2    (ASCII 'b')  -> ⠘⠃
+    '⠇': 16,   # dots 1,2,3  (ASCII 'l')  -> ⠘⠇
+    '⠂': 32,   # dot 2       (ASCII '1')  -> ⠘⠂
+    '⠅': 64,   # dots 1,3    (ASCII 'k')  -> ⠘⠅
+    '⠄': 128,  # dot 3       (ASCII "'")  -> ⠘⠄
+}
+
+# Same rhythmic-value cells as TREMOLO_REPEATED_VALUE_CELLS except 64ths,
+# which uses ⠁ (ASCII 'a') here instead of ⠅ (ASCII 'k') -- BANA reserves
+# ".k" for the measure-division sign (IN_ACCORD_CELLS['⠨⠅']).
+TREMOLO_ALTERNATING_VALUE_CELLS: dict[str, int] = {
+    '⠃': 8,    # dots 1,2    (ASCII 'b')  -> ⠨⠃
+    '⠇': 16,   # dots 1,2,3  (ASCII 'l')  -> ⠨⠇
+    '⠂': 32,   # dot 2       (ASCII '1')  -> ⠨⠂
+    '⠁': 64,   # dot 1       (ASCII 'a')  -> ⠨⠁
+    '⠄': 128,  # dot 3       (ASCII "'")  -> ⠨⠄
+}
 

@@ -19,7 +19,6 @@ class OrnamentType(Enum):
     TURN = auto()                    # turn (dots 2,5,6) → \turn
     INVERTED_TURN = auto()           # inverted turn (dots 2,5,6, 1,2,3) → \reverseturn
     GLISSANDO = auto()               # glissando (dot 4, dot 1 — two cells) → \glissando
-    TREMOLO = auto()                 # tremolo — BANA cell not yet confirmed
 
 
 ORNAMENT_TO_LILYPOND: dict[OrnamentType, str] = {
@@ -33,7 +32,6 @@ ORNAMENT_TO_LILYPOND: dict[OrnamentType, str] = {
     OrnamentType.TURN:                   r'\turn',
     OrnamentType.INVERTED_TURN:          r'\reverseturn',
     OrnamentType.GLISSANDO:              r'\glissando',
-    OrnamentType.TREMOLO:                ':32',
 }
 
 

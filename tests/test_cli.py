@@ -292,3 +292,28 @@ def test_cli_convert_category_override_affects_lyrics_parsing(monkeypatch, tmp_p
     _run_main(monkeypatch, ["convert", str(brf), str(out_override), "--category", "Chamber"])
     content_override = out_override.read_text(encoding="utf-8")
     assert "\\new Lyrics" not in content_override
+
+
+# --- S7-5: End-to-end test ---
+
+
+@pytest.mark.skipif(shutil.which("lilypond") is None, reason="lilypond not installed")
+def test_e2e_conversion(monkeypatch, tmp_path):
+    input_brf = FIXTURES / "fengyang_flower_drum.brf"
+    output_ly = tmp_path / "fengyang_flower_drum.ly"
+
+    # 1. Run conversion with --compile flag
+    _run_main(monkeypatch, ["convert", str(input_brf), str(output_ly), "--compile"])
+
+    # 2. Assert output files exist and are non-empty
+    assert output_ly.exists()
+    assert output_ly.stat().st_size > 0
+
+    output_pdf = tmp_path / "fengyang_flower_drum.pdf"
+    output_midi = tmp_path / "fengyang_flower_drum.midi"
+
+    assert output_pdf.exists()
+    assert output_pdf.stat().st_size > 0
+    assert output_midi.exists()
+    assert output_midi.stat().st_size > 0
+

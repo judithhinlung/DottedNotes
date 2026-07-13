@@ -781,10 +781,6 @@ def test_ornament_to_lilypond_glissando():
     assert Ornament(type=OrnamentType.GLISSANDO).to_lilypond() == r'\glissando'
 
 
-def test_ornament_to_lilypond_tremolo():
-    assert Ornament(type=OrnamentType.TREMOLO).to_lilypond() == ':32'
-
-
 def test_ornament_to_lilypond_map_covers_all_types():
     for orn_type in OrnamentType:
         assert orn_type in ORNAMENT_TO_LILYPOND

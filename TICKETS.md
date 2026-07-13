@@ -4561,7 +4561,7 @@ Estimated time: 4–6 days.
 
 ---
 
-### [ ] S6-6: Implement Tremolo Notation (Repeated-Note and Alternating-Note Tremolos)
+### [x] S6-6: Implement Tremolo Notation (Repeated-Note and Alternating-Note Tremolos)
 
 **Why:** We need to support repeated-note tremolos (fractioning) and alternating-note tremolos. This enables blind composers to transcribe orchestral and keyboard tremolo shorthand to standard LilyPond output.
 
@@ -4601,11 +4601,11 @@ Estimated time: 4–6 days.
 9. Write unit and integration tests covering both types of tremolos (including doubled fractioning and alternating chords).
 
 **Definition of Done:**
-- [ ] `TREMOLO` category and all associated symbols registered in `bana_symbols.py`
-- [ ] Parser correctly handles repeated-note tremolos with/without doubling and compiles them (e.g. `c4:16`)
-- [ ] Parser correctly handles alternating-note tremolos and compiles them to `\repeat tremolo count { note1 note2 }`
-- [ ] Unit tests cover 8th, 16th, 32nd, 64th, and 128th subdivision values for both repeated and alternating tremolos
-- [ ] Zero regressions across the existing test suite
+- [x] `TREMOLO` category and all associated symbols registered in `bana_symbols.py`
+- [x] Parser correctly handles repeated-note tremolos with/without doubling and compiles them (e.g. `c4:16`)
+- [x] Parser correctly handles alternating-note tremolos and compiles them to `\repeat tremolo count { note1 note2 }`
+- [x] Unit tests cover 8th, 16th, 32nd, 64th, and 128th subdivision values for both repeated and alternating tremolos
+- [x] Zero regressions across the existing test suite
 
 ---
 
@@ -4955,7 +4955,7 @@ right.
 
 ---
 
-### [ ] S7-5: End-to-end test: .brf in, compiled PDF + MIDI out
+### [x] S7-5: End-to-end test: .brf in, compiled PDF + MIDI out
 
 **Why:** Every other test in the suite stops at the `Score`/string-of-
 LilyPond level. Nothing currently proves that `dottednotes convert
@@ -4983,14 +4983,14 @@ workflow diagram.
    crashed compile is a common false-positive).
 
 **Definition of Done:**
-- [ ] `test_e2e_conversion` parses a real fixture and produces a `.ly` file
+- [x] `test_e2e_conversion` parses a real fixture and produces a `.ly` file
       via the CLI
-- [ ] When `lilypond` is installed, the test additionally verifies
+- [x] When `lilypond` is installed, the test additionally verifies
       non-empty `.pdf` and `.midi` output; the test is skipped (not
       failed) when it isn't
-- [ ] The subprocess call has a timeout, so a hung `lilypond` process fails
+- [x] The subprocess call has a timeout, so a hung `lilypond` process fails
       the test rather than hanging the run
-- [ ] All output is written under pytest's `tmp_path`, never into
+- [x] All output is written under pytest's `tmp_path`, never into
       `tests/fixtures/`
 
 **Senior note:** This project's working tree has already accumulated real

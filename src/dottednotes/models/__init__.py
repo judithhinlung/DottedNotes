@@ -18,6 +18,7 @@ from .orchestra_score import OrchestraScore
 from .staff import Staff
 from .text_marking import TextMarking, TextMarkingType, TEMPO_TERMS
 from .time_signature import TimeSignature, VALID_DENOMINATORS
+from .tremolo import RepeatedTremolo, AlternatingTremolo
 from .tuplet import Tuplet
 
 __all__ = [
@@ -55,6 +56,8 @@ __all__ = [
     "TextMarking",
     "TextMarkingType",
     "TimeSignature",
+    "RepeatedTremolo",
+    "AlternatingTremolo",
     "Tuplet",
     "VALID_DENOMINATORS",
 ]
