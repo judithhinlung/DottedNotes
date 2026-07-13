@@ -78,6 +78,48 @@ def extract_measure_number(line_str: str) -> tuple[int | None, str]:
     return None, line_str
 
 
+def extract_all_measure_numbers(line_str: str) -> list[tuple[int, int]] | None:
+    """Detect Sao Mai Braille software's inline multi-measure-number
+    convention (S5b-9): a header line carrying *several* NUMBER_SIGN+digit
+    markers spaced out across one physical line -- e.g.
+    `⠼⠁⠀⠀⠀⠼⠃⠀⠀⠼⠙⠀⠀⠼⠑` -- each marking where a later measure's content
+    begins further along the same line, rather than BANA Sec. 33.4.6's own
+    convention of exactly one measure number alone on its own line
+    (`extract_measure_number`, convention 1).
+
+    Returns a list of (column, measure_number) pairs, sorted left to
+    right, only when the *entire* line is nothing but blank cells/spaces
+    and such markers -- any other content (an instrument abbreviation,
+    real music) means this isn't a pure header line, so callers should
+    fall back to `extract_measure_number`. Returns None if fewer than two
+    markers are found, since a single marker is already handled by that
+    existing convention.
+    """
+    positions: list[tuple[int, int]] = []
+    i = 0
+    n = len(line_str)
+    while i < n:
+        ch = line_str[i]
+        if ch in ('⠀', ' '):
+            i += 1
+            continue
+        if ch == NUMBER_SIGN:
+            j = i + 1
+            digits = []
+            while j < n and line_str[j] in LITERARY_DIGIT_MAP:
+                digits.append(LITERARY_DIGIT_MAP[line_str[j]])
+                j += 1
+            if digits:
+                positions.append((i, int(''.join(digits))))
+                i = j
+                continue
+        return None
+
+    if len(positions) >= 2:
+        return positions
+    return None
+
+
 def extract_line_abbreviation(line_str: str) -> tuple[str | None, str]:
     """Find the first instrument abbreviation on the line, return (abbrev_cells, music_cells)."""
     stripped = line_str.lstrip('⠀ ')
@@ -371,17 +413,51 @@ class EnsembleParser:
         parallel_lines = lines[i:]
         systems: list[ParallelSystem] = []
         current_system: ParallelSystem | None = None
+        # Sao Mai's inline multi-measure-number convention (S5b-9): once a
+        # header line declares several markers at once, every content line
+        # that follows is column-sliced at those same marker positions and
+        # distributed across `group_systems` instead of going wholesale to
+        # a single system -- this coexists with BANA's own one-number-per-
+        # line convention (Fengyang) purely because `group_boundaries`
+        # stays None for files that never emit a multi-marker header line.
+        group_boundaries: list[tuple[int, int]] | None = None
+        group_systems: list[ParallelSystem] = []
         for line in parallel_lines:
             if not line.strip():
                 continue
+
+            markers = extract_all_measure_numbers(line)
+            if markers is not None:
+                group_boundaries = markers
+                group_systems = []
+                for _, m_num in markers:
+                    marker_system = ParallelSystem(m_num)
+                    systems.append(marker_system)
+                    group_systems.append(marker_system)
+                current_system = None
+                continue
+
             m_num, remaining = extract_measure_number(line)
             if m_num is not None:
+                group_boundaries = None
+                group_systems = []
                 current_system = ParallelSystem(m_num)
                 systems.append(current_system)
                 current_system.add_line(remaining)
-            else:
-                if current_system is not None:
-                    current_system.add_line(line)
+            elif group_boundaries is not None:
+                abbrev_cells, _ = extract_line_abbreviation(line)
+                cols = [col for col, _ in group_boundaries]
+                for idx, marker_system in enumerate(group_systems):
+                    start = cols[idx]
+                    end = cols[idx + 1] if idx + 1 < len(cols) else len(line)
+                    chunk = line[start:end].lstrip('⠀ ')
+                    if abbrev_cells is not None:
+                        marker_system.parts[abbrev_cells] = chunk
+                        marker_system.last_abbrev = abbrev_cells
+                    elif marker_system.last_abbrev is not None:
+                        marker_system.parts[marker_system.last_abbrev] += " " + chunk
+            elif current_system is not None:
+                current_system.add_line(line)
 
         if not systems:
             raise BrailleParseError("No parallel systems found in ensemble score.")

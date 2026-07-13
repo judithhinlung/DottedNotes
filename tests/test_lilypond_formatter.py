@@ -62,25 +62,17 @@ def test_formatter_detects_chamber_fixture():
     assert settings.short_instrument_names is True
 
 def test_formatter_detects_orchestral_bartok():
-    # Use instruments from Bartok Romanian Folk Dances for Orchestral testing
+    # Use Bartok Romanian Folk Dances fixture for Orchestral testing
     formatter = LilyPondFormatter()
-    score = Score()
-    score.add_staff(Staff(name="Piccolo"))
-    score.add_staff(Staff(name="Flutes I&II"))
-    score.add_staff(Staff(name="Clarinets I&II in B-flat"))
-    score.add_staff(Staff(name="Bassoons I&II"))
-    score.add_staff(Staff(name="Horns in F I&II"))
-    score.add_staff(Staff(name="Violins I"))
-    score.add_staff(Staff(name="Violins II"))
-    score.add_staff(Staff(name="Violas"))
-    score.add_staff(Staff(name="Violoncellos"))
-    score.add_staff(Staff(name="Double Basses"))
+    text = BRLInputPipeline().load(FIXTURES / "Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl")
+    score = EnsembleParser().parse(text)
     
     assert formatter.detect_category(score) == "Orchestral"
     settings = formatter.get_settings(score)
     assert settings.category == "Orchestral"
     assert settings.staff_size == 14.1
     assert settings.short_instrument_names is True
+
 
 
 # ---------------------------------------------------------------------------

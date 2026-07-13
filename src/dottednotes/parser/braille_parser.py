@@ -339,7 +339,12 @@ class BrailleParser:
                 dynamic = Dynamic(level=dyn_level)
                 if dyn_level in (DynamicLevel.CRESCENDO_END, DynamicLevel.DECRESCENDO_END):
                     # End marks follow the last note of the passage; attach there.
-                    if pending:
+                    # A hairpin can legitimately close on a rest (found in
+                    # Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl,
+                    # S5b-9), but _PendingRest/Rest have no `dynamics` field
+                    # -- rests never carry dynamics elsewhere in this
+                    # codebase -- so drop the mark rather than crash.
+                    if pending and isinstance(pending[-1], _PendingNote):
                         pending[-1].dynamics.append(dynamic)
                 else:
                     self._pending_dynamics.append(dynamic)
@@ -730,8 +735,15 @@ class BrailleParser:
 
         # Case 3: first occurrence of this sign — could be single or first of doubled.
         self._last_interval_seen = interval_number
-        if pending:
-            # There is a preceding note: apply immediately as a single-note interval.
+        if pending and isinstance(pending[-1], _PendingNote):
+            # There is a preceding note: apply immediately as a single-note
+            # interval. An interval sign right after a rest is nonsensical
+            # (it builds a chord tone relative to the previous *note*) --
+            # found in Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl
+            # (S5b-9), where '⠼' 's NUMBER_SIGN/4th-interval collision
+            # misreads a stray inline measure-number marker as an interval;
+            # skip rather than crash on the same '_PendingRest has no
+            # note_name' shape as the dynamics-on-rest case above.
             self._apply_interval(interval_number, pending[-1])
         # If no preceding note: just record _last_interval_seen and wait for the
         # next token to determine if this is a doubled sign (carry start) or an error.
@@ -861,7 +873,10 @@ class BrailleParser:
         return current_idx
 
     def _attach_fingering(self, f_obj: Fingering, pending: list[_PendingNote]) -> None:
-        if not pending:
+        # Fingerings only ever follow a note/chord (BANA Sec. 15), never a
+        # rest -- guard needed for the same stray-inline-marker cases as
+        # the interval-on-rest fix above (S5b-9).
+        if not pending or not isinstance(pending[-1], _PendingNote):
             return
         pnote = pending[-1]
         if self._last_item_was_interval and pnote.interval_notes:
@@ -1607,6 +1622,13 @@ class BrailleParser:
 
         return resolved
 
+    def _item_ticks(self, item) -> int:
+        """Duration, in ticks, of a single measure item -- Note/Rest/Chord
+        read `.duration` directly; a Tuplet sums its own items recursively."""
+        if isinstance(item, Tuplet):
+            return sum(self._item_ticks(sub) for sub in item.items)
+        return item.duration.duration_in_ticks()
+
     def _validate_measure_beat_count(self, measure: Measure) -> None:
         """Warn (plain text) if resolved beat count doesn't match the time signature.
 
@@ -1622,15 +1644,17 @@ class BrailleParser:
                 # An in-accord's voices all cover the same span (BANA 11.1/11.1.2
                 # require equal note value per side); use the longest voice so a
                 # malformed voice mismatch doesn't silently understate the count.
+                # A voice's own items can themselves be a Tuplet (found in
+                # Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl, S5b-9),
+                # hence the recursive _item_ticks rather than reading
+                # `.duration` straight off each part item.
                 if item.parts:
                     actual_ticks += max(
-                        sum(n.duration.duration_in_ticks() for n in part)
+                        sum(self._item_ticks(n) for n in part)
                         for part in item.parts
                     )
-            elif isinstance(item, Tuplet):
-                actual_ticks += sum(sub.duration.duration_in_ticks() for sub in item.items)
             else:
-                actual_ticks += item.duration.duration_in_ticks()
+                actual_ticks += self._item_ticks(item)
         if actual_ticks != expected_ticks:
             warnings.warn(
                 f"Measure {measure.number}: expected "

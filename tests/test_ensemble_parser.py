@@ -6,6 +6,7 @@ from pathlib import Path
 from dottednotes.parser.ensemble_parser import (
     EnsembleParser,
     extract_measure_number,
+    extract_all_measure_numbers,
     extract_line_abbreviation,
     decode_instrument_abbreviation,
     has_ensemble_header,
@@ -24,6 +25,22 @@ def test_extract_measure_number():
     assert extract_measure_number("⠀⠜⠧⠂⠄") == (None, "⠀⠜⠧⠂⠄")
     assert extract_measure_number("⠁") == (1, "")
     assert extract_measure_number("⠁⠀") == (1, "")
+
+
+def test_extract_all_measure_numbers():
+    # Sao Mai's inline multi-measure-number convention (S5b-9): several
+    # NUMBER_SIGN+digit markers spaced across one pure header line.
+    assert extract_all_measure_numbers("⠼⠁⠀⠀⠼⠃⠀⠀⠼⠙⠀⠀⠼⠑") == [
+        (0, 1), (4, 2), (8, 4), (12, 5),
+    ]
+    # A single marker is BANA's own convention (extract_measure_number's
+    # job) -- extract_all_measure_numbers requires 2+ markers.
+    assert extract_all_measure_numbers("⠁⠀⠀⠜⠧⠂⠄") is None
+    assert extract_all_measure_numbers("⠼⠁⠀⠀⠀") is None
+    # Real content (not just blank cells + markers) disqualifies the line,
+    # even with 2+ NUMBER_SIGN occurrences -- e.g. a content line where '⠼'
+    # is doing double duty as the INTERVAL-4th cell, not a measure marker.
+    assert extract_all_measure_numbers("⠜⠧⠇⠁⠄⠀⠸⠦⠐⠻⠤⠱⠼⠀⠄⠄⠄⠄⠄⠀⠸⠦⠱⠼⠶") is None
 
 
 def test_extract_line_abbreviation():
@@ -73,6 +90,40 @@ def test_ensemble_parser_basic():
     assert isinstance(first_vn_note, Note)
     assert first_vn_note.note_name == "G"
     assert first_vn_note.octave == 3
+
+
+def test_ensemble_parser_sao_mai_inline_multi_measure_numbers():
+    # S5b-9: Sao Mai's convention -- several NUMBER_SIGN+digit markers
+    # spaced across one header line (rather than BANA's one-number-alone-
+    # per-line convention) -- each marking where a later measure's column
+    # begins. Flute and Violin content lines are column-sliced at the same
+    # marker positions the header declares.
+    # Flute plays C D | E F ; Violin plays C D | E F (octave 3).
+    header = '⠀⠀⠀⠀⠀⠼⠁⠀⠼⠃'  # measure 1 marker at col 5, measure 2 marker at col 8
+    flute_line = '⠜⠋⠇⠄⠀⠐⠹⠱⠐⠫⠻'
+    violin_line = '⠜⠧⠇⠄⠀⠸⠹⠱⠸⠫⠻'
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠣⠣⠣⠼⠙⠲\n'
+        f'{header}\n{flute_line}\n{violin_line}\n'
+    )
+    parser = EnsembleParser()
+    score = parser.parse(raw)
+
+    assert len(score.staves) == 2
+    flute, violin = score.staves
+    assert flute.name == "Flute"
+    assert violin.name == "Violin"
+
+    assert len(flute.measures) == 2
+    assert [n.note_name for n in flute.measures[0].notes] == ["C", "D"]
+    assert [n.note_name for n in flute.measures[1].notes] == ["E", "F"]
+
+    assert len(violin.measures) == 2
+    assert [n.note_name for n in violin.measures[0].notes] == ["C", "D"]
+    assert [n.note_name for n in violin.measures[1].notes] == ["E", "F"]
+    assert [n.octave for n in violin.measures[0].notes] == [3, 3]
 
 
 def test_ensemble_parser_parallel_movement():

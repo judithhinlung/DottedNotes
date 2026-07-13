@@ -4369,7 +4369,7 @@ same role `children_s_piece.brf`'s tests played across S5-6/S5-7.
 
 ---
 
-### [ ] S5b-9: Support Sao Mai's inline multi-measure-number-per-line convention (Bartók smoke test)
+### [x] S5b-9: Support Sao Mai's inline multi-measure-number-per-line convention (Bartók smoke test)
 
 **Why:** `test_bartok_smoke_documents_current_crash`
 (`tests/test_ensemble_integration.py`) is a `strict=True` xfail
@@ -4427,12 +4427,12 @@ investigating for S7b-7:
    unless the developer verifies specific measures.
 
 **Definition of Done:**
-- [ ] `Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl` parses through
+- [x] `Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl` parses through
       `EnsembleParser` without raising
-- [ ] Sao Mai's inline multi-measure-number convention is handled without
+- [x] Sao Mai's inline multi-measure-number convention is handled without
       regressing BANA's standalone-line convention (Fengyang's tests still
       pass unchanged)
-- [ ] `test_bartok_smoke_documents_current_crash`'s `xfail` marker is
+- [x] `test_bartok_smoke_documents_current_crash`'s `xfail` marker is
       removed and replaced with real smoke-test assertions
 
 **Senior note:** Don't guess at Sao Mai's exact convention from one
@@ -5219,7 +5219,7 @@ check it really works" principle as S7-5.
 - [x] At least one generated PDF per category has been manually visually
       reviewed (documented in the PR, not automated)
 
-### [ ] S7b-8: Document all formatting rules in docs/lilypond_conventions.md with source citations
+### [x] S7b-8: Document all formatting rules in docs/lilypond_conventions.md with source citations
 
 **Why:** Every formatting default in this sprint was derived from evidence
 (S7b-1's analysis), and that traceability needs to survive past the PR
@@ -5237,10 +5237,10 @@ happens to do.
    `docs/bana_reference.md` already is.
 
 **Definition of Done:**
-- [ ] `docs/lilypond_conventions.md` exists, covering every default
+- [x] `docs/lilypond_conventions.md` exists, covering every default
       introduced in S7b-2 through S7b-6
-- [ ] Each default cites its source evidence
-- [ ] Referenced from `CLAUDE.md`'s docs/ listing
+- [x] Each default cites its source evidence
+- [x] Referenced from `CLAUDE.md`'s docs/ listing
 
 ---
 
@@ -5288,46 +5288,50 @@ real vocal test fixture.
 
 ---
 
-### [ ] S7b-10: Command-Line Overrides for Formatting Options via `--format`
+### [ ] S7b-10: Command-Line Overrides for Formatting Options and Category via `--format` and `--category`
 
 **Why:** While `LilyPondFormatter` heuristically detects the layout category and
 applies high-quality defaults, users should be able to override these settings
-directly from the command line. This allows custom formatting (e.g. setting
-margins, paper size, or staff size explicitly) without modifying the source
-code.
+directly from the command line. Specifying the category with `--category` (e.g.,
+overriding an art song to chamber) also assists the braille parser in distinguishing
+between braille lyrics and braille music once vocal scores are supported.
 
 **Steps:**
-1. Update `cli.py` to add a new command-line argument `--format` to the
+1. Update `cli.py` to add a new command-line argument `--category` to the
+   `convert` parser, accepting a string category (e.g., `Chamber`, `Art Song`,
+   `Orchestral`, `Solo Piano`).
+2. Update `cli.py` to add a new command-line argument `--format` to the
    `convert` parser, accepting a comma-separated list of key-value pairs (e.g.
    `--format "paper_size=a4,margin_mm=12,staff_size=18"`).
-2. Write a helper function in `cli.py` or a utility module to parse the
+3. Write a helper function in `cli.py` or a utility module to parse the
    `--format` option string into a dictionary of formatting overrides (e.g.,
    `{"paper_size": "a4", "margin_mm": 12.0, "staff_size": 18.0}`). Support
    validation and type conversion for keys like `paper_size` (str), `margin_mm`
    (float), `staff_size` (float), `basic_distance` (float), and `padding`
    (float).
-3. Update `to_lilypond()` of `Score` and `OrchestraScore` to accept a dictionary
-   or custom settings object containing these formatting overrides and apply
-   them directly instead of or on top of the template defaults.
-4. Integrate the `--format` overrides in the CLI handler, passing the resolved
-   options to the score rendering pipeline.
-5. Write unit tests in `tests/test_cli.py` to verify that invalid `--format`
-   arguments raise appropriate error messages and that valid keys are correctly
-   parsed.
-6. Write integration tests verifying that converting a BRF file with `--format
-   "paper_size=a4,margin_mm=10"` renders LilyPond output with the requested
-   formatting overrides.
+4. Update parser entrypoints (e.g. `_parse_score`) to accept the parsed
+   `category` override, allowing the parser to use this information when
+   distinguishing between braille lyrics and braille music.
+5. Update `to_lilypond()` of `Score` and `OrchestraScore` to accept a category
+   override and/or formatting overrides and apply them directly instead of
+   or on top of the template defaults.
+6. Integrate the `--category` and `--format` overrides in the CLI handler,
+   passing them to the parser and the score rendering pipeline.
+7. Write unit tests in `tests/test_cli.py` to verify that invalid `--category`
+   or `--format` arguments raise appropriate error messages and that valid
+   options are correctly parsed.
+8. Write integration tests verifying that converting a BRF file with `--category
+   Chamber` or `--format "paper_size=a4,margin_mm=10"` applies the overrides.
 
 **Definition of Done:**
-- [ ] `--format` CLI option added to the `convert` command and documented in CLI
-      help
-- [ ] Key-value option parser handles correct type casting and warns/errors on
-      unknown/invalid keys
-- [ ] `Score.to_lilypond()` and `OrchestraScore.to_lilypond()` apply format
-      overrides
-- [ ] CLI tests cover valid and invalid format option strings
-- [ ] Integration tests verify compiled output has the specified custom paper
-      settings and margins
+- [ ] `--category` CLI option added to the `convert` command and documented in CLI help
+- [ ] `--format` CLI option added to the `convert` command and documented in CLI help
+- [ ] CLI passes `--category` override to the parser to assist in distinguishing braille lyrics and braille music
+- [ ] Key-value option parser handles correct type casting and warns/errors on unknown/invalid keys
+- [ ] `Score.to_lilypond()` and `OrchestraScore.to_lilypond()` apply category and format overrides
+- [ ] CLI tests cover valid and invalid category and format option strings
+- [ ] Integration tests verify compiled output has the specified category and custom paper settings/margins
+
 
 ---
 
