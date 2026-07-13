@@ -4699,7 +4699,7 @@ instead of braille.
 
 ---
 
-### [ ] S7-2: Implement CLI `convert` subcommand, `--compile`, `--version`, and fix input loading
+### [x] S7-2: Implement CLI `convert` subcommand, `--compile`, `--version`, and fix input loading
 
 **Why:** The current CLI (`cli.py`) takes a bare positional `input` path
 with no subcommand at all — it doesn't match the
@@ -4825,27 +4825,27 @@ divergent copies in the first place.
    (produces a two-staff `PianoStaff`, no `instrumentName` field).
 
 **Definition of Done:**
-- [ ] CLI supports `convert <input> [output]` with the subcommand structure
-- [ ] CLI loads input via `BRLInputPipeline.load()`; `InputPipeline` and
+- [x] CLI supports `convert <input> [output]` with the subcommand structure
+- [x] CLI loads input via `BRLInputPipeline.load()`; `InputPipeline` and
       its now-redundant tests are removed
-- [ ] `dottednotes convert tests/fixtures/fengyang_flower_drum.brf`
+- [x] `dottednotes convert tests/fixtures/fengyang_flower_drum.brf`
       produces a real multi-staff orchestral score (flute, violin I,
       violin II, viola, cello, bass), not an empty `\version`-only file
-- [ ] `dottednotes convert tests/fixtures/fingering_melody.brf` succeeds
+- [x] `dottednotes convert tests/fixtures/fingering_melody.brf` succeeds
       via the solo parser (not misrouted to `EnsembleParser`)
-- [ ] `EnsembleParser.parse()` on hand-sign-only text (no genuine header)
+- [x] `EnsembleParser.parse()` on hand-sign-only text (no genuine header)
       raises the clear `"No instrument list header found..."` message,
       not a downstream `"No parallel systems found..."` failure caused by
       a false-positive header match
-- [ ] CLI supports `--compile`, invoking `lilypond` via `subprocess.run`
+- [x] CLI supports `--compile`, invoking `lilypond` via `subprocess.run`
       with an argument list (not a shell string)
-- [ ] CLI supports `--version`, sourced from installed package metadata,
+- [x] CLI supports `--version`, sourced from installed package metadata,
       not a `pyproject.toml` file read
-- [ ] Missing `lilypond` binary produces a clear plain-text message instead
+- [x] Missing `lilypond` binary produces a clear plain-text message instead
       of a raw `FileNotFoundError` traceback
-- [ ] `tests/test_cli.py` exists and covers the above, including both the
+- [x] `tests/test_cli.py` exists and covers the above, including both the
       Fengyang and fingering_melody regression cases
-- [ ] `tests/test_ensemble_parser.py` covers `has_ensemble_header` directly
+- [x] `tests/test_ensemble_parser.py` covers `has_ensemble_header` directly
       for both the genuine-header and hand-sign-false-positive cases
 
 **Senior note:** Since `\score {}` already contains a `\midi {}` block
@@ -4917,7 +4917,7 @@ specific exception types defined above, plus the narrow set of expected
 
 ---
 
-### [ ] S7-4: Add --verbose flag
+### [x] S7-4: Add --verbose flag
 
 **Why:** Diagnosing translation issues requires inspecting what the
 tokenizer and parser actually did to a given input — right now the only
@@ -4939,10 +4939,10 @@ way to do that is to read source or drop into a debugger.
    contains expected token categories/warning text for a small fixture.
 
 **Definition of Done:**
-- [ ] `--verbose` flag exists on `convert`
-- [ ] Tokenizer/parser trace and existing validation warnings are printed
+- [x] `--verbose` flag exists on `convert`
+- [x] Tokenizer/parser trace and existing validation warnings are printed
       to `stderr` in plain text, one item per line
-- [ ] Unit tests verify verbose output content
+- [x] Unit tests verify verbose output content
 
 **Senior note:** `stdout` and `stderr` are not interchangeable here: S7-2's
 `convert` prints the rendered `.ly` to `stdout` when no output path is
@@ -5511,12 +5511,263 @@ bug" would be the wrong fix for measure 10 specifically.
 
 Estimated time: 3–4 days.
 
+**Why this sprint exists:** Sprints 0–7b built the conversion pipeline
+itself; this sprint is about the two things that determine whether anyone
+outside the developer can actually use or contribute to it — the CLI's
+output has never had a dedicated accessibility pass since S7-3/S7-4 first
+landed `--verbose` and centralized error handling, and the project has no
+docs yet for a contributor who isn't Claude Code reading CLAUDE.md. S8-4 is
+the one ticket in this sprint that is not a code change at all.
+
+---
+
 ### [ ] S8-1: Audit all CLI output for screen reader friendliness
+
+**Why:** CLAUDE.md's Developer Context section is explicit — the developer
+uses VoiceOver on Mac with VS Code, and "no progress bars, ASCII art, or
+visual-only feedback" plus "all error messages must be plain text and
+meaningful" are stated as hard requirements, not aspirations. `cli.py` has
+grown several distinct output paths since S7-3/S7-4 (`--verbose`'s trace,
+the plain conversion output, `--compile`'s confirmation line, every
+`DottedNotesError`/`OSError` path in `main()`), and none of them have had a
+dedicated accessibility pass — they were each written correct-by-intent
+at the time, not verified under an actual screen reader.
+
+**Steps:**
+1. Catalog every `print(...)` call site in `cli.py`: the rendered `.ly`
+   written to stdout, the `f"Written to {output_path}"` line, `--compile`'s
+   `f"Compiled {output_basename}.pdf and {output_basename}.midi"` line,
+   `--verbose`'s `f"Detected encoding: ..."` and per-token
+   `f"Token: {token.category.name} {token.raw}"` lines in
+   `_print_verbose_trace`, each `f"Warning: {w.message}"` line, and both
+   `f"Error: {e}"` paths in `main()`.
+2. Specifically review `main()`'s handling of `LilyPondCompileError.stderr`
+   (the `if isinstance(e, LilyPondCompileError) and e.stderr: print(e.stderr,
+   file=sys.stderr)` branch) — this is the one place DottedNotes passes
+   through another program's raw output verbatim rather than composing its
+   own message. LilyPond's own compiler diagnostics use source-location
+   pointers (a caret under the offending column of a quoted source line),
+   which is a visual-alignment convention that may not read sensibly under
+   VoiceOver. Decide, with the developer, whether to pass it through as-is,
+   summarize it, or reformat it into plain sentences.
+3. Review `--verbose`'s per-token trace line for whether
+   `token.raw` — a single raw Unicode braille character (U+2800–U+28FF) — is
+   sufficient on its own, or whether it should also surface the numeric dot
+   pattern (the same `dots: frozenset[int]` representation `BrailleSymbol`
+   already carries internally) since that's the developer's native mental
+   model for a braille cell, not the rendered glyph.
+4. Note that `argparse`'s own `--help`/usage/error output (invalid
+   arguments, `--version`) is generated by the standard library, not by
+   DottedNotes's own code, and can't be reworded without a custom
+   `HelpFormatter`. Confirm it's actually fine under VoiceOver rather than
+   assuming so by default; if it isn't, that's a separate, larger fix and
+   should be scoped as its own follow-up rather than folded silently into
+   this ticket.
+5. Have the developer run an actual VoiceOver pass over: a successful
+   `convert` to stdout, `convert` with an output path, `--compile`,
+   `--verbose`, and each error path (missing input file, malformed braille
+   input, failed lilypond compile with `--compile`). A sighted contributor
+   reading the text of a message cannot substitute for this — screen reader
+   ergonomics (pacing, punctuation-driven pauses, how a message is announced
+   mid-sentence) aren't reliably predictable by eye.
+6. Fix whatever the pass turns up (e.g. reformatting the lilypond stderr
+   passthrough, adding dot-pattern info to the verbose trace) and add or
+   update tests in `tests/test_cli.py` asserting the plain-text shape of
+   each fixed message so it can't silently regress.
+
+**Definition of Done:**
+- [ ] Every stdout/stderr write site in `cli.py` is catalogued and reviewed
+- [ ] `LilyPondCompileError.stderr` passthrough reviewed and, if needed,
+      reformatted so it doesn't rely on visual column alignment
+- [ ] `--verbose` token trace reviewed with the developer for whether raw
+      braille glyphs alone are sufficient or need accompanying dot-number
+      notation
+- [ ] `argparse`'s built-in `--help`/usage/error output confirmed acceptable
+      under VoiceOver, or a follow-up ticket filed if not
+- [ ] Developer has run a VoiceOver pass over `convert`, `--compile`,
+      `--verbose`, and all error paths and confirmed no screen-reader-hostile
+      output remains
+- [ ] Any fixes made are covered by new or updated tests in `test_cli.py`
+
+**Senior note:** Don't mark this done off a text-only review of the code.
+The whole point of the ticket is that no one has verified these messages
+under an actual screen reader yet — a sighted read-through of the f-strings
+can confirm they're grammatically plain text, but not that they announce
+well. Get the developer's own VoiceOver pass before checking off the last
+item above.
+
+---
+
 ### [ ] S8-2: Write developer documentation
+
+**Why:** CLAUDE.md is written to bootstrap a Claude Code session (it opens
+with "read this file first," includes session-specific rules like "never
+mark a ticket done yourself," and is structured as an operating manual for
+an AI agent, not a codebase orientation doc). `docs/` currently only holds
+reference material for the domain (`bana_reference.md`,
+`lilypond_conventions.md`, `mutopia_analysis.md`) — there is nothing that
+walks a new human contributor through how the pipeline fits together or how
+to extend it. That gap blocks both S8-3's contributor onboarding and S8-4's
+outreach: anyone who arrives from a submitted announcement and wants to
+open a PR has nowhere to start.
+
+**Steps:**
+1. Create `docs/development.md` with an architecture walkthrough aimed at a
+   human contributor: the `BRF/BRL → Internal Model → LilyPond` pipeline
+   from CLAUDE.md's Architecture Overview, but explained with a short worked
+   example (trace one real measure from raw braille cell through
+   `BRLInputPipeline` → `BrailleTokenizer` → `BrailleParser` → a domain model
+   object → `to_lilypond()`) rather than restating CLAUDE.md's reference
+   tables verbatim.
+2. Document how to add a new BANA symbol: where `bana_symbols.py`'s
+   dot-pattern tables live, how a new `SymbolCategory` entry gets added, and
+   restate CLAUDE.md's "never guess dot patterns — cite the Music Braille
+   Code 2015 manual or ask" rule in a form aimed at someone who hasn't read
+   CLAUDE.md.
+3. Document how to add a new domain model class end to end: the
+   `BrailleSymbol` base contract, the required `to_lilypond()` method,
+   where it plugs into `braille_parser.py`, and which test files need a
+   matching addition (`test_models.py` plus an integration-test fixture).
+4. Document the testing conventions from CLAUDE.md's Testing Strategy
+   section for a contributor audience, including the ASCII-vs-Unicode
+   braille fixture gotcha (S7-2 — always load fixtures through
+   `BRLInputPipeline`, never a raw file read) since that bug has already
+   shipped once.
+5. Cross-link to `docs/bana_reference.md` and `docs/lilypond_conventions.md`
+   rather than duplicating their content.
+6. Read the finished doc back as plain text — no ASCII-art diagrams or
+   tables that degrade poorly under a screen reader — consistent with the
+   project's accessibility bar applying to its own documentation, not just
+   CLI output.
+7. Add a link to `docs/development.md` from `README.md` for contributors
+   who want the architecture, distinct from the install/usage instructions
+   already there.
+
+**Definition of Done:**
+- [ ] `docs/development.md` exists and covers the pipeline architecture (with
+      a worked example), adding a BANA symbol, adding a domain model class,
+      and the testing conventions
+- [ ] The ASCII/Unicode braille fixture gotcha (S7-2) is documented
+- [ ] No content is duplicated from `bana_reference.md` /
+      `lilypond_conventions.md` — cross-linked instead
+- [ ] Doc reads as plain text with no diagrams/tables that don't degrade
+      well under a screen reader
+- [ ] `README.md` links to `docs/development.md`
+
+**Senior note:** Keep this separate from S8-3's `CONTRIBUTING.md` — this
+ticket is "how the code works," S8-3 is "how to work with us as a
+contributor," including the accessibility of the contribution process
+itself. Don't merge them into one file; they serve different readers at
+different points in the contribution flow.
+
+---
+
 ### [ ] S8-3: Add CONTRIBUTING.md with blind-contributor guidance
+
+**Why:** DottedNotes exists specifically to serve blind composers, and per
+CLAUDE.md the primary developer works via VoiceOver + VS Code +
+BrailleNotetaker. A generic templated `CONTRIBUTING.md` would miss the
+point — this project's own contribution process needs to hold itself to the
+same accessibility bar S8-1 audits in the CLI, and should be genuinely
+usable by blind contributors, not just written about them for a sighted
+audience.
+
+**Steps:**
+1. Draft the standard sections: filing an issue, dev environment setup
+   (link to `README.md`'s install steps plus `pytest`/dev dependencies),
+   branch/PR conventions, and code style (referencing whatever linting/
+   formatting config exists in `pyproject.toml`).
+2. Add an "Accessibility of this codebase" section: any change touching CLI
+   output, error messages, or documentation must stay screen-reader
+   friendly — no ASCII art, no color/ANSI-only signaling, no tables that
+   don't degrade to plain text — with S8-1's audit cited as the concrete bar
+   new PRs are held to, not a restated abstract principle.
+3. Add a dedicated section for blind/low-vision contributors: known-working
+   tooling (VS Code + VoiceOver, since that's what the primary developer
+   already uses), how to run `pytest` and read its output via a screen
+   reader, and how to review a diff in a screen-reader-friendly way (`git
+   diff` in a terminal vs. GitHub's web PR view, which is not uniformly
+   accessible) — concrete tooling guidance, not generic advice.
+4. Restate CLAUDE.md's BANA-accuracy rule (never guess dot patterns; cite
+   the Music Braille Code 2015 manual; ask the developer if unsure) for
+   external contributors, since they won't have read CLAUDE.md.
+5. Have the developer review the draft specifically for whether the
+   blind-contributor section is accurate and actually useful, not just
+   well-intentioned — a sighted-written accessibility guide is exactly the
+   kind of content that needs sign-off from someone who'll actually use it
+   before it's published.
+6. Link `CONTRIBUTING.md` from `README.md`.
+
+**Definition of Done:**
+- [ ] `CONTRIBUTING.md` created at the repo root with issue/PR/dev-setup/
+      code-style sections
+- [ ] "Accessibility of this codebase" section present, citing S8-1's audit
+      as the concrete bar
+- [ ] Blind/low-vision-contributor section present with concrete tooling and
+      workflow guidance
+- [ ] BANA dot-pattern accuracy rule documented for external contributors
+- [ ] Developer has reviewed and confirmed the blind-contributor guidance is
+      accurate, not just well-intentioned
+- [ ] `README.md` links to `CONTRIBUTING.md`
+
+**Senior note:** Don't ship this without the developer's sign-off in step 5.
+Inaccurate accessibility guidance is worse than none — it can send another
+blind contributor down a workflow that doesn't actually work, and they'd
+have every reason to trust a project whose entire premise is accessibility.
+
+---
+
 ### [ ] S8-4: Submit to accessibility and music technology communities
 
-*Detailed steps to be written when Sprint 7 is complete.*
+**Why:** The tool has no users yet outside its own developer. This sprint's
+title is "Accessibility and Polish," and the polish only matters once
+someone outside the project can find it — this ticket is the one place in
+the sprint that's outreach, not a code change, and it's the only Sprint 8
+ticket whose action (a public post) can't be quietly reverted afterward.
+
+**Steps:**
+1. Compile a short candidate list of venues: blind/low-vision assistive-tech
+   communities, music-notation-software communities (e.g. the LilyPond user
+   list/forum), and accessibility-focused tech communities. This should be
+   led by the developer's own existing contacts (e.g. from the Freedots
+   project background noted in CLAUDE.md) rather than guessed at by whoever
+   picks up the ticket — community norms and moderation expectations vary
+   enough that an unfamiliar submitter can misjudge fit or come across as
+   spam.
+2. Draft a short, plain-text announcement: what DottedNotes does, the
+   workflow it enables (braille → LilyPond → PDF/MIDI), current status and
+   known limitations (link to TICKETS.md's sprint progress so expectations
+   set by the post match what actually ships), and how to install and
+   report issues.
+3. Confirm `README.md` and `CONTRIBUTING.md` (S8-3) are in a postable state
+   before any submission goes out — external readers will land there first,
+   and a broken install doc undermines the announcement itself.
+4. Have the developer review and explicitly approve both the exact
+   announcement text and the venue list before anything is posted — this is
+   a public, effectively irreversible action taken on the developer's
+   behalf, not an internal code change, and needs sign-off up front rather
+   than after the fact.
+5. Post/submit per each venue's own norms (forum post, mailing list intro,
+   issue tracker, etc.), keeping a record of where submissions went so
+   follow-up questions have somewhere to be answered.
+6. Track any resulting feedback, issues, or PRs and file them as follow-up
+   tickets rather than trying to resolve them ad hoc as part of this one.
+
+**Definition of Done:**
+- [ ] Candidate venue list compiled and confirmed by the developer, not
+      guessed at
+- [ ] Announcement text drafted and explicitly approved by the developer
+- [ ] `README.md` and `CONTRIBUTING.md` confirmed postable before submission
+- [ ] Submissions made to the approved venue list
+- [ ] Resulting feedback/issues logged as follow-up tickets, not resolved
+      inline mid-ticket
+
+**Senior note:** This is the one ticket in the sprint that can't be
+undone once done — a mailing list message or forum post can't be
+unsent. Treat "I drafted it" as distinct from "I have permission to post
+it": get explicit developer sign-off on both the wording and the venue
+list before submitting anything, don't treat drafting as implied
+authorization to publish.
 
 ---
 
@@ -5531,15 +5782,6 @@ Estimated time: 1.5–2 weeks.
 ### [ ] S9-5: Round-trip integration test
 
 *Detailed steps to be written when Sprint 8 is complete.*
-
----
-**Sprint 9c: BANA Formatting Rule Library**
-- [ ] S9c-1: Compile complete list of BANA mandatory formatting rules from the Technical Manual
-- [ ] S9c-2: Compile complete list of BANA optional shorthand conventions
-- [ ] S9c-3: Implement each rule as a discrete, testable method on `BANAValidator`
-- [ ] S9c-4: Document every rule in `docs/bana_reference.md` with manual citation and example
-- [ ] S9c-5: Build a rule registry so rules can be enabled/disabled individually — useful for different BANA editions (UK vs US braille music conventions differ slightly)
-
 
 ---
 
@@ -5560,6 +5802,14 @@ Estimated time: 1.5–2 weeks.
 - [ ] S9b-14: Integration test: expanded Internal Model → compressed braille → verify against hand-formatted BANA output
 - [ ] S9b-15: Add `musical_equals()` to Note, Rest, Chord, and Measure classes
 - [ ] S9b-16: Implement `compression_level` parameter with full, minimal, and none modes
+
+---
+**Sprint 9c: BANA Formatting Rule Library**
+- [ ] S9c-1: Compile complete list of BANA mandatory formatting rules from the Technical Manual
+- [ ] S9c-2: Compile complete list of BANA optional shorthand conventions
+- [ ] S9c-3: Implement each rule as a discrete, testable method on `BANAValidator`
+- [ ] S9c-4: Document every rule in `docs/bana_reference.md` with manual citation and example
+- [ ] S9c-5: Build a rule registry so rules can be enabled/disabled individually — useful for different BANA editions (UK vs US braille music conventions differ slightly)
 
 
 
