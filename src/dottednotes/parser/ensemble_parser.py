@@ -22,7 +22,7 @@ from ..models.tuplet import Tuplet
 from .input_pipeline import BRLInputPipeline, decode_literary_braille
 from .tokenizer import BrailleTokenizer, BrailleToken
 from .braille_parser import BrailleParser
-from .instrument_list import parse_instrument_list
+from .instrument_list import parse_instrument_list, _parse_line as _parse_instrument_line
 
 # Match optional octave mark (1 or 2 octave cells), followed by ⠤, optionally followed by an abbreviation in ⠜...⠄
 PARALLEL_MOVEMENT_REGEX = re.compile(
@@ -305,7 +305,25 @@ class EnsembleParser:
         while i < len(lines):
             line = lines[i]
             m_num, _ = extract_measure_number(line)
-            if m_num is None and _line_has_word_sign(line):
+            # Both checks are required, for two independent false-positive
+            # reasons:
+            #  - _line_has_word_sign (tokenizer-based) rules out a hand-sign
+            #    line (⠨⠜/⠸⠜) whose second cell is the same dot pattern as
+            #    WORD_SIGN, which _parse_instrument_line's raw substring
+            #    search alone can't tell apart from a real word-sign (S7-2).
+            #  - _parse_instrument_line rules out a free-text title/
+            #    attribution line above the real instrument list, which
+            #    also tokenizes as WORD_SIGN (any literary text does) but
+            #    doesn't parse as a genuine NAME...ABBREV entry -- found via
+            #    Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl, whose
+            #    title line was getting collected as a fake "instrument",
+            #    then stopping this loop at the next blank line before ever
+            #    reaching the real instrument list below it.
+            if (
+                m_num is None
+                and _line_has_word_sign(line)
+                and _parse_instrument_line(line) is not None
+            ):
                 inst_lines.append(line)
             elif inst_lines:
                 break

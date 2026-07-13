@@ -4369,6 +4369,83 @@ same role `children_s_piece.brf`'s tests played across S5-6/S5-7.
 
 ---
 
+### [ ] S5b-9: Support Sao Mai's inline multi-measure-number-per-line convention (Bartók smoke test)
+
+**Why:** `test_bartok_smoke_documents_current_crash`
+(`tests/test_ensemble_integration.py`) is a `strict=True` xfail
+documenting that `Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl`
+doesn't parse. Two distinct bugs were blocking it, found while
+investigating for S7b-7:
+1. A false positive in `EnsembleParser.parse()`'s instrument-list
+   detection — the file's two free-text title/attribution lines above
+   the real instrument-list header also tokenized as `WORD_SIGN` (any
+   literary text does), got collected as fake "instruments," and the
+   collection loop stopped at the following blank line before ever
+   reaching the real header. **Already fixed** (this ticket, alongside
+   the fix) — see `EnsembleParser.parse()`'s `inst_lines` loop and
+   `test_ensemble_parser_skips_title_line_before_instrument_list`.
+2. **Still open, this ticket's actual scope:** once (1) is fixed, parsing
+   gets to measure ~172 before crashing with
+   `AttributeError: '_PendingRest' object has no attribute 'dynamics'`.
+   Root cause: Sao Mai Braille software (which auto-transcribed this
+   fixture) puts **multiple measure-number markers inline on one physical
+   line**, e.g. line 16 of the normalized file:
+   `⠼⠁⠀⠀⠀⠀⠀⠀⠀⠼⠃⠀⠀⠼⠙⠀⠀⠀⠀⠀⠀⠼⠑` — four separate
+   `NUMBER_SIGN`+digit groups (`⠼⠁`=1, `⠼⠃`=2, `⠼⠙`=4, `⠼⠑`=5), spaced
+   apart mid-line, each apparently marking where a new measure's content
+   begins. `extract_measure_number` (`ensemble_parser.py`) only recognizes
+   a number-sign+digit group *alone at the start* of a line (BANA §33.4.6
+   convention — see its docstring) — it has no concept of multiple inline
+   measure boundaries within a single line. Everything after the first
+   recognized number on such a line gets silently absorbed into that first
+   measure's content instead of being split at each subsequent `⠼X`
+   marker, which misaligns measure boundaries badly enough that, deep
+   enough into the piece, a dynamic marking ends up attached to an
+   unresolved pending rest (`_PendingRest` has no `dynamics` field — only
+   real notes/rests being built as notes do).
+
+**Steps:**
+1. Confirm the inline-multi-measure-number hypothesis against more of the
+   file than the sample above (grep for `NUMBER_SIGN` occurrences per
+   line — the fixture has several, not just line 16) — verify it's a
+   consistent convention throughout, not a one-off.
+2. Extend measure-boundary detection (`extract_measure_number` and/or its
+   caller in `EnsembleParser.parse()`) to recognize `NUMBER_SIGN`+digit as
+   a measure boundary marker *anywhere* in a line, not only at the start —
+   splitting the line's remaining content at each marker into separate
+   per-measure chunks, each still processed through the existing
+   per-instrument parsing path.
+3. Don't let this regress BANA's own standalone-line convention (Fengyang,
+   the developer-verified fixture) — the two conventions need to coexist,
+   selected by what a given file actually uses, not a global flag.
+4. Once parsing succeeds end-to-end, remove `test_bartok_smoke_documents_
+   current_crash`'s `xfail` marker and replace it with real assertions
+   (staff count, a representative measure or two) — per `TICKETS.md`'s
+   existing S5b-8 guidance, this fixture is still not developer-verified
+   ground truth, so treat it as a smoke test (parses without crashing,
+   warning counts tracked as a baseline), not exact-output assertions,
+   unless the developer verifies specific measures.
+
+**Definition of Done:**
+- [ ] `Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl` parses through
+      `EnsembleParser` without raising
+- [ ] Sao Mai's inline multi-measure-number convention is handled without
+      regressing BANA's standalone-line convention (Fengyang's tests still
+      pass unchanged)
+- [ ] `test_bartok_smoke_documents_current_crash`'s `xfail` marker is
+      removed and replaced with real smoke-test assertions
+
+**Senior note:** Don't guess at Sao Mai's exact convention from one
+sample — verify it holds across the whole file (or find where it doesn't)
+before writing the splitting logic, the same "verify before implementing"
+discipline this project applies to BANA dot patterns and LilyPond syntax.
+This fixture is not developer-verified ground truth (S5b-8), so the bar
+here is "parses correctly structurally," not "produces the exact right
+notes" — don't over-invest in exact-output assertions against a fixture
+nobody has confirmed against a reference score.
+
+---
+
 # Sprint 6: Fingering Notation
 
 Estimated time: 4–6 days.

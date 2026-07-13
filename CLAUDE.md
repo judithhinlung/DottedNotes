@@ -10,7 +10,7 @@ Never mark a ticket done yourself — the developer will check it off.
 ## Project Overview
 
 **Repository:** https://github.com/judithhinlung/DottedNotes
-**Language:** Python 3.11+
+**Language:** Python (`>=3.9`, per `pyproject.toml`)
 **Purpose:** Convert braille music notation (.brf/.brl files) to LilyPond (.ly),
 enabling blind composers to go from their native braille notation to
 PDF scores and MIDI audio without sighted assistance.
@@ -64,42 +64,67 @@ DottedNotes/
 ├── src/
 │   └── dottednotes/
 │       ├── __init__.py
+│       ├── bana_symbols.py      # Authoritative BANA dot-pattern tables (all SymbolCategory cells)
+│       ├── exceptions.py        # DottedNotesError, BrailleParseError, LilyPondCompileError
+│       ├── cli.py               # CLI: `convert` subcommand, --compile/--verbose/--version
 │       ├── models/
-│       │   ├── __init__.py
+│       │   ├── __init__.py      # Re-exports every model class below
+│       │   ├── base.py          # BrailleSymbol base class
 │       │   ├── note.py          # Note, Rest classes
-│       │   ├── duration.py      # Duration class
-│       │   ├── accidental.py    # Accidental class
-│       │   ├── articulation.py  # Articulation class
-│       │   ├── dynamic.py       # Dynamic class
-│       │   ├── ornament.py      # Ornament class
+│       │   ├── duration.py      # Duration class (incl. is_triplet)
+│       │   ├── accidental.py    # Accidental, AccidentalType
+│       │   ├── articulation.py  # Articulation, ArticulationType
+│       │   ├── dynamic.py       # Dynamic, DynamicLevel
+│       │   ├── ornament.py      # Ornament, OrnamentType, GraceNote
+│       │   ├── fingering.py     # Fingering (basic/change/alternative)
+│       │   ├── chord.py         # Chord class
+│       │   ├── in_accord.py     # InAccord (multi-voice BANA "in accord")
 │       │   ├── measure.py       # Measure class
-│       │   ├── voice.py         # Voice class
+│       │   ├── measure_repeat.py # MeasureRepeat (whole-measure repeat sign)
+│       │   ├── tuplet.py        # Tuplet class
+│       │   ├── clef.py          # Clef, ClefType
+│       │   ├── key_signature.py # KeySignature
+│       │   ├── time_signature.py # TimeSignature
+│       │   ├── text_marking.py  # TextMarking (tempo/expression word-signs)
+│       │   ├── instrument.py    # InstrumentInfo, InstrumentFamily, family lookup
+│       │   ├── transposition.py # Transposing-instrument interval table (used by Score)
 │       │   ├── staff.py         # Staff class
-│       │   └── score.py         # Score, OrchestraScore classes
+│       │   ├── score.py         # Score class (single/multi-staff to_lilypond())
+│       │   └── orchestra_score.py # OrchestraScore (named-variable, \with{} staves)
 │       ├── parser/
 │       │   ├── __init__.py
-│       │   ├── input_pipeline.py   # BRLInputPipeline, encoding detection
-│       │   ├── tokenizer.py        # BrailleTokenizer
-│       │   └── braille_parser.py   # BrailleParser (main parser)
-│       ├── renderers/
-│       │   ├── __init__.py
-│       │   └── lilypond_renderer.py
-│       └── cli.py               # Command line interface
+│       │   ├── input_pipeline.py   # BRLInputPipeline: ASCII/Unicode braille detection + normalization
+│       │   ├── tokenizer.py        # BrailleTokenizer, BrailleToken
+│       │   ├── braille_parser.py   # BrailleParser (main solo-score parser)
+│       │   ├── ensemble_parser.py  # EnsembleParser (BANA §33 instrument-list header + parallel systems)
+│       │   └── instrument_list.py  # parse_instrument_list, resolve_abbreviation (Table 29)
+│       └── renderers/
+│           ├── __init__.py
+│           └── lilypond_formatter.py  # LilyPondFormatter: per-category \paper{}/staff-size settings
 ├── tests/
 │   ├── __init__.py
 │   ├── test_models.py
 │   ├── test_parser.py
-│   ├── test_renderers.py
-│   └── fixtures/                # .brf test files go here
-│       └── fengyang_flower_drum.brf
+│   ├── test_ensemble_parser.py
+│   ├── test_ensemble_integration.py
+│   ├── test_fingering_model.py
+│   ├── test_fingering_parser.py
+│   ├── test_fingering_integration.py
+│   ├── test_lilypond_formatter.py
+│   ├── test_exceptions.py
+│   ├── test_cli.py
+│   └── fixtures/                # .brf/.brl inputs, each paired with a hand-authored
+│                                 # .ly ground truth where one exists (see fixtures/README.md)
 ├── docs/
 │   ├── bana_reference.md        # BANA symbol table reference
-│   └── lilypond_conventions.md  # LilyPond formatting defaults reference
+│   ├── lilypond_conventions.md  # LilyPond formatting defaults reference, with citations
+│   └── mutopia_analysis.md      # Raw Mutopia corpus analysis backing lilypond_conventions.md
 ├── examples/
 ├── LICENSE                      # GPL-2.0
 ├── README.md
 ├── pyproject.toml
 ├── CLAUDE.md                    # This file
+├── TICKETS.md                   # Full sprint/ticket backlog
 └── .github/
     └── workflows/
         └── ci.yml
@@ -111,17 +136,33 @@ DottedNotes/
 
 1. **Voice numbers:** All voice numbers are per-part (1-4), never global.
 2. **Encoding:** Normalize all input to Unicode braille (U+2800-U+28FF) internally
-   regardless of whether the input file uses ASCII braille or Unicode braille.
+   regardless of whether the input file uses ASCII braille or Unicode braille
+   (`BRLInputPipeline`, `parser/input_pipeline.py`) — every real caller uses this
+   class, never a raw file read.
 3. **Relative mode:** All LilyPond output uses `\relative` mode for readability.
 4. **Concert pitch:** Default to concert pitch output; transposing instrument
-   support added in Sprint 5b.
-5. **Restricted LilyPond parser:** The LilyPond → BRF reverse direction (Sprint 9)
-   only needs to parse LilyPond that DottedNotes itself generated, not arbitrary
-   LilyPond written by humans. This keeps the reverse parser tractable.
-6. **No external APIs:** All format conversion is handled internally.
-   No network dependencies for core functionality.
-7. **Error messages:** Always plain text, always meaningful, always screen-reader
-   friendly. Never silent failures.
+   support added in Sprint 5b (`models/transposition.py`).
+5. **Restricted LilyPond parser:** The LilyPond → BRF reverse direction (Sprint 9,
+   not yet started) only needs to parse LilyPond that DottedNotes itself
+   generated, not arbitrary LilyPond written by humans. This keeps the reverse
+   parser tractable.
+6. **No external APIs at runtime:** `dottednotes convert` has no network
+   dependencies. (Sprint 7b's one-time Mutopia corpus analysis, which derived
+   the formatting defaults below, is an offline research script — not something
+   the shipped CLI ever calls.)
+7. **Error messages:** Always plain text, always meaningful, always
+   screen-reader friendly, never silent failures — enforced by
+   `exceptions.py`'s `DottedNotesError` hierarchy, which `cli.py`'s `main()`
+   catches centrally to print one plain-text line and exit non-zero, never a
+   Python traceback (Sprint 7, S7-3).
+8. **Evidence-based formatting, not per-score guessing:** `LilyPondFormatter`
+   (`renderers/lilypond_formatter.py`) picks `\paper{}`/staff-size settings
+   from one of four templates (Solo Piano / Art Song / Chamber / Orchestral),
+   each template's numbers taken from a single curated, well-engraved Mutopia
+   score for that category — not invented, and not a raw corpus average (see
+   `docs/lilypond_conventions.md` for why an average was actively misleading
+   here). Category is auto-detected from staff count/family but can be
+   overridden (`to_lilypond(category_override=...)`).
 
 ---
 
@@ -139,17 +180,26 @@ raw_brl: str               # Unicode braille character U+2800-U+28FF
 note_name: str             # C, D, E, F, G, A, B
 octave: int                # absolute octave number
 duration: Duration
-accidental: Accidental | None
+accidental: Accidental | None = None
+dynamics: list[Dynamic]
 articulations: list[Articulation]
 ornaments: list[Ornament]
+grace_note: GraceNote | None = None
+tie: bool = False
+slur_start: bool = False
+slur_end: bool = False
+slur_bracket_open: bool = False
+slur_bracket_close: bool = False
+fingerings: list[Fingering]
 def to_lilypond() -> str
-def to_braille() -> str    # Sprint 9
+def to_braille() -> str    # Sprint 9 — not yet started, method does not exist yet
 ```
 
 ### Duration
 ```python
 value: int                 # 1, 2, 4, 8, 16, 32, 64
 dots: int                  # augmentation dots (0, 1, or 2)
+is_triplet: bool = False   # 3-in-the-time-of-2 (BANA 8.4); no other tuplet ratios supported
 def to_lilypond() -> str   # e.g. "4." for dotted quarter
 ```
 
@@ -202,33 +252,62 @@ R1*8 = eight measures rest
 ## CLI Design
 
 ```bash
-# Basic conversion
+# Basic conversion (writes .ly to the given path; omit output to print to stdout)
 dottednotes convert input.brf output.ly
 
 # Convert and compile to PDF + MIDI (requires lilypond binary installed)
 dottednotes convert input.brf output.ly --compile
 
-# Convert with verbose output (lists all symbols parsed and any skipped)
+# Convert with a diagnostic trace on stderr: detected encoding, every
+# tokenizer-level token (category + raw braille cell), and validation
+# warnings (e.g. beat-count mismatches) in plain text, one per line.
+# stdout still carries only the rendered .ly, so `... | lilypond -` stays safe.
 dottednotes convert input.brf output.ly --verbose
 
 # Show help
 dottednotes --help
+dottednotes convert --help
 
-# Show version
+# Show version (from installed package metadata, not a source-tree file read)
 dottednotes --version
 ```
+
+Malformed input or a failed `lilypond` compile prints one plain-text
+`Error: ...` line to stderr and exits non-zero — never a Python traceback
+(`exceptions.py`, `cli.py`'s `main()`). A `--format` flag for overriding
+individual formatting settings (paper size, margins, staff size) from the
+command line is planned but not yet implemented (TICKETS.md S7b-10).
 
 ---
 
 ## Testing Strategy
 
-- Unit tests for every model class `to_lilypond()` method
-- Unit tests for encoding detection and normalization
-- Integration tests: parse a .brf fixture → verify Note objects produced
-- Round-trip tests (Sprint 9): BRF → LilyPond → BRF, verify output matches input
-- Primary test fixture: fengyang_flower_drum.brf (developer's own composition,
-  known correct output)
-- Run tests with: `pytest tests/ --cov=dottednotes`
+- Unit tests for every model class `to_lilypond()` method (`test_models.py`,
+  `test_fingering_model.py`, `test_exceptions.py`)
+- Unit tests for encoding detection, normalization, tokenizing, and the solo
+  parser (`test_parser.py`); ensemble/instrument-list parsing has its own
+  files (`test_ensemble_parser.py`, `test_ensemble_integration.py`)
+- CLI tests drive `cli.py`'s `main()` directly via `sys.argv` + `capsys`
+  (`test_cli.py`) — covers `convert`, `--compile`, `--verbose`, `--version`,
+  and both plain-text error paths (missing file, malformed input)
+- Formatting-pipeline tests (`test_lilypond_formatter.py`) include real
+  `lilypond`-binary compile checks per template category, skipped via
+  `shutil.which("lilypond")` when the binary isn't installed — and check the
+  compile *log* for warnings, not just the exit code (a clean exit code does
+  not mean LilyPond was happy with the engraving)
+- Integration tests: parse a real `.brf` fixture end to end and compare
+  against a hand-authored `.ly` ground truth where one exists
+- Round-trip tests (Sprint 9, not yet started): BRF → LilyPond → BRF, verify
+  output matches input
+- Primary test fixture: `fengyang_flower_drum.brf` (developer's own
+  composition, known correct output, per `tests/fixtures/README.md`) — other
+  fixtures with a paired `.ly` ground truth include `children_s_piece.brf`,
+  `fingering_melody.brf`, `g_major_scale.brf`, and `sprint_4_melody.brf`
+- Most real `.brf` fixtures are ASCII-encoded (what a BrailleNotetaker
+  actually exports), not Unicode braille — always load fixtures through
+  `BRLInputPipeline`, never a raw file read, or ASCII content silently fails
+  to tokenize (this exact bug shipped once; see TICKETS.md S7-2)
+- Run tests with: `pytest tests/` (add `--cov=dottednotes` for coverage)
 
 ---
 

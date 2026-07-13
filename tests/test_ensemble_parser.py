@@ -330,3 +330,27 @@ def test_ensemble_parser_raises_braille_parse_error_when_header_has_no_measures(
     header_only = '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
     with pytest.raises(BrailleParseError, match="No parallel systems found"):
         EnsembleParser().parse(header_only)
+
+
+def test_ensemble_parser_skips_title_line_before_instrument_list():
+    # Found via Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl: a
+    # free-text title/attribution line above the real instrument-list
+    # header also tokenizes as a WORD_SIGN (any literary text does), and
+    # if a blank line separates it from the real header, the old
+    # WORD_SIGN-token-presence check would collect the title line as a
+    # fake "instrument", then stop at the blank line -- before ever
+    # reaching the real instrument list. inst_lines collection must
+    # instead require a line to actually parse as a genuine instrument
+    # entry (_parse_line), not merely contain a WORD_SIGN token.
+    title_line = '⠠⠋⠇⠥⠞⠑'  # "Flute" as bare prose -- no WORD_SIGN...END_WORD_SIGN
+    raw = (
+        title_line + '\n'
+        '\n'
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠣⠣⠣⠼⠙⠲\n'
+        '⠁⠀⠀⠜⠋⠇⠄⠐⠹⠱⠫⠻⠀⠐⠳⠪⠺⠹\n'
+        '⠀⠀⠀⠜⠧⠇⠄⠸⠳⠪⠺⠹⠀⠸⠹⠱⠫⠻\n'
+    )
+    score = EnsembleParser().parse(raw)
+    assert [s.name for s in score.staves] == ['Flute', 'Violin']
