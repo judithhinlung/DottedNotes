@@ -5771,6 +5771,174 @@ authorization to publish.
 
 ---
 
+### [ ] S8-5: Raise exception when braille numeral repeats are encountered
+
+**Why:** DottedNotes does not support BANA Section 19 braille numeral repeats due to their layout-specific nature, high parsing complexity (including octave and dynamic modifications, and cross-measure tie resolution), and explicit prohibition in ensemble scores (§33.4.3). Instead of silently ignoring or mis-parsing these symbols, the parser should raise a clear, plain-text error to guide the user.
+
+**Steps:**
+1. Identify the braille symbols and cell patterns used for BANA Section 19 numeral repeats (such as backward-numeral and measure-number repeats, typically involving lower-cell numbers).
+2. Add tokenization/classification in `BrailleTokenizer` and `BrailleParser` for these numeral repeat indicators.
+3. In `BrailleParser`, when a numeral repeat sequence is encountered, raise a descriptive `BrailleParseError` (e.g., "Braille numeral repeats (BANA §19) are not supported.").
+4. Write unit tests in `tests/test_parser.py` with mock input containing numeral repeats to assert that they correctly raise `BrailleParseError` with the expected error message.
+
+**Definition of Done:**
+- [ ] Numeral repeat symbols are detected during parsing.
+- [ ] `BrailleParseError` is raised with a meaningful message when numeral repeats are encountered.
+- [ ] Unit tests verify the exception behavior on numeral repeat inputs.
+
+---
+
+# Sprint 8b: Advanced Braille Parsing Features
+
+Estimated time: 1.5–2 weeks.
+
+**Research basis for this sprint:** Before starting, review the BANA Music Braille Code 2015 tables (Tables 21, 22, 23, 24, 25, 29, 30, 31, 33) and the LilyPond Notation Reference (for pitches, rhythms, expressive marks, vocal music, chord mode, piano pedaling, and string articulations).
+
+---
+
+### [ ] S8b-1: Implement parsing for the Breve (Double Whole Note/Rest)
+
+**Why:** To support early music, classical transcriptions, and choral works that contain double whole notes and double whole rests (breve). DottedNotes' `Duration` model currently only supports durations from whole note (1) down to 128th note.
+
+**Steps:**
+1. Identify the braille representation for a breve note and rest in BANA (typically involves the whole note cell preceded by a duration/breve sign).
+2. Update `src/dottednotes/models/duration.py` to support `breve` (or value 0.5/whole-note factor 2) or custom breve indicator in the duration class.
+3. Update `src/dottednotes/parser/tokenizer.py` and `braille_parser.py` to tokenize and parse the breve symbols for both notes and rests.
+4. Update `Note.to_lilypond()` and `Rest.to_lilypond()` to serialize to LilyPond's `\breve` and `R\breve` (or `r\breve`).
+5. Write unit tests in `tests/test_models.py` and `tests/test_parser.py` for breve notes and rests.
+
+**Definition of Done:**
+- [ ] Breve note cell sequences are successfully tokenized and parsed.
+- [ ] LilyPond output correctly renders `\breve` and `R\breve`.
+- [ ] Unit tests verify parsing and LilyPond rendering of breves.
+
+---
+
+### [ ] S8b-2: Implement parsing for string bowing signs (Up-bow/Down-bow)
+
+**Why:** Bowing signs (down-bow and up-bow) are critical for string instrument execution in chamber and orchestral music. DottedNotes supports multi-staff scores and string instruments, so parsing these symbols is a high priority.
+
+**Steps:**
+1. Add definitions for down-bow (`⠣⠃`) and up-bow (`⠣⠄`) signs to `src/dottednotes/bana_symbols.py`.
+2. Update the tokenizer to classify bowing signs as articulations or a custom bowing category.
+3. Update `BrailleParser` to parse bowing signs immediately preceding a note or chord, appending them to the note's articulations list.
+4. Support doubled bowing signs (where a sign is doubled to indicate it continues).
+5. Update `Note.to_lilypond()` and `Chord.to_lilypond()` to serialize these to LilyPond's `\downbow` and `\upbow`.
+6. Write unit tests in `tests/test_parser.py` and a dedicated integration test.
+
+**Definition of Done:**
+- [ ] Up-bow and down-bow symbols are parsed correctly.
+- [ ] Bowing marks are rendered as `\upbow` and `\downbow` in LilyPond.
+- [ ] Unit tests verify single and doubled bowing marks.
+
+---
+
+### [ ] S8b-3: Implement parsing for damper/sustain pedal signs
+
+**Why:** Sustain pedal down/release commands are essential for piano and keyboard scores. Without them, translated keyboard scores lack pedal engraving, which is standard in printed music.
+
+**Steps:**
+1. Identify the BANA sustain pedal down/release symbols (commonly involving `⠣⠉` and `⠡⠉` or similar cell patterns).
+2. Create a `Pedal` model or add pedal fields to measure/notes.
+3. Update `BrailleParser` to parse pedal down and pedal release symbols. Pedal down typically precedes a note; pedal release follows a note.
+4. Update LilyPond serialization to output `\sustainOn` and `\sustainOff` at correct places.
+5. Write unit tests in `tests/test_parser.py` and verify formatting in a piano-style score.
+
+**Definition of Done:**
+- [ ] Sustain pedal down and release symbols are parsed successfully.
+- [ ] LilyPond compiles with correct `\sustainOn` and `\sustainOff` markings.
+- [ ] Unit tests verify the pedaling state and output format.
+
+---
+
+### [ ] S8b-4: Support chord ties and doubled interval shorthand
+
+**Why:** Real keyboard music and contrapuntal string music contain complex chord shapes with ties and interval doublings. Currently, the parser only handles simple single-note ties or individual in-accords.
+
+**Steps:**
+1. Update `Chord` and `Note` models to support ties for individual chord members (chord ties, e.g., `<c e g> ~ <c e g>`).
+2. Implement parsing for doubled intervals (BANA Table 31 shorthand where an interval sign is doubled to mean "continue this interval for subsequent notes").
+3. Update `BrailleParser` to track doubled interval state and apply it to subsequent notes until terminated.
+4. Ensure `to_lilypond()` on `Chord` correctly places the tie symbol `~` within or after chord brackets as appropriate.
+5. Add tests in `tests/test_parser.py` asserting doubled intervals expand correctly.
+
+**Definition of Done:**
+- [ ] Doubled intervals are correctly parsed and expanded to standard chords.
+- [ ] Chord ties serialize correctly to LilyPond syntax.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S8b-5: Implement parsing for chord symbols (Lead Sheets)
+
+**Why:** Many popular songs, hymnals, and jazz lead sheets feature chord symbols (e.g. C, G7, Am) written above or inline with the melody. Parsing these allows DottedNotes to support popular lead sheets.
+
+**Steps:**
+1. Define the braille symbols for chord facsimile symbols in `bana_symbols.py` (BANA Table 23).
+2. Implement a parser component or staff layout that detects a chord symbols track/line.
+3. Convert these symbols to LilyPond's `\chordmode` block, rendering them as a `ChordNames` staff above the melody.
+4. Write tests in `tests/test_parser.py` verifying melody + chord symbol alignment.
+
+**Definition of Done:**
+- [ ] Chord symbol signs are parsed into a dedicated `ChordNames` structure.
+- [ ] LilyPond output contains a working `\new ChordNames \chordmode { ... }` track.
+- [ ] Tests verify correct alignment and parsing of chords like maj, min, 7th, and dim.
+
+---
+
+### [ ] S8b-6: Implement parsing for glissandi and wind mute signs
+
+**Why:** Glissandi and mute signs are common expressive markings for brass, woodwinds, and strings.
+
+**Steps:**
+1. Identify glissando and wind mute signs in BANA (Chapter 21 / Table 30).
+2. Update the tokenizer and parser to parse glissando indicators between notes, and mute/unmute indicators.
+3. Render glissandi as `\glissando` in LilyPond.
+4. Render mutes as text markups (e.g., `^"mute"` / `^"con sord."`) or appropriate LilyPond mute articulations.
+5. Write unit tests for both features.
+
+**Definition of Done:**
+- [ ] Glissandi and wind mute signs are parsed and represented in the model.
+- [ ] LilyPond output contains correct `\glissando` and mute markups.
+- [ ] Tests verify correct output.
+
+---
+
+### [ ] S8b-7: Support Section-by-Section (Paragraph) format parsing
+
+**Why:** BANA Chapter 33 allows music to be formatted in paragraph-style sequential blocks (Section-by-Section) instead of line-by-line parallel systems. Supporting this format allows parsing of older keyboard or vocal scores that use paragraph layouts.
+
+**Steps:**
+1. Implement a format detector in `EnsembleParser` to distinguish Section-by-Section format from parallel systems.
+2. In Section-by-Section format, parse sequential paragraphs (blocks of measures) for each voice/part and concatenate them under the correct staff.
+3. Wire the parsed sequential parts back to the unified `Score` model.
+4. Write unit tests using section-by-section mock BRF files.
+
+**Definition of Done:**
+- [ ] The parser auto-detects and successfully parses Section-by-Section formatted files.
+- [ ] Unified `Score` objects are constructed correctly from paragraph blocks.
+- [ ] Unit tests cover multiple staves in paragraph layout.
+
+---
+
+### [ ] S8b-8: Support strophic songs and multi-verse vocal formats
+
+**Why:** Vocal music (hymns, folk songs) frequently features multiple verses of lyrics under the same melody, or strophic structures. Currently, the lyric parser does not align multiple verses or handle refrain markings.
+
+**Steps:**
+1. Extend `EnsembleParser` / `BrailleParser` to parse multiple lyric lines (verses) associated with a single music line (BANA Chapter 26).
+2. Parse verse numbers and handle refrains.
+3. Map each verse's syllables to the same note sequence in the model.
+4. Update the LilyPond generator to output multiple `\new Lyrics \lyricsto ...` blocks.
+5. Write integration tests for multi-verse vocal scores.
+
+**Definition of Done:**
+- [ ] Multiple verses of lyrics are parsed and aligned to a single melody.
+- [ ] LilyPond output renders multiple verse lines cleanly under the music.
+- [ ] Integration tests pass.
+
+---
+
 # Sprint 9: Reverse Direction — LilyPond to BRF
 
 Estimated time: 1.5–2 weeks.
