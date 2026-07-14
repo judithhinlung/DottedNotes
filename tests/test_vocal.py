@@ -173,3 +173,73 @@ def test_vocal_test_fixture_compiles_cleanly(tmp_path: Path):
     assert '\\new Lyrics \\lyricsto "vocals_soprano"' in ly_output
 
     _compile_and_check_no_warnings(ly_output, tmp_path, "vocal_test")
+
+
+def test_parse_strophic_multiverse_lyrics_and_refrain():
+    # Soprano instrument abbreviation is ⠜⠎⠄ (\x1cs.)
+    # We will provide:
+    # Verse 1 text: ⠶⠼⠁⠶⠀⠠⠓⠕⠤⠇⠽ (brackets around number 1, then "Ho-ly")
+    # Verse 2 text: ⠶⠼⠃⠶⠀⠠⠛⠇⠕⠤⠗⠽ (brackets around number 2, then "Glo-ry")
+    # Soprano music line
+    # Then a second system representing a refrain:
+    # Refrain text: ⠠⠗⠑⠋⠗⠁⠊⠝⠀⠠⠁⠤⠍⠑⠝ ("Refrain A-men")
+    # Soprano music line
+    brf_text = (
+        "⠠⠎⠕⠏⠗⠁⠝⠕⠀⠀⠀⠜⠎⠄\n"
+        "\n"
+        "⠼⠁\n"
+        "⠶⠼⠁⠶⠀⠠⠓⠕⠤⠇⠽\n"
+        "⠶⠼⠃⠶⠀⠠⠛⠇⠕⠤⠗⠽\n"
+        "⠜⠎⠄⠀⠐⠽⠉⠐⠵⠐⠯\n"
+        "\n"
+        "⠼⠃\n"
+        "⠠⠗⠑⠋⠗⠁⠊⠝⠀⠠⠁⠤⠍⠑⠝\n"
+        "⠜⠎⠄⠀⠐⠽⠉⠐⠵⠐⠯\n"
+    )
+    
+    score = EnsembleParser().parse(brf_text)
+    assert len(score.staves) == 1
+    staff = score.staves[0]
+    
+    assert staff.name == "Soprano"
+    assert len(staff.verses) == 2
+    
+    # Verse 1: "Ho --", "ly", "A --", "men"
+    # Verse 2: "Glo --", "ry", "A --", "men"
+    # (Since system 2 is a single refrain line, it is replicated across all verses)
+    assert staff.verses[0] == ['\\set stanza = "1. " Ho --', 'ly', '\\set stanza = "Refrain. " A --', 'men']
+    assert staff.verses[1] == ['\\set stanza = "2. " Glo --', 'ry', '\\set stanza = "Refrain. " A --', 'men']
+    
+    assert staff.verse_prefixes == ["1.", "2."]
+    
+    ly_output = score.to_lilypond()
+    
+    # Verify that the stanzas and stacked lyrics are output correctly
+    assert '\\set stanza = "1. " Ho -- ly \\set stanza = "Refrain. " A -- men' in ly_output
+    assert '\\set stanza = "2. " Glo -- ry \\set stanza = "Refrain. " A -- men' in ly_output
+    assert '\\new Lyrics \\lyricsto "vocals_soprano"' in ly_output
+    assert ly_output.count('\\new Lyrics \\lyricsto') == 2
+
+
+def test_parse_strophic_with_word_number_verse_prefixes():
+    # Let's test a plain number sign like ⠼⠁ (without brackets) at the start of a verse line.
+    # ⠼⠁⠀⠠⠓⠕⠤⠇⠽ -> 1. Ho-ly
+    # ⠼⠃⠀⠠⠛⠇⠕⠤⠗⠽ -> 2. Glo-ry
+    brf_text = (
+        "⠠⠎⠕⠏⠗⠁⠝⠕⠀⠀⠀⠜⠎⠄\n"
+        "\n"
+        "⠼⠁\n"
+        "⠼⠁⠀⠠⠓⠕⠤⠇⠽\n"
+        "⠼⠃⠀⠠⠛⠇⠕⠤⠗⠽\n"
+        "⠜⠎⠄⠀⠐⠽⠉⠐⠵⠐⠯\n"
+    )
+    score = EnsembleParser().parse(brf_text)
+    staff = score.staves[0]
+    
+    assert staff.verse_prefixes == ["1.", "2."]
+    assert staff.verses[0] == ['\\set stanza = "1. " Ho --', 'ly']
+    assert staff.verses[1] == ['\\set stanza = "2. " Glo --', 'ry']
+    
+    ly_output = score.to_lilypond()
+    assert '\\set stanza = "1. " Ho -- ly' in ly_output
+    assert '\\set stanza = "2. " Glo -- ry' in ly_output

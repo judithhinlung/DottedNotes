@@ -23,6 +23,8 @@ class Staff:
     clef: Clef | None = None
     tempo: TextMarking | None = None
     lyrics: list[str] = field(default_factory=list)
+    verses: list[list[str]] = field(default_factory=list)
+    verse_prefixes: list[str | None] = field(default_factory=list)
 
 
     def add_measure(self, measure: Measure) -> None:

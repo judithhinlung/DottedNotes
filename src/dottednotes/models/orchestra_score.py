@@ -182,8 +182,13 @@ class OrchestraScore(Score):
                 lines.append(f'{indent}    \\set Staff.midiInstrument = "{midi_name}"')
             lines.append(f'{indent}    \\{var_name}')
             lines.append(f'{indent}  }}')
-            lyrics_content = " ".join(staff.lyrics)
-            lines.append(f'{indent}  \\new Lyrics \\lyricsto "{voice_name}" {{ {lyrics_content} }}')
+            verses = staff.verses if staff.verses else [staff.lyrics]
+            for v_idx, v in enumerate(verses):
+                prefix_str = ""
+                if staff.verse_prefixes and v_idx < len(staff.verse_prefixes) and staff.verse_prefixes[v_idx]:
+                    prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "
+                lyrics_content = prefix_str + " ".join(v)
+                lines.append(f'{indent}  \\new Lyrics \\lyricsto "{voice_name}" {{ {lyrics_content} }}')
             lines.append(f'{indent}>>')
         else:
             lines.append(f'{indent}}} {{')

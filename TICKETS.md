@@ -5851,7 +5851,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-4: Support chord ties and doubled interval shorthand
+### [x] S8b-4: Support chord ties and doubled interval shorthand
 
 **Why:** Real keyboard music and contrapuntal string music contain complex chord shapes with ties and interval doublings. Currently, the parser only handles simple single-note ties or individual in-accords.
 
@@ -5886,7 +5886,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-6: Implement parsing for glissandi and wind mute signs
+### [x] S8b-6: Implement parsing for glissandi and wind mute signs
 
 **Why:** Glissandi and mute signs are common expressive markings for brass, woodwinds, and strings.
 
@@ -5899,12 +5899,17 @@ Estimated time: 1.5–2 weeks.
 
 **Definition of Done:**
 - [x] Glissandi and wind mute signs are parsed and represented in the model.
-- [ ] LilyPond output contains correct `\glissando` and mute markups.
+- [x] LilyPond output contains correct `\glissando` and mute markups.
 - [x] Tests verify correct output.
 
 ---
 
-### [ ] S8b-7: Support Section-by-Section (Paragraph) format parsing
+### [Won't Do] S8b-7: Support Section-by-Section (Paragraph) format parsing
+
+**Why not:** Section-by-Section (paragraph) format is historical and no longer recommended by BANA. Not supporting it.
+
+<details>
+<summary>Original ticket text</summary>
 
 **Why:** BANA Chapter 33 allows music to be formatted in paragraph-style sequential blocks (Section-by-Section) instead of line-by-line parallel systems. Supporting this format allows parsing of older keyboard or vocal scores that use paragraph layouts.
 
@@ -5918,6 +5923,8 @@ Estimated time: 1.5–2 weeks.
 - [ ] The parser auto-detects and successfully parses Section-by-Section formatted files.
 - [ ] Unified `Score` objects are constructed correctly from paragraph blocks.
 - [ ] Unit tests cover multiple staves in paragraph layout.
+
+</details>
 
 ---
 
@@ -5936,6 +5943,55 @@ Estimated time: 1.5–2 weeks.
 - [ ] Multiple verses of lyrics are parsed and aligned to a single melody.
 - [ ] LilyPond output renders multiple verse lines cleanly under the music.
 - [ ] Integration tests pass.
+
+---
+
+### [ ] S8b-9: Compose a lead-sheet test fixture + real-compile integration tests
+
+**Why:** S8b-5 (lead-sheet chord symbols) only has unit- and parser-level tests today — string-equality checks in `test_chord_symbols.py` on isolated chord-symbol lines, never a full hand-authored `.brf` run through the real `lilypond` binary. This can't be folded into a combined fixture with the other S8b features (see S8b-10): a lead sheet is structurally just a melody line paired with a chord-symbol line (BANA Sec. 27's two-line parallel, `parse_lead_sheet()`), invoked via its own explicit code path (`--category "Lead Sheet"`, not the ensemble/solo parser) — there's no staff to hang bowing, pedal, breve, or glissando/mute off of in that format, so it needs its own fixture rather than a section of a larger one.
+
+**Fixture requirements** (developer-authored `.brf`, added to `tests/fixtures/` with an entry in `tests/fixtures/README.md` per the existing table format):
+1. Strict melody/chords two-line alternation starting at physical line 0, per `parse_lead_sheet()`'s documented scope (no header lines, single non-ensemble melody staff).
+2. Chord symbols covering, at minimum, maj, min, 7th, and dim (per existing `test_chord_symbols.py` coverage) plus at least one slash/bass-note chord (e.g. `G/D`), so the fixture exercises more than the simplest case.
+3. Enough melody notes/measures for the chord symbols to align meaningfully above more than one segment.
+4. Developer provides (or confirms, if drafted first) the hand-authored ground-truth `.ly` output, same as `fengyang_flower_drum.brf`.
+
+**Planned integration tests** (new file, e.g. `tests/test_lead_sheet_integration.py`), to be written once the fixture text and ground truth are confirmed:
+- `test_lead_sheet_fixture_parses_without_warnings` — `parse_lead_sheet()` end to end, asserts no validation warnings.
+- `test_lead_sheet_fixture_matches_ground_truth_ly` — compares generated `to_lilypond()` output against the confirmed ground-truth `.ly`.
+- `test_lead_sheet_fixture_compiles_cleanly` — reuses the `shutil.which("lilypond")` skip-if guard and the `_compile_and_check_no_warnings` helper (or an equivalent local copy) to run the real `lilypond` binary and assert a clean log, not just exit code 0.
+- `test_cli_convert_lead_sheet_fixture_end_to_end` — drives the fixture through the actual CLI entry point (`dottednotes convert fixture.brf --category "Lead Sheet"`), complementing the existing inline-string CLI test (`test_cli.py::test_cli_convert_lead_sheet_category_routes_to_lead_sheet_parser`) with a real file and ground truth.
+
+**Definition of Done:**
+- [ ] Fixture `.brf` composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [ ] Ground-truth `.ly` output confirmed by the developer.
+- [ ] `tests/test_lead_sheet_integration.py` written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
+
+---
+
+### [ ] S8b-10: Compose a combined test fixture for breve/bowing/pedal/chord-tie/glissando/mute + real-compile integration tests
+
+**Why:** S8b-1 through S8b-4 and S8b-6 (breve, bowing, sustain pedal, chord ties, glissando/mute) each have unit- and parser-level tests only — string-equality checks on `to_lilypond()` output. None of them are exercised together in one real, hand-authored `.brf` the way `fengyang_flower_drum.brf` anchors earlier sprints, and none are run through the real `lilypond` binary and checked for a clean compile log (the `_compile_and_check_no_warnings` pattern already established in `test_lilypond_formatter.py` and `test_vocal.py`). A feature can pass every existing test and still emit LilyPond that's syntactically wrong in combination with another feature (e.g. a glissando spanning a pedal marking, or a chord tie on a bowed chord) — nothing today would catch that. Lead-sheet chord symbols (S8b-5) are covered by their own fixture instead (S8b-9) since that format can't host these staff-based features. S8b-8 (strophic/multi-verse) is also excluded from this fixture's scope since it's still in progress as of this writing; fold it in (or add a further fixture) once it lands.
+
+**Fixture requirements** (developer-authored, single or small set of `.brf` files, added to `tests/fixtures/` with an entry in `tests/fixtures/README.md` per the existing table format):
+1. **Breve** (S8b-1): at least one breve note and one breve rest.
+2. **Bowing** (S8b-2): both up-bow and down-bow marks, including at least one doubled (carried) bowing sign across 3+ notes, on a string instrument part.
+3. **Sustain pedal** (S8b-3): a pedal-down/release pair, plus one pedal "change" (release+depress on the same note) on a piano part.
+4. **Chord ties + doubled intervals** (S8b-4): at least one tied chord pair, one doubled chord-tie carry across 3+ chords, and one doubled-interval (octave or other) carry — including a case where a chord tie occurs *inside* an active interval-doubling carry (mirrors `test_chord_tie_does_not_interrupt_interval_doubling_carry`).
+5. **Glissando + mute/open** (S8b-6): a glissando between two notes, and a stopped/open pair on a wind or string part — ideally the same instrument used for bowing, since `⠣⠃` is instrument-family-dependent (bow vs. mute) and a combined fixture should confirm both readings resolve correctly from real context rather than an isolated synthetic snippet.
+6. Multi-staff/multi-instrument (at least piano + one bowed string + one wind), so bowing, mute, and pedal each land on the instrument family they're valid for.
+7. Developer provides (or confirms, if drafted first) the hand-authored ground-truth `.ly` output, same as `fengyang_flower_drum.brf` — this is what makes it a real integration fixture rather than another synthetic snippet.
+
+**Planned integration tests** (new file, e.g. `tests/test_sprint8b_integration.py`), to be written once the fixture text and ground truth are confirmed:
+- `test_sprint8b_fixture_parses_without_warnings` — parses the fixture end to end, asserts no beat-count/validation warnings are raised.
+- `test_sprint8b_fixture_matches_ground_truth_ly` — compares generated `to_lilypond()` output against the confirmed ground-truth `.ly` (same pattern as `test_children_s_piece` / `fengyang_flower_drum` ground-truth tests).
+- `test_sprint8b_fixture_compiles_cleanly` — reuses the `shutil.which("lilypond")` skip-if guard and the `_compile_and_check_no_warnings` helper (or an equivalent local copy) to run the real `lilypond` binary and assert a clean log, not just exit code 0.
+- `test_sprint8b_fixture_renders_expected_markup` — asserts the compiled `.ly` text contains each feature's expected LilyPond token at least once (`\breve`, `\downbow`/`\upbow`, `\sustainOn`/`\sustainOff`, chord tie `~` inside `<...>`, `\glissando`, `\stopped`/`\open`) so a future regression that silently drops one feature while the others still compile is caught.
+
+**Definition of Done:**
+- [ ] Fixture `.brf` file(s) composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [ ] Ground-truth `.ly` output confirmed by the developer.
+- [ ] `tests/test_sprint8b_integration.py` written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
 
 ---
 

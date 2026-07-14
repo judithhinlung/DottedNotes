@@ -323,8 +323,8 @@ class ParallelSystem:
         # until the next abbreviated line arrives and tells us (via
         # `word_lines`, keyed the same way as `.parts`) which vocal
         # instrument it belongs to.
-        self.pending_word_line: str | None = None
-        self.word_lines: dict[str, str] = {}
+        self.pending_word_lines: list[str] = []
+        self.word_lines: dict[str, list[str]] = {}
 
     def add_line(
         self,
@@ -334,14 +334,14 @@ class ParallelSystem:
     ) -> bool:
         """Process a line within the system. Returns True if successfully handled.
 
-        `instruments` (when supplied) resolves a pending word line: once the
+        `instruments` (when supplied) resolves pending word lines: once the
         next abbreviated line arrives, if its instrument is
-        `InstrumentFamily.VOCAL`, the stashed line becomes that instrument's
-        lyrics (`word_lines`); otherwise it's dropped (not a real word line).
+        `InstrumentFamily.VOCAL`, the stashed lines become that instrument's
+        lyrics (`word_lines`); otherwise they're dropped.
         """
         abbrev_cells, music_cells = extract_line_abbreviation(line_str)
         if abbrev_cells is not None:
-            if self.pending_word_line is not None:
+            if self.pending_word_lines:
                 if instruments is not None:
                     prefix, digits = decode_instrument_abbreviation(abbrev_cells)
                     matched = match_instruments(prefix, digits, instruments)
@@ -351,19 +351,19 @@ class ParallelSystem:
                         if category_override is not None and category_override not in ("Art Song", "Vocal"):
                             is_vocal = False
                     if is_vocal:
-                        self.word_lines[abbrev_cells] = self.pending_word_line
-                self.pending_word_line = None
+                        self.word_lines[abbrev_cells] = list(self.pending_word_lines)
+                self.pending_word_lines.clear()
             self.parts[abbrev_cells] = music_cells
             self.last_abbrev = abbrev_cells
             return True
         elif self.last_abbrev is not None:
             self.parts[self.last_abbrev] += " " + music_cells.lstrip('⠀ ')
             return True
-        elif self.pending_word_line is None and music_cells.strip('⠀ '):
+        elif music_cells.strip('⠀ '):
             # No abbreviation yet established for this system -- this is a
             # candidate word line (Sec. 35.1), stashed until the next line
-            # resolves it (see EnsembleParser.parse()'s parallel_lines loop).
-            self.pending_word_line = music_cells.lstrip('⠀ ')
+            # resolves it.
+            self.pending_word_lines.append(music_cells.lstrip('⠀ '))
             return True
         return False
 
@@ -476,6 +476,52 @@ def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
             syllables.append((part, not is_last))
             
     return syllables
+
+
+def clean_and_parse_verse_number(word: str) -> str | None:
+    # Look for number sign
+    idx = word.find('#')
+    if idx == -1:
+        # Check if it is a plain digit
+        digits = "".join(c for c in word if c.isdigit())
+        if digits and digits == word.strip('.:,;()[]'):
+            return digits
+        return None
+        
+    digit_map = {'a': '1', 'b': '2', 'c': '3', 'd': '4', 'e': '5', 'f': '6', 'g': '7', 'h': '8', 'i': '9', 'j': '0'}
+    translated = ""
+    i = idx + 1
+    while i < len(word):
+        char = word[i].lower()
+        if char in digit_map:
+            translated += digit_map[char]
+            i += 1
+        else:
+            break
+            
+    if translated.isdigit():
+        return translated
+    return None
+
+
+def extract_stanza_prefix(syllables: list[tuple[str, bool]]) -> tuple[str | None, list[tuple[str, bool]]]:
+    if not syllables:
+        return None, syllables
+        
+    first_syl, has_hyphen = syllables[0]
+    # Stanza prefixes do not have a hyphen at the end.
+    if has_hyphen:
+        return None, syllables
+        
+    verse_num = clean_and_parse_verse_number(first_syl)
+    if verse_num:
+        return f"{verse_num}.", syllables[1:]
+        
+    cleaned = first_syl.strip('.:,;()[]')
+    if cleaned.lower() in ('refrain', 'chorus', 'ref', 'cho'):
+        return f"{cleaned}.", syllables[1:]
+        
+    return None, syllables
 
 
 class EnsembleParser:
@@ -596,7 +642,9 @@ class EnsembleParser:
                 current_system = None
                 continue
 
-            m_num, remaining = extract_measure_number(line)
+            m_num = None
+            if current_system is None or len(current_system.parts) > 0:
+                m_num, remaining = extract_measure_number(line)
             if m_num is not None:
                 group_boundaries = None
                 group_systems = []
@@ -618,6 +666,7 @@ class EnsembleParser:
             elif (
                 line[0] not in ('⠀', ' ')
                 and extract_line_abbreviation(line)[0] is None
+                and (current_system is None or len(current_system.parts) > 0)
             ):
                 # BANA Sec. 35.9: measure numbers are commonly omitted
                 # entirely in vocal music ("the word text serving as the
@@ -837,20 +886,45 @@ class EnsembleParser:
                 # A word line (Sec. 35.1) was stashed on `sys.word_lines`,
                 # keyed by the same abbreviation as this instrument's own
                 # `.parts` music-line entry (see ParallelSystem.add_line).
-                lyric_chunks = []
+                max_verses = 0
                 for sys in systems:
                     for key in sys.parts:
                         prefix, digits = decode_instrument_abbreviation(key)
                         if inst.abbreviation.lower() == prefix.lower():
                             if not digits or inst.part_number in digits:
                                 if key in sys.word_lines:
-                                    lyric_chunks.append(sys.word_lines[key])
+                                    max_verses = max(max_verses, len(sys.word_lines[key]))
                                 break
 
-                if lyric_chunks:
-                    lyric_cells_str = " ".join(lyric_chunks)
-                    syllables = parse_lyrics(lyric_cells_str)
-                    
+                verse_syllables_list = [[] for _ in range(max_verses)]
+                verses_prefixes = [None] * max_verses
+                has_any_lyrics = False
+                for sys in systems:
+                    for key in sys.parts:
+                        prefix, digits = decode_instrument_abbreviation(key)
+                        if inst.abbreviation.lower() == prefix.lower():
+                            if not digits or inst.part_number in digits:
+                                if key in sys.word_lines:
+                                    chunks = sys.word_lines[key]
+                                    has_any_lyrics = True
+                                    if len(chunks) == 1 and max_verses > 1:
+                                        chunks = [chunks[0]] * max_verses
+                                    for v_idx in range(max_verses):
+                                        chunk = chunks[v_idx] if v_idx < len(chunks) else ""
+                                        if not chunk.strip():
+                                            continue
+                                        syllables = parse_lyrics(chunk)
+                                        prefix_val, remaining_syllables = extract_stanza_prefix(syllables)
+                                        if prefix_val is not None:
+                                            if verses_prefixes[v_idx] is None:
+                                                verses_prefixes[v_idx] = prefix_val
+                                            if remaining_syllables:
+                                                first_syl, has_hyphen = remaining_syllables[0]
+                                                remaining_syllables[0] = (f"\\set stanza = \"{prefix_val} \" {first_syl}", has_hyphen)
+                                        verse_syllables_list[v_idx].extend(remaining_syllables)
+                                break
+
+                if has_any_lyrics:
                     # Flatten pitched elements of the staff
                     pitched_elements = []
                     
@@ -895,26 +969,34 @@ class EnsembleParser:
                     if current_group:
                         groups.append(current_group)
 
-                    # Map syllables to note groups 1-to-1
-                    mapped_lyrics = []
-                    num_mappings = min(len(syllables), len(groups))
-                    if len(syllables) != len(groups):
-                        warnings.warn(
-                            f"{inst.name}: {len(syllables)} lyric syllable(s) "
-                            f"but {len(groups)} note/slur-group(s) -- lyrics "
-                            "will be misaligned past the shorter of the two. "
-                            "Check for a missing syllable or an extra/missing "
-                            "syllabic slur.",
-                            stacklevel=2,
-                        )
-                    for idx in range(num_mappings):
-                        syllable, has_hyphen = syllables[idx]
-                        ly_syllable = syllable
-                        if has_hyphen:
-                            ly_syllable += " --"
-                        mapped_lyrics.append(ly_syllable)
+                    mapped_verses = []
+                    for v_idx in range(max_verses):
+                        syllables = verse_syllables_list[v_idx]
                         
-                    staff.lyrics = mapped_lyrics
+                        mapped_lyrics = []
+                        num_mappings = min(len(syllables), len(groups))
+                        if len(syllables) != len(groups):
+                            warnings.warn(
+                                f"{inst.name} (Verse {v_idx+1}): {len(syllables)} lyric syllable(s) "
+                                f"but {len(groups)} note/slur-group(s) -- lyrics "
+                                "will be misaligned past the shorter of the two. "
+                                "Check for a missing syllable or an extra/missing "
+                                "syllabic slur.",
+                                stacklevel=2,
+                            )
+                        for idx in range(num_mappings):
+                            syllable, has_hyphen = syllables[idx]
+                            ly_syllable = syllable
+                            if has_hyphen:
+                                ly_syllable += " --"
+                            mapped_lyrics.append(ly_syllable)
+                            
+                        mapped_verses.append(mapped_lyrics)
+                        
+                    if mapped_verses:
+                        staff.lyrics = mapped_verses[0]
+                        staff.verses = mapped_verses
+                        staff.verse_prefixes = verses_prefixes
 
         score = OrchestraScore()
         for inst in instruments:

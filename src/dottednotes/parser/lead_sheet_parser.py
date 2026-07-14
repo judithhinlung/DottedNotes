@@ -7,11 +7,11 @@ parallel must begin a new segment."
 Scope: this module assumes strict alternation starting at physical line 0
 (melody, chords, melody, chords, ...) with no header lines above the first
 melody line, and a single (non-ensemble, non-chorded) melody staff --
-`BrailleParseError` is raised for anything else rather than guessing. Wiring
-this into the CLI's format auto-detection (`dottednotes convert`) is a
-follow-up; there is no unambiguous structural marker (unlike the ensemble
-format's §33.2 instrument-list header) to detect a lead sheet from raw
-content alone, so callers must invoke `parse_lead_sheet()` explicitly.
+`BrailleParseError` is raised for anything else rather than guessing. There
+is no unambiguous structural marker (unlike the ensemble format's §33.2
+instrument-list header) to detect a lead sheet from raw content alone, so
+callers must invoke this explicitly -- `dottednotes convert` does so via
+`--category "Lead Sheet"` (see `cli.py`'s `_parse_score()`).
 """
 
 from __future__ import annotations

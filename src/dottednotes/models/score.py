@@ -186,13 +186,20 @@ class Score:
                 relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
                 transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
                 voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
-                lyrics_content = " ".join(staff.lyrics)
+                lyrics_lines = []
+                verses = staff.verses if staff.verses else [staff.lyrics]
+                for v_idx, v in enumerate(verses):
+                    prefix_str = ""
+                    if staff.verse_prefixes and v_idx < len(staff.verse_prefixes) and staff.verse_prefixes[v_idx]:
+                        prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "
+                    lyrics_content = prefix_str + " ".join(v)
+                    lyrics_lines.append(f"  \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}")
                 body = [
                     "\\new Staff <<",
                     f"  \\new Voice = \"{voice_name}\" {{",
                     *transposed,
                     "  }",
-                    f"  \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}",
+                    *lyrics_lines,
                     ">>"
                 ]
             elif self.chord_names is not None:
@@ -236,13 +243,20 @@ class Score:
                     ]
                     transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
                     voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
-                    lyrics_content = " ".join(staff.lyrics)
+                    lyrics_lines = []
+                    verses = staff.verses if staff.verses else [staff.lyrics]
+                    for v_idx, v in enumerate(verses):
+                        prefix_str = ""
+                        if staff.verse_prefixes and v_idx < len(staff.verse_prefixes) and staff.verse_prefixes[v_idx]:
+                            prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "
+                        lyrics_content = prefix_str + " ".join(v)
+                        lyrics_lines.append(f"  \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}")
                     block_lines = [
                         "\\new Staff <<",
                         f"  \\new Voice = \"{voice_name}\" {{",
                         *transposed,
                         "  }",
-                        f"  \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}",
+                        *lyrics_lines,
                         ">>"
                     ]
                 else:
@@ -270,12 +284,17 @@ class Score:
                         relative_block.append("      }")
                         transposed = self._wrap_transpose(staff, relative_block, '      ', concert_pitch)
                         voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
-                        lyrics_content = " ".join(staff.lyrics)
                         block_lines.append("  \\new Staff <<")
                         block_lines.append(f"    \\new Voice = \"{voice_name}\" {{")
                         block_lines.extend(transposed)
                         block_lines.append("    }")
-                        block_lines.append(f"    \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}")
+                        verses = staff.verses if staff.verses else [staff.lyrics]
+                        for v_idx, v in enumerate(verses):
+                            prefix_str = ""
+                            if staff.verse_prefixes and v_idx < len(staff.verse_prefixes) and staff.verse_prefixes[v_idx]:
+                                prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "
+                            lyrics_content = prefix_str + " ".join(v)
+                            block_lines.append(f"    \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}")
                         block_lines.append("  >>")
                     else:
                         block_lines.append("  \\new Staff {")
