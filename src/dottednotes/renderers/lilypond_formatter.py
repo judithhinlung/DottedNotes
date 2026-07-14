@@ -36,6 +36,18 @@ class FormattingSettings:
       - padding: 5.0
       - short_instrument_names: True
       - source_citation: ftp/MozartWA/KV550/kv550-1/kv550-1.ly
+    - Lead Sheet: NOT derived from a Mutopia anchor (S8b-5 follow-up) --
+      Mutopia's corpus is overwhelmingly classical/public-domain and, after
+      checking Folk/Jazz/Hymn+Guitar styles, contains no piece using
+      \\chordmode/\\new ChordNames to anchor against. Reuses Solo Piano's
+      values verbatim as a documented placeholder rather than an invented
+      citation; see docs/lilypond_conventions.md.
+      - staff_size: 20.0 pt
+      - margin_mm: 20.0 mm
+      - basic_distance: 12.0
+      - padding: 2.0
+      - short_instrument_names: False
+      - source_citation: none -- see docstring above
     """
     category: str
     staff_size: float
@@ -84,6 +96,21 @@ class LilyPondFormatter:
             system_system_spacing_padding=5.0,
             short_instrument_names=True,
             source_citation="ftp/MozartWA/KV550/kv550-1/kv550-1.ly",
+        ),
+        "Lead Sheet": FormattingSettings(
+            category="Lead Sheet",
+            staff_size=20.0,
+            margin_mm=20.0,
+            system_system_spacing_basic_distance=12.0,
+            system_system_spacing_padding=2.0,
+            short_instrument_names=False,
+            source_citation=(
+                "No Mutopia anchor found -- chord-symbol lead sheets are a "
+                "20th-century popular/jazz convention not present in Mutopia's "
+                "classical-dominated corpus in \\chordmode/ChordNames form "
+                "(checked Folk/Jazz/Hymn+Guitar styles, S8b-5 follow-up). "
+                "Reusing Solo Piano's values as a documented placeholder."
+            ),
         ),
     }
 

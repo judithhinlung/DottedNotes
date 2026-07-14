@@ -78,6 +78,8 @@ DottedNotes/
 │       │   ├── ornament.py      # Ornament, OrnamentType, GraceNote
 │       │   ├── fingering.py     # Fingering (basic/change/alternative)
 │       │   ├── chord.py         # Chord class
+│       │   ├── chord_symbol.py  # ChordSymbol (BANA Table 23 lead-sheet chord symbols)
+│       │   ├── chord_names.py   # ChordNamesTrack (rhythm-aligned \chordmode entries)
 │       │   ├── in_accord.py     # InAccord (multi-voice BANA "in accord")
 │       │   ├── measure.py       # Measure class
 │       │   ├── measure_repeat.py # MeasureRepeat (whole-measure repeat sign)
@@ -96,6 +98,8 @@ DottedNotes/
 │       │   ├── input_pipeline.py   # BRLInputPipeline: ASCII/Unicode braille detection + normalization
 │       │   ├── tokenizer.py        # BrailleTokenizer, BrailleToken
 │       │   ├── braille_parser.py   # BrailleParser (main solo-score parser)
+│       │   ├── chord_symbol_parser.py # parse_chord_symbol_line (BANA §23/Table 23)
+│       │   ├── lead_sheet_parser.py   # parse_lead_sheet (BANA §27 two-line lead-sheet parallel)
 │       │   ├── ensemble_parser.py  # EnsembleParser (BANA §33 instrument-list header + parallel systems)
 │       │   └── instrument_list.py  # parse_instrument_list, resolve_abbreviation (Table 29)
 │       └── renderers/
@@ -107,6 +111,7 @@ DottedNotes/
 │   ├── test_parser.py
 │   ├── test_ensemble_parser.py
 │   ├── test_ensemble_integration.py
+│   ├── test_chord_symbols.py     # BANA §23/27 chord symbols + lead-sheet alignment (S8b-5)
 │   ├── test_fingering_model.py
 │   ├── test_fingering_parser.py
 │   ├── test_fingering_integration.py
@@ -157,11 +162,15 @@ DottedNotes/
    Python traceback (Sprint 7, S7-3).
 8. **Evidence-based formatting, not per-score guessing:** `LilyPondFormatter`
    (`renderers/lilypond_formatter.py`) picks `\paper{}`/staff-size settings
-   from one of four templates (Solo Piano / Art Song / Chamber / Orchestral),
-   each template's numbers taken from a single curated, well-engraved Mutopia
-   score for that category — not invented, and not a raw corpus average (see
-   `docs/lilypond_conventions.md` for why an average was actively misleading
-   here). Category is auto-detected from staff count/family but can be
+   from one of five templates (Solo Piano / Art Song / Chamber / Orchestral /
+   Lead Sheet), each template's numbers taken from a single curated,
+   well-engraved Mutopia score for that category — not invented, and not a
+   raw corpus average (see `docs/lilypond_conventions.md` for why an average
+   was actively misleading here). The exception is Lead Sheet, which has no
+   Mutopia anchor (chord-symbol lead sheets aren't present in that corpus in
+   `\chordmode`/`ChordNames` form) and reuses Solo Piano's numbers as a
+   documented placeholder instead — see `docs/lilypond_conventions.md`.
+   Category is auto-detected from staff count/family but can be
    overridden (`to_lilypond(category_override=...)`).
 
 ---

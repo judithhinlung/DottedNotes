@@ -64,6 +64,7 @@ class SymbolCategory(Enum):
     FINGERING = auto()
     TREMOLO = auto()
     PEDAL = auto()
+    CHORD_SYMBOL = auto()
     UNKNOWN = auto()
 
 
@@ -810,4 +811,89 @@ TREMOLO_ALTERNATING_VALUE_CELLS: dict[str, int] = {
     '⠁': 64,   # dot 1       (ASCII 'a')  -> ⠨⠁
     '⠄': 128,  # dot 3       (ASCII "'")  -> ⠨⠄
 }
+
+# ---------------------------------------------------------------------------
+# Chord symbols (S8b-5, BANA Music Braille Code 2015, Sec. 23, Table 23).
+#
+# A chord symbol is CAPITAL_INDICATOR + a root letter (A-G), optionally
+# followed by an ACCIDENTAL_CELLS sign, then any mix of plain literary
+# letters (spelling out quality words like "m", "dim", "maj", "sus" --
+# already decodable via this module's own letter tables, no new entries
+# needed) and the special non-alphanumeric signs below. Extension numbers
+# (6, 7, 9, 11, 13...) are NUMBER_SIGN + one-or-more LITERARY_DIGITS letters,
+# exactly like elsewhere in this module. A bass note (slash chord) is
+# SLASH + its own CAPITAL_INDICATOR + root (+ accidental) pair.
+#
+# Every dot pattern below (and the compositional rules in the comments) was
+# cross-checked against the BANA manual's own Chart 23.1-1 "Representative
+# Chord Symbols" worked examples (p.169), decoding each example cell-by-cell
+# through ASCII_TO_DOTS/LITERARY_DIGITS -- not read off the table heading
+# alone. For instance "F#dim7" -> ,F%DIM#G decodes as CAPITAL_INDICATOR + F
+# + SHARP + literal letters D-I-M + NUMBER_SIGN + G(=7 via LITERARY_DIGITS),
+# confirming quality words are spelled out literally; "F#°7" -> ,F%4#G
+# confirms CHORD_DIMINISHED_CELL below is the circle sign; "C△" -> ,C0
+# confirms CHORD_MAJOR7_CELL is the triangle sign; "B♭ø7" -> ,B<4'#G
+# confirms half-diminished is the diminished-circle cell immediately
+# followed by CHORD_BISECT_CELL; "Gmaj7+9" -> ,GMAJ#G+#I and "B7-9" ->
+# ,B#G-#I confirm PLUS/MINUS directly before a NUMBER_SIGN+digit raise/lower
+# that extension (LilyPond's own altered-chordmode-degree syntax uses the
+# same +/- convention); "Dm(#7)" -> ,DM7%#G7 confirms CHORD_PAREN_CELL is
+# used, unchanged, for both the opening and closing parenthesis.
+#
+# CHORD_TRIANGLE_BISECT_CELL's meaning is NOT confirmed by any worked
+# example in Chart 23.1-1 (23.1.2 explicitly warns that, unlike the circle
+# signs, "the meanings of some other signs are not standardized") -- do not
+# guess its semantics; ask the developer to confirm against a real score
+# before using it.
+# ---------------------------------------------------------------------------
+
+CHORD_AUGMENTED_OR_RAISE_CELL: str = '⠬'   # dots 3,4,6 (ASCII '+') -- standalone
+                                            # after the root/quality = augmented
+                                            # triad ("B+"); immediately before a
+                                            # NUMBER_SIGN+digit = raise that
+                                            # extension a semitone ("Gmaj7+9").
+CHORD_LOWER_CELL: str = '⠤'                # dots 3,6 (ASCII '-') -- immediately
+                                            # before a NUMBER_SIGN+digit = lower
+                                            # that extension a semitone
+                                            # ("B7-9"). Also LITERARY_HYPHEN;
+                                            # disambiguated by chord-symbol-line
+                                            # context, never seen by the
+                                            # music-line tokenizer.
+CHORD_DIMINISHED_CELL: str = '⠲'           # dots 2,5,6 (ASCII '4') -- diminished
+                                            # circle sign ("F#°7", "B♭°").
+CHORD_TRIANGLE_CELL: str = '⠴'             # dots 3,5,6 (ASCII '0') -- major-
+                                            # seventh triangle sign ("C△" = Cmaj7).
+CHORD_BISECT_CELL: str = '⠄'               # dot 3 (ASCII "'") -- placed right
+                                            # after CHORD_DIMINISHED_CELL to form
+                                            # the half-diminished sign ("B♭ø7").
+                                            # Also END_WORD_SIGN; disambiguated
+                                            # by chord-symbol-line context.
+CHORD_TRIANGLE_BISECT_CELL: str = '⠴⠄'     # NOT CONFIRMED -- see module note
+                                            # above. Do not use without asking
+                                            # the developer first.
+CHORD_SLASH_CELL: str = '⠌'                # dots 3,4 (ASCII '/') -- bass-note
+                                            # separator ("D♭/A♭", "G7/B").
+CHORD_PAREN_CELL: str = '⠶'                # dots 2,3,5,6 (ASCII '7') -- used
+                                            # unchanged for both the opening and
+                                            # closing parenthesis ("Dm(#7)").
+                                            # Also MEASURE_REPEAT_CELL;
+                                            # disambiguated by chord-symbol-line
+                                            # context, never seen by the
+                                            # music-line tokenizer.
+CHORD_ITALIC_SEVENTH_CELLS: str = '⠨⠼⠛'    # dots 4,6 + NUMBER_SIGN + G -- an
+                                            # alternate 3-cell print rendering
+                                            # of a plain "7" extension for a
+                                            # "specialized seventh chord" (Par.
+                                            # 23.1.1). Not demonstrated by a
+                                            # Chart 23.1-1 example; semantically
+                                            # equivalent to NUMBER_SIGN+G per
+                                            # Par. 23.1.2's description, treated
+                                            # as such here.
+
+# NC ("no chord") and Tacet are complete pre-defined literal indications
+# (Par. 23.2), not composed root+quality chord symbols. NC uses a doubled
+# CAPITAL_INDICATOR (whole-word capital, dots6 dots6); Tacet uses a single
+# CAPITAL_INDICATOR (only the first letter capitalized). Both decode via
+# this module's own letter tables once the leading capital indicator(s) are
+# stripped -- no new cell constants needed beyond CAPITAL_INDICATOR itself.
 

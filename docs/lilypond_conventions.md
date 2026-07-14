@@ -42,6 +42,7 @@ not a corpus-wide statistic.
 | Art Song | Schubert, *An die Musik* (D547) | `ftp/SchubertF/D547/an-die-musik/an-die-musik.ly` |
 | Chamber | Mozart, String Quartet No. 14 in G major (KV387) | `ftp/MozartWA/KV387/kv387-1/kv387-1.ly` |
 | Orchestral | Mozart, Symphony No. 40 in G minor (KV550) | `ftp/MozartWA/KV550/kv550-1/kv550-1.ly` |
+| Lead Sheet | **none** — see below | — |
 
 ### Per-category settings (`FormattingSettings` fields)
 
@@ -51,6 +52,21 @@ not a corpus-wide statistic.
 | Art Song | 18.0 | 18.0 | 14.0 | 3.0 | `False` |
 | Chamber | 16.0 | 15.0 | 16.0 | 4.0 | `True` |
 | Orchestral | 14.1 | 12.0 | 18.0 | 5.0 | `True` |
+| Lead Sheet | 20.0 | 20.0 | 12.0 | 2.0 | `False` |
+
+**Lead Sheet has no anchor piece (S8b-5 follow-up).** Its row is Solo
+Piano's values reused verbatim, not independently derived. Before adding
+it, Mutopia's Folk, Jazz, and Hymn+Guitar styles were checked (five
+candidate guitar/voice+guitar scores, including Foster's "Old Folks at
+Home", Gershwin's "Rialto Ripples" guitar trio, and "Stille Nacht" for
+both voice+guitar and guitar solo) — none use `\chordmode` or `\new
+ChordNames`. Mutopia's corpus is ~1700/2124 pieces classical
+(Baroque/Classical/Romantic); chord-symbol lead sheets are a 20th-century
+popular/jazz convention it doesn't appear to contain in ChordNames form.
+Same honest-placeholder treatment as the "two uncited constants" below —
+flagged rather than given a false citation. If a real well-engraved
+public-domain lead sheet turns up later, re-derive this row from it and
+update this table.
 
 Each row is the anchor piece's own settings, read directly from its
 LilyPond source (staff size, margins, `\paper{}`/`\layout{}` spacing
@@ -106,6 +122,13 @@ using its staves, in this order:
    staff both present → `"Art Song"`.
 4. 3 or more staves (that didn't already match above) → `"Chamber"`.
 5. Otherwise (1–2 staves) → `"Solo Piano"`.
+
+`"Lead Sheet"` is never auto-detected here — a `Score` only gets its
+`chord_names` (BANA Sec. 27) set via `parse_lead_sheet()`, which
+`cli.py`'s `_parse_score()` only calls when `--category "Lead Sheet"` is
+given explicitly (S8b-5 follow-up) — so by the time formatting runs, the
+override is already in hand and `detect_category()` is never consulted
+for it.
 
 These thresholds are a first-pass heuristic (S7b-3's own docstring calls
 it out as such), not derived from a specific Mutopia statistic — the

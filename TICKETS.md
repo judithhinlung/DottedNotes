@@ -5869,7 +5869,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-5: Implement parsing for chord symbols (Lead Sheets)
+### [x] S8b-5: Implement parsing for chord symbols (Lead Sheets)
 
 **Why:** Many popular songs, hymnals, and jazz lead sheets feature chord symbols (e.g. C, G7, Am) written above or inline with the melody. Parsing these allows DottedNotes to support popular lead sheets.
 
@@ -5880,9 +5880,9 @@ Estimated time: 1.5–2 weeks.
 4. Write tests in `tests/test_parser.py` verifying melody + chord symbol alignment.
 
 **Definition of Done:**
-- [ ] Chord symbol signs are parsed into a dedicated `ChordNames` structure.
-- [ ] LilyPond output contains a working `\new ChordNames \chordmode { ... }` track.
-- [ ] Tests verify correct alignment and parsing of chords like maj, min, 7th, and dim.
+- [x] Chord symbol signs are parsed into a dedicated `ChordNames` structure.
+- [x] LilyPond output contains a working `\new ChordNames \chordmode { ... }` track.
+- [x] Tests verify correct alignment and parsing of chords like maj, min, 7th, and dim.
 
 ---
 
@@ -5898,9 +5898,9 @@ Estimated time: 1.5–2 weeks.
 5. Write unit tests for both features.
 
 **Definition of Done:**
-- [ ] Glissandi and wind mute signs are parsed and represented in the model.
+- [x] Glissandi and wind mute signs are parsed and represented in the model.
 - [ ] LilyPond output contains correct `\glissando` and mute markups.
-- [ ] Tests verify correct output.
+- [x] Tests verify correct output.
 
 ---
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from .chord_names import ChordNamesTrack
 from .staff import Staff
 from .transposition import get_transposition
 
@@ -16,6 +17,9 @@ class Score:
     copyright: str = ""
     tagline: str = ""
     staves: list[Staff] = field(default_factory=list)
+    # BANA Sec. 27 lead-sheet chord symbols (S8b-5), rendered as a ChordNames
+    # context alongside the single melody staff. None for every other score.
+    chord_names: Optional[ChordNamesTrack] = None
 
     def add_staff(self, staff: Staff) -> None:
         self.staves.append(staff)
@@ -173,6 +177,11 @@ class Score:
             staff = self.staves[0]
             anchor, start_midi = staff.relative_anchor()
             staff_content = staff.to_lilypond(start_midi=start_midi)
+            if staff.lyrics and self.chord_names is not None:
+                raise NotImplementedError(
+                    "Chord symbols alongside lyrics (BANA Sec. 36) are not supported; "
+                    "Sec. 27 lead sheets are melody-only."
+                )
             if staff.lyrics:
                 relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
                 transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
@@ -185,6 +194,17 @@ class Score:
                     "  }",
                     f"  \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}",
                     ">>"
+                ]
+            elif self.chord_names is not None:
+                relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
+                transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
+                body = [
+                    "<<",
+                    "  " + self.chord_names.to_lilypond().replace('\n', '\n  '),
+                    "  \\new Staff {",
+                    *transposed,
+                    "  }",
+                    ">>",
                 ]
             else:
                 relative_block = [f"\\relative {anchor} {{", staff_content, '}']

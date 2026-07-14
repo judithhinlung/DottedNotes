@@ -12,15 +12,25 @@ from pathlib import Path
 from .exceptions import DottedNotesError, LilyPondCompileError
 from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, has_ensemble_header
+from .parser.lead_sheet_parser import parse_lead_sheet
 from .parser.tokenizer import BrailleTokenizer
 from .parser.input_pipeline import BRLInputPipeline
 
 
 def _parse_score(text: str, category_override: str | None = None):
     """Parse normalized Unicode braille text into a Score, choosing the
+    lead-sheet, ensemble, or solo parser.
+
+    An explicit `category_override == "Lead Sheet"` always wins and routes
+    to `parse_lead_sheet()` (BANA Sec. 27's two-line melody/chord-symbol
+    parallel) -- there's no unambiguous structural marker to auto-detect a
+    lead sheet the way an instrument-list header marks an ensemble score,
+    so the caller must ask for it explicitly. Otherwise, choose the
     ensemble or solo parser based on whether an instrument-list header
     (BANA §33.2) is present.
     """
+    if category_override == "Lead Sheet":
+        return parse_lead_sheet(text)
     if has_ensemble_header(text):
         return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)
@@ -111,7 +121,7 @@ def _run_convert(args: argparse.Namespace) -> None:
     text = BRLInputPipeline().load(args.input)
 
     category_override = args.category
-    valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral"}
+    valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet"}
     if category_override is not None and category_override not in valid_categories:
         raise DottedNotesError(
             f"Invalid category: '{category_override}'. Must be one of {sorted(list(valid_categories))}"
@@ -186,7 +196,9 @@ def main() -> None:
     )
     convert_parser.add_argument(
         "--category",
-        help="Override the layout category (e.g. Solo Piano, Art Song, Chamber, Orchestral)",
+        help="Override the layout category (e.g. Solo Piano, Art Song, Chamber, "
+             "Orchestral, Lead Sheet). \"Lead Sheet\" also switches the parser "
+             "itself to BANA Sec. 27's two-line melody/chord-symbol format.",
     )
     convert_parser.add_argument(
         "--format",

@@ -12,6 +12,8 @@ class ArticulationType(Enum):
     SWELL = "swell"
     DOWN_BOW = "down_bow"   # S8b-2, BANA Sec. 25.3 (Table 24B) -> \downbow
     UP_BOW = "up_bow"       # S8b-2, BANA Sec. 25.3 (Table 24B) -> \upbow
+    STOPPED = "stopped"     # S8b-6, BANA wind mute cross sign -> \stopped
+    OPEN = "open"           # S8b-6, BANA wind/string open/unmute circle sign -> \open
 
 
 _ARTICULATION_TO_LILYPOND = {
@@ -28,6 +30,8 @@ _ARTICULATION_TO_LILYPOND = {
     # attach correctly with no leading hyphen, same as \espressivo above).
     ArticulationType.DOWN_BOW: r'\downbow',
     ArticulationType.UP_BOW: r'\upbow',
+    ArticulationType.STOPPED: r'\stopped',
+    ArticulationType.OPEN: r'\open',
 }
 
 

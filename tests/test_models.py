@@ -945,9 +945,17 @@ def test_instrument_family_resolution():
     # Unknown instrument
     assert get_instrument_family('Synthesizer') is None
 
+    # Plucked string instruments
+    assert get_instrument_family('Guitar') == InstrumentFamily.PLUCKED_STRING
+    assert get_instrument_family('Banjo') == InstrumentFamily.PLUCKED_STRING
+    assert get_instrument_family('Acoustic guitar') == InstrumentFamily.PLUCKED_STRING
+
     # InstrumentInfo property
     info = InstrumentInfo(name="Violin I", abbreviation="v1")
     assert info.family == InstrumentFamily.STRING
+
+    info_gtr = InstrumentInfo(name="Classical Guitar", abbreviation="gtr")
+    assert info_gtr.family == InstrumentFamily.PLUCKED_STRING
 
 
 def test_score_staff_grouping():

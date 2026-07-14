@@ -266,6 +266,41 @@ def test_cli_convert_invalid_format_keys_exits_nonzero(monkeypatch, tmp_path, ca
     assert "Must be in key=value format" in captured.err
 
 
+def test_cli_convert_lead_sheet_category_routes_to_lead_sheet_parser(monkeypatch, tmp_path):
+    # S8b-5 follow-up: --category "Lead Sheet" routes _parse_score() through
+    # parse_lead_sheet() (BANA Sec. 27's two-line melody/chord-symbol
+    # parallel) instead of the normal solo/ensemble dispatch. Whole notes
+    # C/D/E/F paired with C/Dm/Em/F chord symbols -- same fixture verified
+    # against a real `lilypond` compile in test_chord_symbols.py.
+    music = '⠽⠀⠵⠀⠯⠀⠿⠣⠅'   # whole notes C D E F (blank-cell bar lines between), final double bar
+    chords = '⠠⠉⠠⠙⠍⠠⠑⠍⠠⠋'  # ,C ,DM ,EM ,F
+    brf = tmp_path / "lead_sheet.brf"
+    brf.write_text(music + '\n' + chords + '\n', encoding="utf-8")
+    out = tmp_path / "lead_sheet.ly"
+
+    _run_main(monkeypatch, ["convert", str(brf), str(out), "--category", "Lead Sheet"])
+
+    content = out.read_text(encoding="utf-8")
+    assert "\\new ChordNames" in content
+    assert "\\chordmode { c1 d1:m e1:m f1 }" in content
+
+
+def test_cli_convert_lead_sheet_category_on_non_lead_sheet_input_errors(monkeypatch, tmp_path, capsys):
+    # A single physical line isn't a valid two-line melody/chord parallel --
+    # parse_lead_sheet()'s own validation should surface as a plain-text
+    # CLI error, not a traceback.
+    brf = tmp_path / "single_line.brf"
+    brf.write_text('⠐⠹\n', encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), "--category", "Lead Sheet"])
+    assert exc_info.value.code == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("Error:")
+    assert "Traceback" not in captured.err
+
+
 def test_cli_convert_category_override_affects_lyrics_parsing(monkeypatch, tmp_path):
     # A simple vocal + piano accompaniment BRF score, same as in test_vocal.py
     brf_text = (

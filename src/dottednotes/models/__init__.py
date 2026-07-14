@@ -1,5 +1,7 @@
 from .accidental import Accidental, AccidentalType
 from .chord import Chord
+from .chord_symbol import ChordSymbol
+from .chord_names import ChordNamesTrack
 from .articulation import Articulation, ArticulationType
 from .base import BrailleSymbol
 from .clef import Clef, ClefType, CLEF_TO_LILYPOND
@@ -24,6 +26,8 @@ from .tuplet import Tuplet
 __all__ = [
     "Accidental",
     "Chord",
+    "ChordSymbol",
+    "ChordNamesTrack",
     "AccidentalType",
     "Articulation",
     "ArticulationType",

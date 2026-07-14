@@ -10,6 +10,7 @@ class InstrumentFamily(Enum):
     PERCUSSION = "Percussion"
     KEYBOARD_HARP = "KeyboardHarp"
     STRING = "String"
+    PLUCKED_STRING = "PluckedString"
     VOCAL = "Vocal"
 
 
@@ -40,6 +41,8 @@ _NAME_TO_FAMILY: dict[str, InstrumentFamily] = {
     'Viola': InstrumentFamily.STRING,
     'Violoncello': InstrumentFamily.STRING,
     'Double bass': InstrumentFamily.STRING,
+    'Guitar': InstrumentFamily.PLUCKED_STRING,
+    'Banjo': InstrumentFamily.PLUCKED_STRING,
     'Soprano': InstrumentFamily.VOCAL,
     'Alto': InstrumentFamily.VOCAL,
     'Tenor': InstrumentFamily.VOCAL,
@@ -69,10 +72,15 @@ def get_instrument_family(name: str) -> InstrumentFamily | None:
     # Strings
     if any(k in lower_name for k in ['violin', 'viola', 'violoncello', 'cello', 'double bass', 'contrabass', 'string', 'fiddle']):
         return InstrumentFamily.STRING
-        
+
     # Woodwinds
     if any(k in lower_name for k in ['flute', 'oboe', 'clarinet', 'bassoon', 'piccolo', 'english horn', 'recorder', 'reed', 'pipe', 'woodwind']):
         return InstrumentFamily.WOODWIND
+
+    # Plucked Strings
+    if any(k in lower_name for k in ['guitar', 'banjo', 'mandolin', 'ukulele']) or \
+       any(w == 'lute' for w in lower_name.replace('-', ' ').split()):
+        return InstrumentFamily.PLUCKED_STRING
         
     # Brass
     if any(k in lower_name for k in ['horn', 'trumpet', 'trombone', 'tuba', 'cornet', 'euphonium', 'brass']):

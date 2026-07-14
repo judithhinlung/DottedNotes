@@ -2097,6 +2097,99 @@ def test_parser_down_bow_renders_on_chord():
     assert r'\downbow' in ly
 
 
+def test_parser_wind_mute_and_open():
+    from dottednotes.models.instrument import InstrumentInfo
+    from dottednotes.models.articulation import ArticulationType
+    
+    # ⠣⠃ = mute sign, ⠐⠹ = C4 quarter note, ⠅ = open sign (after the note)
+    brf = '⠣⠃⠐⠹⠅'
+    tokens = BrailleTokenizer().tokenize(brf)
+    
+    # Wind instrument (Horn = Brass)
+    inst_wind = InstrumentInfo(name="Horn", abbreviation="Hn")
+    parser_wind = BrailleParser(tokens=tokens, active_instrument=inst_wind)
+    score_wind = parser_wind.parse()
+    notes_wind = score_wind.staves[0].measures[0].notes
+    
+    assert len(notes_wind[0].articulations) == 2
+    assert notes_wind[0].articulations[0].type == ArticulationType.STOPPED
+    assert notes_wind[0].articulations[1].type == ArticulationType.OPEN
+    assert r'\stopped' in notes_wind[0].to_lilypond()
+    assert r'\open' in notes_wind[0].to_lilypond()
+
+
+def test_parser_bowed_string_open():
+    from dottednotes.models.instrument import InstrumentInfo
+    from dottednotes.models.articulation import ArticulationType
+    
+    # ⠣⠃ = down-bow sign, ⠐⠹ = C4 quarter note, ⠅ = open string sign (after the note)
+    brf = '⠣⠃⠐⠹⠅'
+    tokens = BrailleTokenizer().tokenize(brf)
+    
+    # Bowed String instrument (Violin = String)
+    inst_str = InstrumentInfo(name="Violin I", abbreviation="Vln I")
+    parser_str = BrailleParser(tokens=tokens, active_instrument=inst_str)
+    score_str = parser_str.parse()
+    notes_str = score_str.staves[0].measures[0].notes
+    
+    assert len(notes_str[0].articulations) == 2
+    assert notes_str[0].articulations[0].type == ArticulationType.DOWN_BOW
+    assert notes_str[0].articulations[1].type == ArticulationType.OPEN
+    assert r'\downbow' in notes_str[0].to_lilypond()
+    assert r'\open' in notes_str[0].to_lilypond()
+
+
+def test_parser_plucked_string_and_keyboard_treat_dots_13_as_fingering():
+    from dottednotes.models.instrument import InstrumentInfo
+    from dottednotes.models.articulation import ArticulationType
+    
+    # ⠣⠃ = down-bow/mute sign, ⠐⠹ = C4 quarter note, ⠅ = dots 1-3
+    brf = '⠣⠃⠐⠹⠅'
+    tokens = BrailleTokenizer().tokenize(brf)
+    
+    # Plucked String instrument (Guitar = PluckedString)
+    inst_guitar = InstrumentInfo(name="Guitar", abbreviation="Gtr")
+    parser_guitar = BrailleParser(tokens=tokens, active_instrument=inst_guitar)
+    score_guitar = parser_guitar.parse()
+    notes_guitar = score_guitar.staves[0].measures[0].notes
+    
+    assert len(notes_guitar[0].articulations) == 1
+    assert notes_guitar[0].articulations[0].type == ArticulationType.DOWN_BOW  # default
+    assert len(notes_guitar[0].fingerings) == 1
+    assert notes_guitar[0].fingerings[0].finger == 5
+    
+    # Keyboard instrument (Piano = KeyboardHarp)
+    inst_piano = InstrumentInfo(name="Piano right hand", abbreviation="Prh")
+    parser_piano = BrailleParser(tokens=tokens, active_instrument=inst_piano)
+    score_piano = parser_piano.parse()
+    notes_piano = score_piano.staves[0].measures[0].notes
+    
+    assert len(notes_piano[0].articulations) == 1
+    assert notes_piano[0].articulations[0].type == ArticulationType.DOWN_BOW  # default
+    assert len(notes_piano[0].fingerings) == 1
+    assert notes_piano[0].fingerings[0].finger == 5
+
+
+def test_parser_wind_mute_doubled_carry():
+    from dottednotes.models.instrument import InstrumentInfo
+    from dottednotes.models.articulation import ArticulationType
+    
+    # ⠣⠃⠣⠃ = doubled mute, ⠐⠹ = C4, ⠹ = C4, ⠹ = C4, ⠣⠃ = terminator, ⠹ = C4, ⠹ = C4
+    brf = '⠣⠃⠣⠃⠐⠹⠹⠹⠣⠃⠹⠹'
+    tokens = BrailleTokenizer().tokenize(brf)
+    inst_wind = InstrumentInfo(name="Trumpet", abbreviation="Tpt")
+    parser_wind = BrailleParser(tokens=tokens, active_instrument=inst_wind)
+    score = parser_wind.parse()
+    notes = score.staves[0].measures[0].notes
+    
+    # Check carry and termination
+    assert notes[0].articulations[0].type == ArticulationType.STOPPED
+    assert notes[1].articulations[0].type == ArticulationType.STOPPED
+    assert notes[2].articulations[0].type == ArticulationType.STOPPED
+    assert notes[3].articulations[0].type == ArticulationType.STOPPED # terminator note
+    assert len(notes[4].articulations) == 0 # carry ended
+
+
 # ---------------------------------------------------------------------------
 # S4-2: Dynamic tokenization and parsing
 # ---------------------------------------------------------------------------

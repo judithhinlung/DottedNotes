@@ -29,12 +29,33 @@ def test_formatter_defaults_exist():
 def test_formatter_override():
     formatter = LilyPondFormatter()
     score = Score()
-    
+
     settings = formatter.get_settings(score, category_override="Chamber")
     assert settings.category == "Chamber"
     assert settings.staff_size == 16.0
     assert settings.margin_mm == 15.0
     assert settings.short_instrument_names is True
+
+def test_formatter_lead_sheet_reuses_solo_piano_values():
+    # S8b-5 follow-up: Lead Sheet has no Mutopia anchor (see
+    # docs/lilypond_conventions.md), so it deliberately reuses Solo Piano's
+    # numbers rather than inventing its own -- confirm that stays true, and
+    # that (unlike the four anchored categories) it has no "ftp/" citation.
+    formatter = LilyPondFormatter()
+    lead_sheet = formatter.DEFAULTS["Lead Sheet"]
+    solo_piano = formatter.DEFAULTS["Solo Piano"]
+    assert lead_sheet.staff_size == solo_piano.staff_size
+    assert lead_sheet.margin_mm == solo_piano.margin_mm
+    assert lead_sheet.system_system_spacing_basic_distance == solo_piano.system_system_spacing_basic_distance
+    assert lead_sheet.system_system_spacing_padding == solo_piano.system_system_spacing_padding
+    assert lead_sheet.short_instrument_names == solo_piano.short_instrument_names
+    assert not lead_sheet.source_citation.startswith("ftp/")
+
+def test_formatter_get_settings_lead_sheet_override():
+    formatter = LilyPondFormatter()
+    settings = formatter.get_settings(Score(), category_override="Lead Sheet")
+    assert settings.category == "Lead Sheet"
+    assert settings.staff_size == 20.0
 
 def test_formatter_detects_solo_piano_fixture():
     # Use fingering_melody.brf for Solo Piano testing

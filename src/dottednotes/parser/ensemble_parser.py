@@ -739,7 +739,12 @@ class EnsembleParser:
             # heuristic should never fire here, regardless of whether
             # header_str is present.
             tokens = BrailleTokenizer().tokenize(cells_stream, at_line_start=False)
-            parser = BrailleParser(tokens=tokens, instruments=instruments, ensemble=True)
+            parser = BrailleParser(
+                tokens=tokens,
+                instruments=instruments,
+                ensemble=True,
+                active_instrument=inst
+            )
             try:
                 score = parser.parse()
             except Exception as e:

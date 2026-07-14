@@ -36,7 +36,7 @@ from ..models.accidental import Accidental, AccidentalType
 from ..models.chord import Chord
 from ..models.in_accord import InAccord
 from ..models.articulation import Articulation, ArticulationType
-from ..models.instrument import InstrumentInfo
+from ..models.instrument import InstrumentInfo, InstrumentFamily
 from ..models.clef import Clef, ClefType
 from ..models.duration import Duration, TICKS_PER_QUARTER
 from ..models.dynamic import Dynamic, DynamicLevel
@@ -122,6 +122,8 @@ _STR_TO_ARTICULATION_TYPE: dict[str, ArticulationType] = {
     'swell':             ArticulationType.SWELL,
     'down_bow':          ArticulationType.DOWN_BOW,
     'up_bow':            ArticulationType.UP_BOW,
+    'stopped':           ArticulationType.STOPPED,
+    'open':              ArticulationType.OPEN,
 }
 
 _STR_TO_ORNAMENT_TYPE: dict[str, OrnamentType] = {
@@ -262,6 +264,7 @@ class BrailleParser:
         preserve_state: bool = False,
         initial_state: dict | None = None,
         category_override: str | None = None,
+        active_instrument: InstrumentInfo | None = None,
     ) -> None:
         self._tokens = tokens
         # S5b-3 / BANA 33.4.2: "Intervals and in-accords are read upward in
@@ -272,6 +275,7 @@ class BrailleParser:
         # so ensemble-ness here is just "was a non-empty instrument list
         # supplied," not something detected from raw text.
         self._instruments = instruments or []
+        self._active_instrument = active_instrument
         self._ensemble_opt = ensemble
         self._preserve_state = preserve_state
         self._initial_state = initial_state
@@ -758,7 +762,15 @@ class BrailleParser:
         )
 
     def _handle_articulation(self, token: BrailleToken) -> None:
-        art_type = _STR_TO_ARTICULATION_TYPE[ARTICULATION_CELLS[token.character]]
+        art_name = ARTICULATION_CELLS[token.character]
+        if art_name == 'down_bow':
+            family = self._active_instrument.family if self._active_instrument else None
+            if family in (InstrumentFamily.WOODWIND, InstrumentFamily.BRASS):
+                art_type = ArticulationType.STOPPED
+            else:
+                art_type = ArticulationType.DOWN_BOW
+        else:
+            art_type = _STR_TO_ARTICULATION_TYPE[art_name]
 
         if art_type in self._active_articulations:
             # Terminator: next note gets this articulation, then carry mode ends.
@@ -951,6 +963,12 @@ class BrailleParser:
             return current_idx
 
         t1 = self._tokens[idx]
+
+        family = self._active_instrument.family if self._active_instrument else None
+        is_wind_or_bowed_string = family in (InstrumentFamily.WOODWIND, InstrumentFamily.BRASS, InstrumentFamily.STRING)
+        if t1.character == '⠅' and is_wind_or_bowed_string:
+            pending[-1].articulations.append(Articulation(type=ArticulationType.OPEN))
+            return idx
 
         def get_finger(char: str) -> int | None:
             return FINGERING_CELLS.get(char, None)
