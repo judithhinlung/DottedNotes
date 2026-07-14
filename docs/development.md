@@ -212,3 +212,7 @@ To add one end to end:
 - `docs/lilypond_conventions.md` — where the output formatting defaults
   (paper size, staff size, margins per instrumentation category) come
   from, and the Mutopia corpus evidence behind each one.
+- `CONTRIBUTING.md` — how to actually open a pull request, including this
+  project's accessibility bar for any change touching CLI output or
+  documentation, and dedicated guidance for blind and low-vision
+  contributors.

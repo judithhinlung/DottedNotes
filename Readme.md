@@ -146,7 +146,9 @@ significant work so we can coordinate.
 See [docs/development.md](docs/development.md) for an architecture
 walkthrough of the BRF/BRL → LilyPond pipeline, a worked example tracing
 one measure through it end to end, and how to add a new BANA symbol or
-domain model class.
+domain model class. See [CONTRIBUTING.md](CONTRIBUTING.md) for issue/PR
+conventions, dev environment setup, and dedicated guidance for blind and
+low-vision contributors.
 
 All CLI output, error messages, and documentation must be screen-reader
 friendly: plain text, no ASCII art, no progress bars, no visual-only feedback.

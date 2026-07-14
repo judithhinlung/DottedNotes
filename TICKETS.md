@@ -5662,7 +5662,7 @@ different points in the contribution flow.
 
 ---
 
-### [ ] S8-3: Add CONTRIBUTING.md with blind-contributor guidance
+### [x] S8-3: Add CONTRIBUTING.md with blind-contributor guidance
 
 **Why:** DottedNotes exists specifically to serve blind composers, and per
 CLAUDE.md the primary developer works via VoiceOver + VS Code +
@@ -5699,16 +5699,16 @@ audience.
 6. Link `CONTRIBUTING.md` from `README.md`.
 
 **Definition of Done:**
-- [ ] `CONTRIBUTING.md` created at the repo root with issue/PR/dev-setup/
+- [x] `CONTRIBUTING.md` created at the repo root with issue/PR/dev-setup/
       code-style sections
-- [ ] "Accessibility of this codebase" section present, citing S8-1's audit
+- [x] "Accessibility of this codebase" section present, citing S8-1's audit
       as the concrete bar
-- [ ] Blind/low-vision-contributor section present with concrete tooling and
+- [x] Blind/low-vision-contributor section present with concrete tooling and
       workflow guidance
-- [ ] BANA dot-pattern accuracy rule documented for external contributors
-- [ ] Developer has reviewed and confirmed the blind-contributor guidance is
+- [x] BANA dot-pattern accuracy rule documented for external contributors
+- [x] Developer has reviewed and confirmed the blind-contributor guidance is
       accurate, not just well-intentioned
-- [ ] `README.md` links to `CONTRIBUTING.md`
+- [x] `README.md` links to `CONTRIBUTING.md`
 
 **Senior note:** Don't ship this without the developer's sign-off in step 5.
 Inaccurate accessibility guidance is worse than none — it can send another
@@ -5775,41 +5775,459 @@ authorization to publish.
 
 Estimated time: 1.5–2 weeks.
 
+**Research basis for this sprint:** Before starting this sprint, review the BANA Music Braille Code 2015 manual (specifically sections on page layout, spacing, and indicators) and the LilyPond Notation Reference (especially for notes, durations, and chords).
+
+---
+
 ### [ ] S9-1: Add to_braille() method to all domain model classes
+
+**Why:** Currently, the internal domain model classes (Note, Rest, Chord, Measure, Staff, Score, etc.) only know how to render themselves to LilyPond via `to_lilypond()`. To enable the reverse translation path, these classes must implement `to_braille() -> str` using the dot-pattern tables in `src/dottednotes/bana_symbols.py`.
+
+**Steps:**
+1. Define the base `to_braille() -> str` method interface in `BrailleSymbol` (in `src/dottednotes/models/base.py`).
+2. Implement `to_braille()` on core musical elements:
+   - `Note`: output the pitch name + duration modifier, prepended by octave marks, accidentals, dynamics, articulations, ornaments, and grace note indicators, and appended by ties or slurs.
+   - `Rest`: output the rest sign corresponding to the duration.
+   - `Duration`: handle dots (augmentation dots) and triplet markings.
+3. Implement `to_braille()` on structural and meta-elements:
+   - `KeySignature`
+   - `TimeSignature`
+   - `Clef`
+   - `TextMarking`
+4. Implement `to_braille()` on composite elements:
+   - `Chord`: output the primary note followed by interval indicators.
+   - `InAccord`: output the voice parts separated by BANA in-accord signs.
+   - `Measure`: output the sequence of notes/rests/chords, ending with the appropriate bar line symbol.
+   - `MeasureRepeat`: output the whole-measure repeat sign (`⠍⠄`).
+5. Implement `to_braille()` on score elements:
+   - `Staff`: render measures separated by measure spaces.
+   - `Score` / `OrchestraScore`: coordinate staves and metadata.
+6. Create `tests/test_to_braille.py` and write unit tests for every class's `to_braille()` output.
+
+**Definition of Done:**
+- [ ] Every domain model class implements `to_braille() -> str` returning correct BANA Unicode braille.
+- [ ] Unit tests in `tests/test_to_braille.py` assert on note durations, octave marks, accidentals, key/time signatures, chords, and simple measures.
+- [ ] All unit tests pass successfully.
+
+**Senior note:** Keep `to_braille()` focused strictly on representing the object's own musical value. Do not hardcode line wrapping, page layouts, or part prefixing inside `Note.to_braille()` or `Measure.to_braille()`. Those layout concerns belong in `BrailleRenderer` (S9-2).
+
+---
+
 ### [ ] S9-2: Implement BrailleRenderer
-### [ ] S9-3: Implement restricted LilyPond parser for tool-generated output
+
+**Why:** Converting a `Score` to a formatted braille document requires coordination of layout rules, measure spacing, page numbering, and part indicators (e.g. hand signs for piano parts, or abbreviated instrument names for ensemble scores).
+
+**Steps:**
+1. Create `src/dottednotes/renderers/braille_renderer.py` with the `BrailleRenderer` class.
+2. Implement `render(self, score: Score) -> str` to format single-staff and multi-staff scores.
+3. Handle part indicators:
+   - For piano scores, output the right hand (`⠨⠜`) or left hand (`⠸⠜`) prefix at the start of systems.
+   - For ensemble scores, output BANA-compliant instrument abbreviations.
+4. Support measure spacing (a single space `⠀` separating measures) and system boundaries.
+5. Create `tests/test_braille_renderer.py` and test formatting of both single-staff and multi-staff scores.
+
+**Definition of Done:**
+- [ ] `BrailleRenderer` coordinates the translation and layout formatting of complete scores.
+- [ ] Part prefixes and measure spacing are output correctly according to BANA rules.
+- [ ] Unit tests verify formatting structure for piano and ensemble scores.
+
+**Senior note:** Ensure `BrailleRenderer` only outputs Unicode braille characters (U+2800 to U+28FF) and spaces. Any conversion to ASCII braille for file writing should be handled at the file writing layer, not here.
+
+---
+
+### [ ] S9-3: Implement resilient LilyPond parser for arbitrary scores
+
+**Why:** To translate arbitrary LilyPond files (such as those from Mutopia) back to the internal domain model, we need a resilient LilyPond parser. This parser must extract supported musical elements (pitch, duration, chords, slurs, ties, dynamics, articulations, vocal lyrics, multiple voices, staves, headers) and ignore unrecognized markup, stem overrides, beam markers, and layout code without throwing errors.
+
+**Steps:**
+1. Create `src/dottednotes/parser/lilypond_parser.py` containing `LilypondParser`.
+2. Implement a lexical tokenizer that parses LilyPond syntax into tokens:
+   - Skip all single-line (`%`) and multi-line (`%{ ... %}`) comments.
+   - Parse identifiers, command words (starting with `\`), strings (`"..."`), braces (`{ }`), angle brackets (`< >`, `<< >>`), numbers, and Scheme calls (starting with `#`).
+3. Implement structured extraction for supported blocks:
+   - **Headers**: Parse key-value definitions within `\header { ... }` blocks (extract `title`, `composer`, etc.).
+   - **Variables**: Store variable names mapped to their musical token streams to resolve them when referenced in scores.
+   - **Staves/Voices**: Parse `\new Staff` and `\new Voice` configurations, including parallel construct systems `<< ... >>` representing multi-staff/multi-part scores.
+   - **Vocal music**: Support vocal lyrics declarations in `\new Lyrics \lyricsto "voice" { ... }` or `\addlyrics { ... }` blocks, mapping lyric syllables to their corresponding notes.
+4. Implement a music parser that processes token streams (handling relative pitch context `\relative` as well as absolute pitch):
+   - Parse note pitches (e.g., `c'4`, `d''8.`, `ees`, `fis`) with accidentals and octave indicators.
+   - Parse rests (`r4`, `r8`) and multi-measure rests (`R2*52`), mapping them to `Rest` or appropriate spacer structures.
+   - Parse chords (`<c e g>4`) containing multiple notes.
+   - Extract attached details: dynamics (`\p`, `\f`), articulations (`-.`, `->`), slurs (`(`, `)`), and ties (`~`).
+5. Implement the resilience/ignoring strategy:
+   - Silently skip formatting overrides (e.g. `\override Staff.TimeSignature.stencil = ##f`).
+   - Silently skip stem overrides (`\stemUp`, `\stemDown`, `\stemNeutral`) and beam markers (`[`, `]`).
+   - Skip unrecognized noteside markup and text annotations (e.g. `^\markup { ... }` or text scripts `^"dolce"`).
+   - Ignore layout blocks (`\layout { ... }`), midi blocks (`\midi { ... }`), paper blocks (`\paper { ... }`), and custom Scheme functions/macros.
+6. Create `tests/test_lilypond_parser.py` and write unit and integration tests:
+   - Test snippets of notes, chords, and lyrics.
+   - Parse full DottedNotes-generated LilyPond files.
+   - Parse real Mutopia fixtures (such as `tests/fixtures/vocal_test.ly` and `tests/fixtures/Children_s_Piece.ly`), asserting that all supported content (headers, notes, lyrics, chords, etc.) is successfully extracted while unsupported commands are skipped cleanly.
+
+**Definition of Done:**
+- [ ] `LilypondParser` successfully extracts supported elements (vocal lyrics, slurs, ties, chords, voices, staves, headers) from arbitrary LilyPond files into a musically correct `Score` domain model.
+- [ ] The parser silently skips all unrecognized commands, formatting overrides, custom layouts, and Scheme code.
+- [ ] Raises `LilyPondParseError` only on syntactically malformed LilyPond (e.g., unmatched braces, unclosed string literals).
+- [ ] Unit and integration tests cover various test cases, including parsing vocal scores and piano scores from fixtures.
+
+**Senior note:** Do not attempt to write a general compilation engine. Focus on structural block parsing and a robust fallback: if a command or block is not recognized, scan ahead to skip its parameters/scopes safely by balancing braces, brackets, and strings.
+
+---
+
 ### [ ] S9-4: Implement BRF file writer with BANA line length and pagination
+
+**Why:** Braille files (.brf) require strict layout constraints, typically 38-40 characters per line and 25 lines per page, with right-aligned page numbering. We must break lines only at safe boundaries (e.g., measure spaces) and output page-break indicators.
+
+**Steps:**
+1. Implement page formatting and line wrapping in `BRFWriter` (in `src/dottednotes/renderers/braille_renderer.py` or a new writer file).
+2. Allow setting line width (default 40) and page height (default 25).
+3. Implement line-wrapping logic: wrap at measure spaces where possible. If a single measure exceeds the line length, break it using BANA continuation rules.
+4. Implement pagination, outputting BANA page headers/footers with page numbers.
+5. Implement conversion from Unicode braille to ASCII braille (since BRF files are traditionally ASCII-encoded).
+6. Write tests in `tests/test_brf_writer.py` verifying page boundaries, line limits, and ASCII translation.
+
+**Definition of Done:**
+- [ ] BRF writer formats text into clean pages matching BANA dimension constraints.
+- [ ] Text wraps cleanly without breaking individual note symbols.
+- [ ] Output is written in ASCII braille format.
+- [ ] Unit tests pass.
+
+---
+
 ### [ ] S9-5: Round-trip integration test
 
-*Detailed steps to be written when Sprint 8 is complete.*
+**Why:** The best way to ensure the reverse path works flawlessly is an end-to-end round-trip test: read a BRF, parse it, output to LilyPond, parse it back, render it back to BRF, and verify that the output matches the input.
+
+**Steps:**
+1. Create `tests/test_roundtrip.py`.
+2. Load existing fixtures (`fengyang_flower_drum.brf`, `children_s_piece.brf`, etc.).
+3. Convert: BRF → Internal Model → LilyPond → Internal Model → BRF.
+4. Compare the resulting BRF content against the original. If there are minor formatting differences (e.g. spacing), verify the musical content is identical.
+5. Run the round-trip check on all test fixtures.
+
+**Definition of Done:**
+- [ ] Integration tests verify the complete round-trip flow for all standard BRF fixtures.
+- [ ] The generated BRF is musically equivalent to the original.
+- [ ] All tests pass.
 
 ---
 
-**Sprint 9b: BANA Validator (between Sprint 9 and Sprint 10)**
-- [ ] S9b-1: Implement `BANAValidator` class with rule registry
-- [ ] S9b-2: Implement articulation series shorthand rule (your specific case)
-- [ ] S9b-3: Implement octave mark validation and auto-insertion
-- [ ] S9b-4: Implement line length checking and automatic line breaking
-- [ ] S9b-5: Implement `Correction` dataclass and `ValidationResult`
-- [ ] S9b-6: Add `--report` flag to CLI that outputs plain text correction list
-- [ ] S9b-7: Add validation step to web UI with corrections displayed after upload
-- [ ] S9b-8: Integration test: input your Fengyang score with known rule violations, verify corrections match expected BANA output
-- [ ] S9b-9: Document all implemented BANA rules in `docs/bana_reference.md`
-- [ ] S9b-10: Implement `BrailleRenderer` class with `compression_level` parameter
-- [ ] S9b-11: Implement measure repeat detection using `musical_equals()`
-- [ ] S9b-12: Implement section repeat detection using sliding window comparison
-- [ ] S9b-13: Implement articulation series shorthand detection at voice level
-- [ ] S9b-14: Integration test: expanded Internal Model → compressed braille → verify against hand-formatted BANA output
-- [ ] S9b-15: Add `musical_equals()` to Note, Rest, Chord, and Measure classes
-- [ ] S9b-16: Implement `compression_level` parameter with full, minimal, and none modes
+# Sprint 9b: BANA Validator (between Sprint 9 and Sprint 10)
+
+Estimated time: 1.5–2 weeks.
+
+**Research basis for this sprint:** Verify BANA guidelines regarding octave rules (when marks are required or omitted), repeated articulations, measure repetitions, and line lengths.
 
 ---
-**Sprint 9c: BANA Formatting Rule Library**
-- [ ] S9c-1: Compile complete list of BANA mandatory formatting rules from the Technical Manual
-- [ ] S9c-2: Compile complete list of BANA optional shorthand conventions
-- [ ] S9c-3: Implement each rule as a discrete, testable method on `BANAValidator`
-- [ ] S9c-4: Document every rule in `docs/bana_reference.md` with manual citation and example
-- [ ] S9c-5: Build a rule registry so rules can be enabled/disabled individually — useful for different BANA editions (UK vs US braille music conventions differ slightly)
+
+### [ ] S9b-1: Implement BANAValidator class with rule registry
+
+**Why:** To ensure scores conform to BANA music notation rules, we need a centralized validation system that can run modular checks against the internal domain model and report errors/warnings.
+
+**Steps:**
+1. Create `src/dottednotes/validation/validator.py` with the `BANAValidator` class.
+2. Implement a rule registry where validation rules can be registered, enabled, or disabled.
+3. Define the validation run method returning a `ValidationResult`.
+4. Write tests for rule registration and validation execution.
+
+**Definition of Done:**
+- [ ] `BANAValidator` class and registry are implemented.
+- [ ] Rules can be registered and toggled.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-2: Implement articulation series shorthand rule
+
+**Why:** BANA rules (Section 14) allow repeated identical articulations (such as a string of staccatos) to be written using a shorthand sign instead of repeating it on every single note. We need to validate if shorthands are correctly used.
+
+**Steps:**
+1. Create a validation rule that checks for 4 or more identical articulations in consecutive notes.
+2. If the shorthand is missing, suggest a correction warning.
+3. Write unit tests for the articulation shorthand rule.
+
+**Definition of Done:**
+- [ ] Missing articulation shorthands are detected and reported.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-3: Implement octave mark validation and auto-insertion
+
+**Why:** BANA has complex rules for when octave marks are required (e.g. measure starts, leaps of seconds/thirds/fifths/etc. depending on direction). Checking these is critical to prevent pitch misreadings.
+
+**Steps:**
+1. Implement BANA rules for octave marks based on leap sizes.
+2. Flag missing or redundant octave marks.
+3. Implement correction suggestions to auto-insert or auto-remove octave marks.
+4. Write tests verifying correct warnings for various leaps.
+
+**Definition of Done:**
+- [ ] Octave leap rules are validated and reported.
+- [ ] Redundant and missing octave marks are flagged.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-4: Implement line length checking and automatic line breaking
+
+**Why:** Rendered braille lines should never overflow BANA physical page margins (usually 40 columns).
+
+**Steps:**
+1. Implement a rule checking if any line exceeds 40 characters (or the configured limit).
+2. Report the position and length of the violation.
+3. Propose line-break corrections.
+4. Write tests verifying line-length validations.
+
+**Definition of Done:**
+- [ ] Line overflow issues are flagged.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-5: Implement Correction dataclass and ValidationResult
+
+**Why:** We need structured feedback for validation findings rather than generic strings to allow programmatic correction and UI displays.
+
+**Steps:**
+1. In `src/dottednotes/validation/validator.py`, implement `Correction` and `ValidationResult` dataclasses.
+2. Include fields for rule ID, severity, message, line/measure reference, and before/after suggestions.
+3. Update validator and rules to return these objects.
+4. Write tests verifying the fields.
+
+**Definition of Done:**
+- [ ] `Correction` and `ValidationResult` are implemented and used by the validator.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-6: Add --report flag to CLI that outputs plain text correction list
+
+**Why:** Command-line users (especially blind composers using VoiceOver) need a highly readable, plain-text report of validation errors and corrections.
+
+**Steps:**
+1. Add the `--report` option to the `convert` subcommand in `src/dottednotes/cli.py`.
+2. If `--report` is active, validate the score.
+3. Print warnings and corrections in a clean, line-by-line format to `stderr` (e.g. `Measure 4: Missing octave mark on note D`).
+4. Write tests in `tests/test_cli.py` verifying the `--report` output.
+
+**Definition of Done:**
+- [ ] The CLI supports `--report`.
+- [ ] Output is plain-text, accessible, and contains all corrections.
+- [ ] Tests pass.
+
+---
+
+### [ ] S9b-7: Add validation step to web UI with corrections displayed after upload
+
+**Why:** Prepare backend support and APIs so that when files are uploaded in the future web UI, validation results are returned and can be displayed.
+
+**Steps:**
+1. Implement a backend helper or endpoint serializer returning JSON validation results.
+2. Write tests verifying the JSON format.
+
+**Definition of Done:**
+- [ ] JSON serialization of validation results is implemented and tested.
+
+---
+
+### [ ] S9b-8: Integration test: input your Fengyang score with known rule violations, verify corrections match expected BANA output
+
+**Why:** End-to-end integration tests using real compositions ensure the validator is reliable under real-world conditions.
+
+**Steps:**
+1. Create a variant of the Fengyang test fixture with intentional BANA violations.
+2. Run the validator and assert the corrections match the expected output.
+
+**Definition of Done:**
+- [ ] Integration test passes.
+
+---
+
+### [ ] S9b-9: Document all implemented BANA rules in docs/bana_reference.md
+
+**Why:** Clear documentation ensures developers and users understand which BANA rules are being checked.
+
+**Steps:**
+1. Update `docs/bana_reference.md` to list all validator rules, citing the BANA manual sections and providing examples.
+
+**Definition of Done:**
+- [ ] `docs/bana_reference.md` is updated and complete.
+
+---
+
+### [ ] S9b-10: Implement BrailleRenderer class with compression_level parameter
+
+**Why:** Users should be able to control whether output braille is fully formatted, minimally formatted, or uncompressed.
+
+**Steps:**
+1. Update `BrailleRenderer` to accept a `compression_level` parameter.
+2. Implement compression levels: `none`, `minimal`, and `full`.
+3. Write unit tests checking that output changes based on the compression level.
+
+**Definition of Done:**
+- [ ] `compression_level` is supported.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-11: Implement measure repeat detection using musical_equals()
+
+**Why:** In compressed mode, identical consecutive measures should be rendered using the BANA measure repeat sign (`⠍⠄`) to save space.
+
+**Steps:**
+1. Implement measure repeat detection during rendering.
+2. If consecutive measures are musically identical, replace the subsequent ones with a `MeasureRepeat` model.
+3. Write unit tests.
+
+**Definition of Done:**
+- [ ] Consecutive identical measures are replaced by the measure repeat sign in compressed output.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-12: Implement section repeat detection using sliding window comparison
+
+**Why:** Larger repeated sections of music can be compressed using BANA section/part repeat signs.
+
+**Steps:**
+1. Implement a sliding window comparison algorithm to find repeating sequences of measures.
+2. Replace repeated sequences with BANA repeat indications.
+3. Write tests verifying correct detection and representation.
+
+**Definition of Done:**
+- [ ] Section repeats are detected and compressed correctly.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-13: Implement articulation series shorthand detection at voice level
+
+**Why:** Automatically compress repeated articulations into shorthand signs during rendering.
+
+**Steps:**
+1. Add a rendering pass that replaces sequences of 4+ identical articulations with BANA shorthand signs.
+2. Write unit tests.
+
+**Definition of Done:**
+- [ ] Repeated articulations are compressed into BANA shorthands.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9b-14: Integration test: expanded Internal Model → compressed braille → verify against hand-formatted BANA output
+
+**Why:** Verify that the complete compression pipeline matches expected output from a hand-formatted BANA score.
+
+**Steps:**
+1. Run a complex score through the compression pipeline and assert the output matches hand-formatted BANA reference data.
+
+**Definition of Done:**
+- [ ] Integration test passes.
+
+---
+
+### [ ] S9b-15: Add musical_equals() to Note, Rest, Chord, and Measure classes
+
+**Why:** To detect duplicates for compression, we need a way to compare objects for musical equivalence, ignoring non-musical attributes.
+
+**Steps:**
+1. Implement `musical_equals(self, other)` on `Note`, `Rest`, `Chord`, and `Measure`.
+2. Write unit tests.
+
+**Definition of Done:**
+- [ ] `musical_equals()` is implemented and verified on the core model classes.
+- [ ] Unit tests pass.
+
+**Senior note:** Place this ticket before the repeat detection tickets in execution, as they depend on it.
+
+---
+
+### [ ] S9b-16: Implement compression_level parameter with full, minimal, and none modes
+
+**Why:** Expose the compression level option via the command line interface so users can configure formatting.
+
+**Steps:**
+1. Add the `--compression` option to the CLI (`cli.py`).
+2. Wire the flag to the renderer.
+3. Write tests verifying CLI parameter handling.
+
+**Definition of Done:**
+- [ ] CLI supports `--compression none|minimal|full`.
+- [ ] CLI tests pass.
+
+---
+
+# Sprint 9c: BANA Formatting Rule Library
+
+Estimated time: 1–1.5 weeks.
+
+---
+
+### [ ] S9c-1: Compile complete list of BANA mandatory formatting rules from the Technical Manual
+
+**Why:** To ensure full BANA compliance, we need a complete reference of mandatory rules from the manual.
+
+**Steps:**
+1. Gather all mandatory formatting rules from the BANA manual.
+2. Document them in `docs/bana_reference.md` under a "Mandatory Formatting Rules" section.
+
+**Definition of Done:**
+- [ ] Mandatory formatting rules are documented.
+
+---
+
+### [ ] S9c-2: Compile complete list of BANA optional shorthand conventions
+
+**Why:** Document all optional shorthands for completeness.
+
+**Steps:**
+1. Identify and document optional shorthands from the manual in `docs/bana_reference.md`.
+
+**Definition of Done:**
+- [ ] Optional shorthands are documented.
+
+---
+
+### [ ] S9c-3: Implement each rule as a discrete, testable method on BANAValidator
+
+**Why:** Modular implementation makes the validator easy to test, maintain, and expand.
+
+**Steps:**
+1. Translate compiled rules into separate methods on `BANAValidator`.
+2. Add tests verifying each method.
+
+**Definition of Done:**
+- [ ] All compiled rules are implemented as modular methods.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S9c-4: Document every rule in docs/bana_reference.md with manual citation and example
+
+**Why:** Help users map validation errors to BANA manual guidelines.
+
+**Steps:**
+1. Update `docs/bana_reference.md` with rule names, description, citations, and examples.
+
+**Definition of Done:**
+- [ ] Rule library is fully documented.
+
+---
+
+### [ ] S9c-5: Build a rule registry so rules can be enabled/disabled individually — useful for different BANA editions
+
+**Why:** Different regions (e.g. UK vs US) or BANA editions have slight differences in rules.
+
+**Steps:**
+1. Support loading validation profiles (e.g., standard, strict, UK).
+2. Write tests verifying profile loading and rule filtering.
+
+**Definition of Done:**
+- [ ] Validator supports rule registry configuration profiles.
+- [ ] Unit tests pass.
+
+---
 
 
 
