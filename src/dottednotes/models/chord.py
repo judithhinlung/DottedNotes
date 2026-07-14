@@ -80,4 +80,13 @@ def _chord_extras(written: Note) -> str:
         (')' if written.slur_end else '') +
         ('\\)' if written.slur_bracket_close else '')
     )
-    return f"{art_str}{orn_str}{tie_str}{dyn_str}{slur_str}"
+    pedal_str = ''
+    if written.pedal_sustain == "on":
+        pedal_str = r"\sustainOn"
+    elif written.pedal_sustain == "off":
+        pedal_str = r"\sustainOff"
+    elif written.pedal_sustain == "change":
+        pedal_str = r"\sustainOff\sustainOn"
+    elif written.pedal_sustain == "on_off":
+        pedal_str = r"\sustainOn\sustainOff"
+    return f"{art_str}{orn_str}{tie_str}{dyn_str}{slur_str}{pedal_str}"

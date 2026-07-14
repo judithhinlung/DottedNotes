@@ -349,6 +349,11 @@ class BrailleTokenizer:
             elif char == self._BAR_LINE_PREFIX:
                 three = text[i:i + 3]
                 two = text[i:i + 2]
+                # Piano damper pedal down: ⠣⠉
+                if two == '⠣⠉':
+                    tokens.append(BrailleToken(two, SymbolCategory.PEDAL, i, line))
+                    i += 2
+                    continue
                 # Bar line sequences take priority (longest match first)
                 if three in BAR_LINE_SEQUENCES:
                     tokens.append(BrailleToken(
@@ -438,6 +443,19 @@ class BrailleTokenizer:
                         continue
                 # ⠩ not classified as key sig → sharp accidental
 
+            # --- natural cell ⠡: pedal up / change / natural accidental ---
+            elif char == '⠡':
+                three = text[i:i + 3]
+                two = text[i:i + 2]
+                if three == '⠡⠣⠉':
+                    tokens.append(BrailleToken(three, SymbolCategory.PEDAL, i, line))
+                    i += 3
+                    continue
+                if two == '⠡⠉':
+                    tokens.append(BrailleToken(two, SymbolCategory.PEDAL, i, line))
+                    i += 2
+                    continue
+
             # --- ornaments / articulations / slur-tie: longest match first ---
             # Several ornament, articulation, and slur pairs begin with cells
             # that are also OCTAVE_MARKS (⠐, ⠰, ⠸, ⠨, ⠘, ⠠, ⠈).
@@ -447,6 +465,12 @@ class BrailleTokenizer:
             # over ⠐ (octave 4) and ⠐⠦ (mezzo staccato).
             three = text[i:i + 3]
             two = text[i:i + 2]
+
+            # Piano pedal signs: half pedal ⠐⠣⠉, pedal up after strike ⠐⠡⠉, pedal down after strike ⠠⠣⠉
+            if three in ('⠐⠣⠉', '⠐⠡⠉', '⠠⠣⠉'):
+                tokens.append(BrailleToken(three, SymbolCategory.PEDAL, i, line))
+                i += 3
+                continue
 
             # Hand-sign 2-cell sequences (right ⠨⠜, left ⠸⠜), marking which
             # physical staff the following line's measures belong to. Must be

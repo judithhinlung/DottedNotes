@@ -63,6 +63,7 @@ class SymbolCategory(Enum):
     MULTI_MEASURE_REST = auto()
     FINGERING = auto()
     TREMOLO = auto()
+    PEDAL = auto()
     UNKNOWN = auto()
 
 
@@ -482,6 +483,12 @@ DYNAMIC_CELLS: dict[str, str] = {
 
 SLUR_CELLS: dict[str, str] = {
     '⠈⠉': 'tie',               # dots 4 + dots 1,4 — placed after tied note
+    '⠨⠉': 'chord_tie',         # dots 4,6 + dots 1,4 — placed after a tied chord
+                                # (BANA Music Braille Code 2015, Table 10, Sec. 10.2,
+                                # ASCII ".c"). Doubled for 4+ successive tied chords by
+                                # restating only the second cell (⠨⠉⠉, Sec. 10.2.2),
+                                # disambiguated from a plain slur at the parser level
+                                # (see _handle_slur), not here.
     '⠉':  'slur',              # dots 1,4 — between notes (simple) or doubled for carry
     '⠸⠉': 'slur',              # dots 4,5,6 + dots 1,4 — alternative syllabic slur
     '⠰⠃': 'slur_bracket_open', # dots 5,6 + dots 1,2 — before first bracketed note

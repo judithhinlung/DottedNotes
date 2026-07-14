@@ -5833,7 +5833,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-3: Implement parsing for damper/sustain pedal signs
+### [x] S8b-3: Implement parsing for damper/sustain pedal signs
 
 **Why:** Sustain pedal down/release commands are essential for piano and keyboard scores. Without them, translated keyboard scores lack pedal engraving, which is standard in printed music.
 
@@ -5845,9 +5845,9 @@ Estimated time: 1.5–2 weeks.
 5. Write unit tests in `tests/test_parser.py` and verify formatting in a piano-style score.
 
 **Definition of Done:**
-- [ ] Sustain pedal down and release symbols are parsed successfully.
-- [ ] LilyPond compiles with correct `\sustainOn` and `\sustainOff` markings.
-- [ ] Unit tests verify the pedaling state and output format.
+- [x] Sustain pedal down and release symbols are parsed successfully.
+- [x] LilyPond compiles with correct `\sustainOn` and `\sustainOff` markings.
+- [x] Unit tests verify the pedaling state and output format.
 
 ---
 

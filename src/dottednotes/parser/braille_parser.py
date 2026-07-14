@@ -215,6 +215,7 @@ class _PendingNote:
     # second note/chord of the pair is identified purely positionally (the
     # very next item), so it needs no flag of its own -- see
     # BrailleParser._group_alternating_tremolos.
+    pedal_sustain: str | None = None
 
 
 @dataclass
@@ -230,6 +231,7 @@ class _PendingRest:
     is_divisi_octave: bool = False  # S5b-3: always False — rests are never
     # part of a divisi-in-octaves passage — kept only so _group_triplets
     # can check this attribute uniformly across notes and rests.
+    pedal_sustain: str | None = None
 
 
 class BrailleParser:
@@ -336,6 +338,38 @@ class BrailleParser:
                     self._last_item_was_interval = False
                     i = self._parse_fingering_after_note_or_interval(i, pending)
                     i = self._parse_tremolo_after_note_or_chord(i, pending)
+            elif token.category == SymbolCategory.PEDAL:
+                if token.character in ('⠣⠉', '⠐⠣⠉', '⠠⠣⠉'):
+                    self._pending_pedal_down = "on"
+                elif token.character in ('⠡⠉', '⠐⠡⠉'):
+                    active = left_staff if self._current_hand == 'left' else right_staff
+                    if pending:
+                        if pending[-1].pedal_sustain == "on":
+                            pending[-1].pedal_sustain = "on_off"
+                        else:
+                            pending[-1].pedal_sustain = "off"
+                    elif active.measures and active.measures[-1].notes:
+                        last_item = active.measures[-1].notes[-1]
+                        if isinstance(last_item, Chord):
+                            if last_item.notes[0].pedal_sustain == "on":
+                                last_item.notes[0].pedal_sustain = "on_off"
+                            else:
+                                last_item.notes[0].pedal_sustain = "off"
+                        elif isinstance(last_item, (Note, Rest)):
+                            if last_item.pedal_sustain == "on":
+                                last_item.pedal_sustain = "on_off"
+                            else:
+                                last_item.pedal_sustain = "off"
+                elif token.character == '⠡⠣⠉':
+                    active = left_staff if self._current_hand == 'left' else right_staff
+                    if pending:
+                        pending[-1].pedal_sustain = "change"
+                    elif active.measures and active.measures[-1].notes:
+                        last_item = active.measures[-1].notes[-1]
+                        if isinstance(last_item, Chord):
+                            last_item.notes[0].pedal_sustain = "change"
+                        elif isinstance(last_item, (Note, Rest)):
+                            last_item.pedal_sustain = "change"
             elif token.category == SymbolCategory.HAND_SIGN:
                 # Octave state is tracked per hand: a BRF that interleaves
                 # right/left-hand systems without restating the octave mark
@@ -374,6 +408,10 @@ class BrailleParser:
                         self._last_interval_seen = None
                         self._divisi_octave_active = False
                         self._divisi_marking_pending = False
+                        # BANA Sec. 10.1.2: tie restatement is required after a
+                        # major interruption such as a double bar.
+                        self._chord_tie_carry_active = False
+                        self._last_token_was_chord_tie = False
             elif token.category == SymbolCategory.REPEAT:
                 self._pending_repeat_count += 1
                 if self._pending_repeat_line is None:
@@ -745,7 +783,27 @@ class BrailleParser:
             if pending:
                 pending[-1].tie = True
 
+        elif slur_type == 'chord_tie':
+            if self._chord_tie_carry_active:
+                # Terminator: full sign restated once while carry is active
+                # (BANA Sec. 10.2.2). The last carried chord already got its
+                # tie via _buffer_note, so don't re-apply it here.
+                self._chord_tie_carry_active = False
+            else:
+                # Single occurrence, or first of a doubled pair — either way
+                # ties the chord currently in progress to the next one.
+                if pending:
+                    pending[-1].tie = True
+                self._last_token_was_chord_tie = True
+
         elif slur_type == 'slur':
+            if self._last_token_was_chord_tie:
+                # Bare slur cell immediately after a chord-tie sign is the
+                # doubling shorthand (BANA Sec. 10.2.2: restate only the
+                # second cell, ⠨⠉⠉), not an ordinary phrase slur.
+                self._chord_tie_carry_active = True
+                self._last_token_was_chord_tie = False
+                return
             if self._slur_carry_active:
                 # Terminator: the next note ends the slurred passage.
                 self._pending_slur_end = True
@@ -1180,11 +1238,19 @@ class BrailleParser:
             grace_note=grace_note,
             slur_end=slur_end,
             slur_bracket_open=slur_bracket_open,
+            pedal_sustain=self._pending_pedal_down,
         )
+        self._pending_pedal_down = None
 
         # Apply any active (carried) intervals to this new note.
         for interval_number in sorted(self._active_intervals):
             self._apply_interval(interval_number, pnote)
+
+        # BANA Sec. 10.2.1: a doubled chord tie carries across successive
+        # chords independently of interval-doubling carry, which must not
+        # be interrupted by it.
+        if self._chord_tie_carry_active:
+            pnote.tie = True
 
         # S5b-3: while a divisi-in-octaves passage is active (see
         # _handle_interval), every note carried by the octave interval is
@@ -1200,10 +1266,13 @@ class BrailleParser:
     def _buffer_rest(self, token: BrailleToken) -> _PendingRest:
         # An octave mark before a rest is meaningless (rests have no pitch); clear it.
         self._octave_mark_pending = False
-        return _PendingRest(
+        prest = _PendingRest(
             base_duration=REST_CELLS[token.character],
             raw_brl=token.character,
+            pedal_sustain=self._pending_pedal_down,
         )
+        self._pending_pedal_down = None
+        return prest
 
     def _handle_key_signature(self, token: BrailleToken) -> None:
         self._key_signature = KeySignature(
@@ -1367,6 +1436,7 @@ class BrailleParser:
                     raw_brl=pnote.raw_brl,
                     duration=dur,
                     is_full_measure=is_full,
+                    pedal_sustain=pnote.pedal_sustain,
                 ))
                 divisi_partners.append(None)
                 continue
@@ -1389,6 +1459,7 @@ class BrailleParser:
                 slur_bracket_close=pnote.slur_bracket_close,
                 fingerings=list(pnote.fingerings),
                 tremolo=pnote.tremolo,
+                pedal_sustain=pnote.pedal_sustain,
             )
             if pnote.is_divisi_octave and pnote.interval_notes:
                 # Divisi-in-octaves (BANA 33.4.2): the octave partner is a
@@ -1932,6 +2003,8 @@ class BrailleParser:
             '_grace_carry_ending': self._grace_carry_ending,
             '_last_token_was_slur': self._last_token_was_slur,
             '_slur_carry_active': self._slur_carry_active,
+            '_last_token_was_chord_tie': self._last_token_was_chord_tie,
+            '_chord_tie_carry_active': self._chord_tie_carry_active,
             '_pending_slur_end': self._pending_slur_end,
             '_pending_slur_bracket_open': self._pending_slur_bracket_open,
             '_pending_tempo': self._pending_tempo,
@@ -2008,10 +2081,13 @@ class BrailleParser:
         self._grace_carry_ending: bool = False
         self._last_token_was_slur: bool = False
         self._slur_carry_active: bool = False
+        self._last_token_was_chord_tie: bool = False
+        self._chord_tie_carry_active: bool = False
         self._pending_slur_end: bool = False
         self._pending_slur_bracket_open: bool = False
         self._pending_tempo: TextMarking | None = None
         self._pending_text_markings: list[TextMarking] = []
+        self._pending_pedal_down: str | None = None
         # Interval / chord state
         self._active_intervals: dict[int, AccidentalType | None] = {}
         self._last_interval_seen: int | None = None

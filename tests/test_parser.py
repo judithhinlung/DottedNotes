@@ -3569,6 +3569,106 @@ def test_multiple_doublings_terminated_together():
 
 
 # =============================================================================
+# S8b-4: Chord ties (BANA Music Braille Code 2015, Table 10, Sec. 10.2)
+# =============================================================================
+
+_CHORD_TIE = '⠨⠉'  # dots 4,6 + dots 1,4 — placed after a tied chord
+
+
+# --- Tokenizer: chord-tie cell recognition ---
+
+def test_tokenizer_chord_tie_is_slur_category():
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠬' + _CHORD_TIE + '⠐⠹⠬')
+    slur_tokens = [t for t in tokens if t.category == SymbolCategory.SLUR]
+    assert len(slur_tokens) == 1
+    assert slur_tokens[0].character == _CHORD_TIE
+
+
+def test_tokenizer_chord_tie_not_split_into_octave_mark_plus_slur():
+    # ⠨ (dots 4,6) is octave mark 5; before this fix, ⠨⠉ mis-tokenized as
+    # octave-mark-5 + plain slur instead of one chord-tie SLUR token.
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠬' + _CHORD_TIE + '⠐⠹⠬')
+    octave_tokens = [t for t in tokens if t.category == SymbolCategory.OCTAVE_MARK]
+    assert all(t.character == '⠐' for t in octave_tokens)
+    stray_slurs = [t for t in tokens if t.character == '⠉' and t.category == SymbolCategory.SLUR]
+    assert stray_slurs == []
+
+
+# --- Parser: chord tie ---
+
+def test_parser_chord_tie_attaches_to_first_chord_only():
+    """A single chord-tie sign ties exactly the chord pair it sits between."""
+    items = _parse_chords('⠐⠹⠬' + _CHORD_TIE + '⠐⠹⠬')
+    assert items[0].notes[0].tie is True
+    assert items[1].notes[0].tie is False
+
+
+def test_parser_chord_tie_renders_tilde_in_lilypond():
+    items = _parse_chords('⠐⠹⠬' + _CHORD_TIE + '⠐⠹⠬')
+    ly0 = items[0].to_relative_lilypond(60)[0]
+    ly1 = items[1].to_relative_lilypond(60)[0]
+    assert ly0.count('~') == 1
+    assert ly0.index('~') > ly0.index('>')  # placed after the chord's closing bracket
+    assert '~' not in ly1
+
+
+def test_chord_tie_doubling_carry_mode():
+    """Doubled chord-tie sign (⠨⠉⠉) ties 4 successive chords via carry; a
+    single terminator restatement ends the carry for the chord after it
+    (BANA Sec. 10.2.2, mirrors test_interval_doubling_carry_mode /
+    test_parser_doubled_staccato_ends_on_third_sign's shape).
+    """
+    text = ('⠐⠹⠬' + _CHORD_TIE + '⠉' + '⠱⠬' + '⠐⠫⠬' + '⠳⠬'
+            + _CHORD_TIE + '⠐⠹⠬')
+    items = _parse_chords(text)
+    assert len(items) == 5
+    assert all(isinstance(item, Chord) for item in items)
+    assert items[0].notes[0].tie is True
+    assert items[1].notes[0].tie is True
+    assert items[2].notes[0].tie is True
+    assert items[3].notes[0].tie is True   # terminator chord, also carried
+    assert items[4].notes[0].tie is False  # carry ended
+
+
+def test_chord_tie_carry_terminates_at_final_bar():
+    """Active chord-tie carry terminates at a final double bar (BANA Sec. 10.1.2,
+    mirrors test_interval_doubling_terminates_at_final_bar)."""
+    text = ('⠐⠹⠬' + _CHORD_TIE + '⠉' + '⠱⠬' + '⠐⠫⠬' + '⠳⠬' + '⠣⠅\n⠐⠹⠬')
+    tokens = BrailleTokenizer().tokenize(text)
+    score = BrailleParser(tokens=tokens).parse()
+    staff = score.staves[0]
+    assert staff.measures[0].notes[3].notes[0].tie is True    # last carried chord
+    assert staff.measures[1].notes[0].notes[0].tie is False   # carry ended by bar
+
+
+def test_chord_tie_does_not_interrupt_interval_doubling_carry():
+    """BANA Sec. 10.2.1: an active interval-doubling carry must not be
+    interrupted by a chord tie occurring between carried chords."""
+    # ⠐⠹⠬⠬ = C4 with 3rd applied + carry; a chord tie then ties this chord
+    # to the next; ⠱⠐⠫⠳ = three more notes, each still carrying the 3rd
+    # interval independently of the (single, non-carrying) chord-tie sign.
+    text = '⠐⠹⠬⠬' + _CHORD_TIE + '⠱⠐⠫⠳'
+    items = _parse_chords(text)
+    assert len(items) == 4
+    assert all(isinstance(item, Chord) for item in items)
+    # Interval carry still applies to every chord (BANA 9.3 unaffected).
+    assert items[1].notes[1].note_name == 'B'  # D4 + 3rd below (carry)
+    assert items[3].notes[1].note_name == 'E'  # G4 + 3rd below (carry)
+    # A single (non-doubled) chord tie only ties the first pair.
+    assert items[0].notes[0].tie is True
+    assert items[1].notes[0].tie is False
+
+
+def test_regression_plain_slur_without_preceding_chord_tie_still_works():
+    """An ordinary bare slur cell, not preceded by a chord-tie sign, is unaffected."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠐⠹' + '⠉' + '⠹')
+    assert notes[0].tie is False
+    assert notes[1].tie is False
+
+
+# =============================================================================
 # S5-2: In-accord parsing
 # =============================================================================
 

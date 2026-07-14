@@ -47,6 +47,7 @@ class Note(BrailleSymbol):
     slur_bracket_close: bool = False
     fingerings: list[Fingering] = field(default_factory=list)
     tremolo: Optional[RepeatedTremolo] = None
+    pedal_sustain: Optional[str] = None
 
     def __post_init__(self):
         if self.note_name not in NOTE_NAME_TO_LILYPOND:
@@ -84,8 +85,17 @@ class Note(BrailleSymbol):
             (')' if self.slur_end else '') +
             ('\\)' if self.slur_bracket_close else '')
         )
+        pedal_str = ''
+        if self.pedal_sustain == "on":
+            pedal_str = r"\sustainOn"
+        elif self.pedal_sustain == "off":
+            pedal_str = r"\sustainOff"
+        elif self.pedal_sustain == "change":
+            pedal_str = r"\sustainOff\sustainOn"
+        elif self.pedal_sustain == "on_off":
+            pedal_str = r"\sustainOn\sustainOff"
         return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
-                f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}")
+                f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}")
 
     def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
         """Return (pitch_only_str, new_midi) for use inside a chord <...> block.
@@ -183,8 +193,17 @@ class Note(BrailleSymbol):
             (')' if self.slur_end else '') +
             ('\\)' if self.slur_bracket_close else '')
         )
+        pedal_str = ''
+        if self.pedal_sustain == "on":
+            pedal_str = r"\sustainOn"
+        elif self.pedal_sustain == "off":
+            pedal_str = r"\sustainOff"
+        elif self.pedal_sustain == "change":
+            pedal_str = r"\sustainOff\sustainOn"
+        elif self.pedal_sustain == "on_off":
+            pedal_str = r"\sustainOn\sustainOff"
         result = (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
-                  f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}")
+                  f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}")
         return result, target_midi
 
 
@@ -194,14 +213,25 @@ class Rest(BrailleSymbol):
     duration: Duration
     is_full_measure: bool = False  # True for whole-measure rests (R1 in LilyPond)
     multi_measure_count: int = 1   # Number of measures for a multi-measure rest
+    pedal_sustain: Optional[str] = None
 
     def to_lilypond(self) -> str:
         """Return LilyPond rest string e.g. 'r4', 'R1', 'r2.', 'R1*4'"""
+        pedal_str = ''
+        if self.pedal_sustain == "on":
+            pedal_str = r"\sustainOn"
+        elif self.pedal_sustain == "off":
+            pedal_str = r"\sustainOff"
+        elif self.pedal_sustain == "change":
+            pedal_str = r"\sustainOff\sustainOn"
+        elif self.pedal_sustain == "on_off":
+            pedal_str = r"\sustainOn\sustainOff"
+
         if self.is_full_measure:
             if self.multi_measure_count > 1:
-                return f"R{self.duration.to_lilypond()}*{self.multi_measure_count}"
-            return f"R{self.duration.to_lilypond()}"
-        return f"r{self.duration.to_lilypond()}"
+                return f"R{self.duration.to_lilypond()}*{self.multi_measure_count}{pedal_str}"
+            return f"R{self.duration.to_lilypond()}{pedal_str}"
+        return f"r{self.duration.to_lilypond()}{pedal_str}"
 
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Rests do not change the pitch reference; pass prev_midi through unchanged."""
