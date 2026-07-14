@@ -5796,7 +5796,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-1: Implement parsing for the Breve (Double Whole Note/Rest)
+### [x] S8b-1: Implement parsing for the Breve (Double Whole Note/Rest)
 
 **Why:** To support early music, classical transcriptions, and choral works that contain double whole notes and double whole rests (breve). DottedNotes' `Duration` model currently only supports durations from whole note (1) down to 128th note.
 
@@ -5808,13 +5808,13 @@ Estimated time: 1.5–2 weeks.
 5. Write unit tests in `tests/test_models.py` and `tests/test_parser.py` for breve notes and rests.
 
 **Definition of Done:**
-- [ ] Breve note cell sequences are successfully tokenized and parsed.
-- [ ] LilyPond output correctly renders `\breve` and `R\breve`.
-- [ ] Unit tests verify parsing and LilyPond rendering of breves.
+- [x] Breve note cell sequences are successfully tokenized and parsed.
+- [x] LilyPond output correctly renders `\breve` and `R\breve`.
+- [x] Unit tests verify parsing and LilyPond rendering of breves.
 
 ---
 
-### [ ] S8b-2: Implement parsing for string bowing signs (Up-bow/Down-bow)
+### [x] S8b-2: Implement parsing for string bowing signs (Up-bow/Down-bow)
 
 **Why:** Bowing signs (down-bow and up-bow) are critical for string instrument execution in chamber and orchestral music. DottedNotes supports multi-staff scores and string instruments, so parsing these symbols is a high priority.
 
@@ -5827,9 +5827,9 @@ Estimated time: 1.5–2 weeks.
 6. Write unit tests in `tests/test_parser.py` and a dedicated integration test.
 
 **Definition of Done:**
-- [ ] Up-bow and down-bow symbols are parsed correctly.
-- [ ] Bowing marks are rendered as `\upbow` and `\downbow` in LilyPond.
-- [ ] Unit tests verify single and doubled bowing marks.
+- [x] Up-bow and down-bow symbols are parsed correctly.
+- [x] Bowing marks are rendered as `\upbow` and `\downbow` in LilyPond.
+- [x] Unit tests verify single and doubled bowing marks.
 
 ---
 

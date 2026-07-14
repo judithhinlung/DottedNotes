@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-VALID_DURATIONS = {1, 2, 4, 8, 16, 32, 64}
+VALID_DURATIONS = {0, 1, 2, 4, 8, 16, 32, 64}
 
 # MusicXML-style integer tick resolution (quarter note = 24 ticks). Chosen
 # over float beats (S5-8) so triplet math (thirds) is always exact: a
@@ -10,7 +10,7 @@ TICKS_PER_QUARTER = 24
 
 @dataclass
 class Duration:
-    value: int  # 1=whole, 2=half, 4=quarter, 8=eighth, 16=sixteenth, 32=thirty-second, 64=sixty-fourth
+    value: int  # 0=breve, 1=whole, 2=half, 4=quarter, 8=eighth, 16=sixteenth, 32=thirty-second, 64=sixty-fourth
     dots: int = 0  # augmentation dots (0, 1, or 2)
     is_triplet: bool = False  # 3-in-the-time-of-2 (BANA 8.4); no other tuplet ratios supported
 
@@ -26,6 +26,8 @@ class Duration:
             )
 
     def to_lilypond(self) -> str:
+        if self.value == 0:
+            return r"\breve" + "." * self.dots
         return str(self.value) + "." * self.dots
 
     def duration_in_ticks(self) -> int:
@@ -37,7 +39,10 @@ class Duration:
         our own internal beat-accounting (S5-6/S5-7's duration resolution
         and _validate_measure_beat_count), independent of LilyPond output.
         """
-        base = TICKS_PER_QUARTER * 4 // self.value
+        if self.value == 0:
+            base = TICKS_PER_QUARTER * 8
+        else:
+            base = TICKS_PER_QUARTER * 4 // self.value
         if self.dots == 1:
             ticks = base * 3 // 2
         elif self.dots == 2:

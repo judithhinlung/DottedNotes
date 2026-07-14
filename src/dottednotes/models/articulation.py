@@ -10,6 +10,8 @@ class ArticulationType(Enum):
     ACCENT = "accent"
     EXPRESSIVE_ACCENT = "expressive_accent"
     SWELL = "swell"
+    DOWN_BOW = "down_bow"   # S8b-2, BANA Sec. 25.3 (Table 24B) -> \downbow
+    UP_BOW = "up_bow"       # S8b-2, BANA Sec. 25.3 (Table 24B) -> \upbow
 
 
 _ARTICULATION_TO_LILYPOND = {
@@ -20,6 +22,12 @@ _ARTICULATION_TO_LILYPOND = {
     ArticulationType.ACCENT: '->',
     ArticulationType.EXPRESSIVE_ACCENT: '-^',
     ArticulationType.SWELL: r'\espressivo',
+    # No shorthand punctuation exists for bowing marks (LilyPond Notation
+    # Reference Sec. 11.1.2, "Bowing indications" -- created as articulations,
+    # verified against a real `lilypond` compile: bare `\downbow`/`\upbow`
+    # attach correctly with no leading hyphen, same as \espressivo above).
+    ArticulationType.DOWN_BOW: r'\downbow',
+    ArticulationType.UP_BOW: r'\upbow',
 }
 
 

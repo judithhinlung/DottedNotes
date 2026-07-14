@@ -120,6 +120,8 @@ _STR_TO_ARTICULATION_TYPE: dict[str, ArticulationType] = {
     'accent':            ArticulationType.ACCENT,
     'expressive_accent': ArticulationType.EXPRESSIVE_ACCENT,
     'swell':             ArticulationType.SWELL,
+    'down_bow':          ArticulationType.DOWN_BOW,
+    'up_bow':            ArticulationType.UP_BOW,
 }
 
 _STR_TO_ORNAMENT_TYPE: dict[str, OrnamentType] = {
@@ -306,7 +308,30 @@ class BrailleParser:
                         self._pending_slur_end = True
                         self._last_token_was_slur = False
                     self._commit_pending_triplet_signs()
-                    pending.append(self._buffer_note(token))
+
+                    is_breve = False
+                    note_name, base_duration = NOTE_CELLS[token.character]
+                    if base_duration == 1:
+                        # Compact form lookup: only a breve if the time signature allows at least 8 beats
+                        if (i + 1 < len(self._tokens)
+                                and self._tokens[i + 1].character == '⠅'
+                                and self._time_signature
+                                and self._time_signature.beats_per_measure() >= 8.0):
+                            is_breve = True
+                            i += 1
+                        # Longer form lookup: token + '⠘' + '⠉' + token
+                        elif (i + 3 < len(self._tokens)
+                              and self._tokens[i + 1].character == '⠘'
+                              and self._tokens[i + 2].character == '⠉'
+                              and self._tokens[i + 3].character == token.character):
+                            is_breve = True
+                            i += 3
+
+                    pnote = self._buffer_note(token)
+                    if is_breve:
+                        pnote.base_duration = 0
+
+                    pending.append(pnote)
                     self._apply_triplet_flag(pending[-1])
                     self._last_item_was_interval = False
                     i = self._parse_fingering_after_note_or_interval(i, pending)
@@ -389,7 +414,27 @@ class BrailleParser:
                 pending = []
             elif token.category == SymbolCategory.REST:
                 self._commit_pending_triplet_signs()
-                pending.append(self._buffer_rest(token))
+
+                is_breve = False
+                base_duration = REST_CELLS[token.character]
+                if base_duration == 1:
+                    # Compact form lookup
+                    if i + 1 < len(self._tokens) and self._tokens[i + 1].character == '⠅':
+                        is_breve = True
+                        i += 1
+                    # Longer form lookup: token + '⠘' + '⠉' + token
+                    elif (i + 3 < len(self._tokens)
+                          and self._tokens[i + 1].character == '⠘'
+                          and self._tokens[i + 2].character == '⠉'
+                          and self._tokens[i + 3].character == token.character):
+                        is_breve = True
+                        i += 3
+
+                prest = self._buffer_rest(token)
+                if is_breve:
+                    prest.base_duration = 0
+
+                pending.append(prest)
                 self._apply_triplet_flag(pending[-1])
                 self._last_item_was_interval = False
             elif token.category == SymbolCategory.MULTI_MEASURE_REST:
@@ -1716,7 +1761,11 @@ class BrailleParser:
         for i, n in enumerate(pending):
             next_bd = pending[i + 1].base_duration if i + 1 < len(pending) else None
 
-            if n.base_duration == 1:
+            if n.base_duration == 0:
+                resolved[i] = 0
+                state = "normal"
+
+            elif n.base_duration == 1:
                 if state == "individual":
                     resolved[i] = 16
                 elif next_bd == 8:

@@ -63,6 +63,8 @@ class BrailleTokenizer:
         ⠣⠅   final double bar
         ⠣⠶   forward repeat
         ⠣⠆   end repeat
+        ⠣⠃   down-bow (BANA Sec. 25.3) → ARTICULATION
+        ⠣⠄   up-bow (BANA Sec. 25.3) → ARTICULATION
         If none of the above match and the tokenizer is at a measure boundary,
         ⠣⠣⠣ / ⠣⠣ are flat key signatures (2–3 flats).
         ⠣ alone at a measure boundary: KEY_SIGNATURE only if followed by the
@@ -366,6 +368,15 @@ class BrailleTokenizer:
                 # and flat accidental fallthrough.  ⠣⠜ is never a bar line or key sig.
                 if two == '⠣⠜':
                     tokens.append(BrailleToken(two, SymbolCategory.IN_ACCORD, i, line))
+                    i += 2
+                    continue
+                # Bowing marks (S8b-2, down-bow ⠣⠃ / up-bow ⠣⠄): must be checked
+                # before flat key sigs and flat accidental fallthrough for the
+                # same reason as ⠣⠜ above -- neither is ever a bar line or key
+                # sig, and KEY_SIGNATURE_CELLS' own ⠣-prefixed keys (⠣, ⠣⠣, ⠣⠣⠣)
+                # never collide with these two 2-char sequences.
+                if two in ARTICULATION_CELLS:
+                    tokens.append(BrailleToken(two, SymbolCategory.ARTICULATION, i, line))
                     i += 2
                     continue
                 # At a measure boundary: check for flat key signatures

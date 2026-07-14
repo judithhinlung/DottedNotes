@@ -218,6 +218,8 @@ TIME_SIGNATURE_CELLS: dict[str, tuple[int, int]] = {
     '⠼⠋⠦': (6, 8),   # 6/8 compound     — confirmed by developer
     '⠼⠃⠆': (2, 2),   # 2/2 cut time     — confirmed by developer
     '⠼⠃⠲': (2, 4),   # 2/4             — confirmed by developer
+    '⠼⠙⠆': (4, 2),   # 4/2
+    '⠼⠓⠲': (8, 4),   # 8/4
 }
 
 # ---------------------------------------------------------------------------
@@ -496,6 +498,15 @@ ARTICULATION_CELLS: dict[str, str] = {
     '⠨⠦': 'accent',             # dots 4,6 + dots 2,3,6
     '⠘⠦': 'expressive_accent',  # dots 4,5 + dots 2,3,6
     '⠤⠄': 'swell',              # dots 3,6 + dot 3
+
+    # --- Bowing marks (S8b-2, BANA Music Braille Code 2015, Table 24(B),
+    # Sec. 25.3 "Bowing Marks") --- ASCII "<b" and "<'" decoded via
+    # ASCII_TO_DOTS (input_pipeline.py): '<' = dots 1,2,6 = ⠣ (the same
+    # BAR_LINE_PREFIX cell used for flats/bar lines/key sigs, disambiguated
+    # here by exact 2-char lookup in the tokenizer's ⠣ branch, same
+    # mechanism already used for ⠣⠜ full-measure in-accord).
+    '⠣⠃': 'down_bow',  # dots 1,2,6 + dots 1,2   ("<b")
+    '⠣⠄': 'up_bow',    # dots 1,2,6 + dot 3      ("<'")
 }
 
 # ---------------------------------------------------------------------------

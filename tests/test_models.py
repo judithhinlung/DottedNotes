@@ -61,6 +61,7 @@ def test_duration_to_lilypond():
 def test_duration_to_lilypond_all_valid_values():
     for value in [1, 2, 4, 8, 16, 32, 64]:
         assert Duration(value).to_lilypond() == str(value)
+    assert Duration(0).to_lilypond() == r"\breve"
 
 
 def test_double_dotted_half():
@@ -73,10 +74,14 @@ def test_invalid_duration_value_raises():
         Duration(value=3)
 
 
-def test_invalid_duration_value_zero_raises():
-    import pytest
-    with pytest.raises(ValueError):
-        Duration(value=0)
+def test_breve_duration():
+    d = Duration(value=0)
+    assert d.to_lilypond() == r"\breve"
+    assert d.duration_in_ticks() == 192
+    
+    d_dotted = Duration(value=0, dots=1)
+    assert d_dotted.to_lilypond() == r"\breve."
+    assert d_dotted.duration_in_ticks() == 288
 
 
 def test_invalid_dot_count_raises():

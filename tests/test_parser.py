@@ -1999,6 +1999,105 @@ def test_parser_tenuto_renders_to_lilypond():
 
 
 # ---------------------------------------------------------------------------
+# S8b-2: Bowing marks (down-bow / up-bow)
+# BANA Music Braille Code 2015, Table 24(B), Sec. 25.3 -- down-bow "<b" = ⠣⠃,
+# up-bow "<'" = ⠣⠄ (decoded via ASCII_TO_DOTS). Reuses the existing
+# articulation carry/doubling mechanism (_handle_articulation) wholesale, so
+# these tests mirror the staccato tests above one-for-one.
+# ---------------------------------------------------------------------------
+
+def test_tokenizer_down_bow_two_cells():
+    tokens = BrailleTokenizer().tokenize('⠣⠃')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠣⠃'
+
+
+def test_tokenizer_up_bow_two_cells():
+    tokens = BrailleTokenizer().tokenize('⠣⠄')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.ARTICULATION
+    assert tokens[0].character == '⠣⠄'
+
+
+def test_tokenizer_flat_accidental_still_works_alongside_bowing_cells():
+    # ⠣ alone (not followed by ⠃ or ⠄) must remain a flat ACCIDENTAL --
+    # regression check that adding ⠣⠃/⠣⠄ to ARTICULATION_CELLS didn't
+    # shadow the pre-existing flat-accidental fallthrough.
+    tokens = BrailleTokenizer().tokenize('⠣⠐⠹')
+    assert tokens[0].category == SymbolCategory.ACCIDENTAL
+    assert tokens[1].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[2].category == SymbolCategory.NOTE
+
+
+def test_parser_down_bow_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠣⠃⠐⠹')
+    assert len(notes[0].articulations) == 1
+    assert notes[0].articulations[0].type == ArticulationType.DOWN_BOW
+
+
+def test_parser_up_bow_attaches_to_note():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠣⠄⠐⠹')
+    assert notes[0].articulations[0].type == ArticulationType.UP_BOW
+
+
+def test_parser_down_bow_does_not_carry_forward():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠣⠃⠐⠹⠹')
+    assert len(notes[0].articulations) == 1
+    assert len(notes[1].articulations) == 0
+
+
+def test_parser_doubled_down_bow_applies_to_all_following_notes():
+    # BANA Sec. 25.3 / 1.12: doubled two-cell bowing sign continues across
+    # 4+ successive notes.
+    notes = _parse('⠣⠃⠣⠃⠐⠹⠹⠹⠹')
+    assert all(len(n.articulations) == 1 for n in notes)
+    assert all(n.articulations[0].type == ArticulationType.DOWN_BOW for n in notes)
+
+
+def test_parser_doubled_up_bow_ends_on_terminator_sign():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠣⠄⠣⠄⠐⠹⠹⠹⠣⠄⠹⠹')
+    assert notes[0].articulations[0].type == ArticulationType.UP_BOW  # carry
+    assert notes[1].articulations[0].type == ArticulationType.UP_BOW  # carry
+    assert notes[2].articulations[0].type == ArticulationType.UP_BOW  # carry
+    assert notes[3].articulations[0].type == ArticulationType.UP_BOW  # terminator note
+    assert notes[4].articulations == []                                # carry ended
+
+
+def test_parser_down_bow_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠣⠃⠐⠹')
+    assert r'\downbow' in notes[0].to_lilypond()
+
+
+def test_parser_up_bow_renders_to_lilypond():
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠣⠄⠐⠹')
+    assert r'\upbow' in notes[0].to_lilypond()
+
+
+def test_parser_down_bow_renders_on_chord():
+    # Bowing on the written note of a chord renders via Chord.to_lilypond()'s
+    # existing _chord_extras (reads notes[0].articulations) -- no bowing-
+    # specific code needed there.
+    from dottednotes.models import Chord
+    items = _parse_chords('⠣⠃⠐⠹⠬')
+    assert isinstance(items[0], Chord)
+    ly = items[0].to_relative_lilypond(60)[0]
+    assert r'\downbow' in ly
+
+
+# ---------------------------------------------------------------------------
 # S4-2: Dynamic tokenization and parsing
 # ---------------------------------------------------------------------------
 
