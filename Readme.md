@@ -143,6 +143,11 @@ Contributions are welcome, especially from blind or low-vision developers and
 musicians who use braille notation. Please open an issue before starting
 significant work so we can coordinate.
 
+See [docs/development.md](docs/development.md) for an architecture
+walkthrough of the BRF/BRL → LilyPond pipeline, a worked example tracing
+one measure through it end to end, and how to add a new BANA symbol or
+domain model class.
+
 All CLI output, error messages, and documentation must be screen-reader
 friendly: plain text, no ASCII art, no progress bars, no visual-only feedback.
 

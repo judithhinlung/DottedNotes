@@ -5598,7 +5598,7 @@ item above.
 
 ---
 
-### [ ] S8-2: Write developer documentation
+### [x] S8-2: Write developer documentation
 
 **Why:** CLAUDE.md is written to bootstrap a Claude Code session (it opens
 with "read this file first," includes session-specific rules like "never
@@ -5644,15 +5644,15 @@ open a PR has nowhere to start.
    already there.
 
 **Definition of Done:**
-- [ ] `docs/development.md` exists and covers the pipeline architecture (with
+- [x] `docs/development.md` exists and covers the pipeline architecture (with
       a worked example), adding a BANA symbol, adding a domain model class,
       and the testing conventions
-- [ ] The ASCII/Unicode braille fixture gotcha (S7-2) is documented
-- [ ] No content is duplicated from `bana_reference.md` /
+- [x] The ASCII/Unicode braille fixture gotcha (S7-2) is documented
+- [x] No content is duplicated from `bana_reference.md` /
       `lilypond_conventions.md` — cross-linked instead
-- [ ] Doc reads as plain text with no diagrams/tables that don't degrade
+- [x] Doc reads as plain text with no diagrams/tables that don't degrade
       well under a screen reader
-- [ ] `README.md` links to `docs/development.md`
+- [x] `README.md` links to `docs/development.md`
 
 **Senior note:** Keep this separate from S8-3's `CONTRIBUTING.md` — this
 ticket is "how the code works," S8-3 is "how to work with us as a
