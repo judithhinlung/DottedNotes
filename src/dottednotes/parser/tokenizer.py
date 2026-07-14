@@ -15,8 +15,10 @@ from dottednotes.bana_symbols import (
     IN_ACCORD_CELLS,
     INTERVAL_CELLS,
     LITERARY_DIGITS,
+    LITERARY_HYPHEN,
     KEY_SIGNATURE_CELLS,
     LITERARY_PERIOD,
+    LOWER_DIGIT_CELLS,
     MEASURE_REPEAT_CELL,
     NOTE_CELLS,
     OCTAVE_MARKS,
@@ -75,6 +77,13 @@ class BrailleTokenizer:
     ⠼ (dots 3,4,5,6 = NUMBER_SIGN):
         3-char lookup in KEY_SIGNATURE_CELLS → KEY_SIGNATURE  (4–7 sharps/flats)
         3-char lookup in TIME_SIGNATURE_CELLS → TIME_SIGNATURE
+        ⠼ + LITERARY_DIGITS (+ ⠍) → MULTI_MEASURE_REST
+        ⠼ + LITERARY_DIGITS (+ ⠼ + LITERARY_DIGITS), between spaces →
+            NUMERAL_REPEAT (backward-numeral repeat, BANA Sec. 19.1.1 — not
+            supported; BrailleParser raises on this token)
+        ⠼ + LOWER_DIGIT_CELLS (+ LITERARY_HYPHEN + LOWER_DIGIT_CELLS), between
+            spaces → NUMERAL_REPEAT (measure-number repeat, BANA Sec. 19.1.2 —
+            same as above)
         Otherwise → UNKNOWN.
 
     ⠜ (dots 3,4,5) — word sign / clef prefix:
@@ -268,6 +277,58 @@ class BrailleTokenizer:
                             seq = text[i:j + 1]
                             tokens.append(BrailleToken(seq, SymbolCategory.MULTI_MEASURE_REST, i, line))
                             i = j + 1
+                            at_measure_start = False
+                            header_active = False
+                            continue
+
+                    # Braille numeral repeats (S8-5, BANA Sec. 19, Table 19) --
+                    # not supported (BrailleParser raises on this category).
+                    # Backward-numeral repeat: NUMBER_SIGN + one-or-more
+                    # LITERARY_DIGITS, optionally followed immediately by a
+                    # second NUMBER_SIGN + LITERARY_DIGITS run (the disjunct
+                    # form, e.g. "#e#d" = 5 measures back, repeat 4),
+                    # terminated by a blank cell/newline/end-of-input (Sec.
+                    # 19.1.1: "between blank spaces").
+                    j = i + 1
+                    while j < len(text) and text[j] in LITERARY_DIGITS:
+                        j += 1
+                    if j > i + 1:
+                        k = j
+                        if k < len(text) and text[k] == self._NUMBER_SIGN:
+                            k2 = k + 1
+                            while k2 < len(text) and text[k2] in LITERARY_DIGITS:
+                                k2 += 1
+                            if k2 > k + 1:
+                                j = k2
+                        next_char = text[j] if j < len(text) else ''
+                        if next_char in (' ', '⠀', '\n', '\r', '\t', ''):
+                            tokens.append(BrailleToken(
+                                text[i:j], SymbolCategory.NUMERAL_REPEAT, i, line))
+                            i = j
+                            at_measure_start = False
+                            header_active = False
+                            continue
+
+                    # Measure-number repeat: NUMBER_SIGN + one-or-more
+                    # LOWER_DIGIT_CELLS digits, optionally + LITERARY_HYPHEN +
+                    # more LOWER_DIGIT_CELLS digits (inclusive range, e.g.
+                    # "#2-4"), terminated the same way (Sec. 19.1.2: "brailled,
+                    # between spaces, using lower-cell numerals").
+                    if i + 1 < len(text) and text[i + 1] in LOWER_DIGIT_CELLS:
+                        j = i + 1
+                        while j < len(text) and text[j] in LOWER_DIGIT_CELLS:
+                            j += 1
+                        if j < len(text) and text[j] == LITERARY_HYPHEN:
+                            k = j + 1
+                            while k < len(text) and text[k] in LOWER_DIGIT_CELLS:
+                                k += 1
+                            if k > j + 1:
+                                j = k
+                        next_char = text[j] if j < len(text) else ''
+                        if next_char in (' ', '⠀', '\n', '\r', '\t', ''):
+                            tokens.append(BrailleToken(
+                                text[i:j], SymbolCategory.NUMERAL_REPEAT, i, line))
+                            i = j
                             at_measure_start = False
                             header_active = False
                             continue

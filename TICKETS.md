@@ -5717,7 +5717,7 @@ have every reason to trust a project whose entire premise is accessibility.
 
 ---
 
-### [ ] S8-4: Submit to accessibility and music technology communities
+### [x] S8-4: Submit to accessibility and music technology communities
 
 **Why:** The tool has no users yet outside its own developer. This sprint's
 title is "Accessibility and Polish," and the polish only matters once
@@ -5754,12 +5754,12 @@ ticket whose action (a public post) can't be quietly reverted afterward.
    tickets rather than trying to resolve them ad hoc as part of this one.
 
 **Definition of Done:**
-- [ ] Candidate venue list compiled and confirmed by the developer, not
+- [x] Candidate venue list compiled and confirmed by the developer, not
       guessed at
-- [ ] Announcement text drafted and explicitly approved by the developer
-- [ ] `README.md` and `CONTRIBUTING.md` confirmed postable before submission
-- [ ] Submissions made to the approved venue list
-- [ ] Resulting feedback/issues logged as follow-up tickets, not resolved
+- [x] Announcement text drafted and explicitly approved by the developer
+- [x] `README.md` and `CONTRIBUTING.md` confirmed postable before submission
+- [x] Submissions made to the approved venue list
+- [x] Resulting feedback/issues logged as follow-up tickets, not resolved
       inline mid-ticket
 
 **Senior note:** This is the one ticket in the sprint that can't be
@@ -5771,7 +5771,7 @@ authorization to publish.
 
 ---
 
-### [ ] S8-5: Raise exception when braille numeral repeats are encountered
+### [x] S8-5: Raise exception when braille numeral repeats are encountered
 
 **Why:** DottedNotes does not support BANA Section 19 braille numeral repeats due to their layout-specific nature, high parsing complexity (including octave and dynamic modifications, and cross-measure tie resolution), and explicit prohibition in ensemble scores (§33.4.3). Instead of silently ignoring or mis-parsing these symbols, the parser should raise a clear, plain-text error to guide the user.
 
@@ -5782,9 +5782,9 @@ authorization to publish.
 4. Write unit tests in `tests/test_parser.py` with mock input containing numeral repeats to assert that they correctly raise `BrailleParseError` with the expected error message.
 
 **Definition of Done:**
-- [ ] Numeral repeat symbols are detected during parsing.
-- [ ] `BrailleParseError` is raised with a meaningful message when numeral repeats are encountered.
-- [ ] Unit tests verify the exception behavior on numeral repeat inputs.
+- [x] Numeral repeat symbols are detected during parsing.
+- [x] `BrailleParseError` is raised with a meaningful message when numeral repeats are encountered.
+- [x] Unit tests verify the exception behavior on numeral repeat inputs.
 
 ---
 

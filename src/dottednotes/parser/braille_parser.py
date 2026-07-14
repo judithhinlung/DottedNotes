@@ -76,6 +76,18 @@ class MeasureRepeatError(BrailleParseError):
     """
 
 
+class NumeralRepeatError(BrailleParseError):
+    """Raised whenever a braille numeral repeat (S8-5, BANA Sec. 19) is
+    encountered: backward-numeral repeats (Sec. 19.1.1) or measure-number
+    repeats (Sec. 19.1.2). DottedNotes does not support these — they are
+    layout-specific, involve parsing complexity this parser does not
+    implement (octave/dynamic modifications, cross-measure tie
+    resolution, Secs. 19.2-19.3), and are explicitly prohibited in
+    ensemble scores (Sec. 33.4.3) — so this is raised instead of silently
+    ignoring or mis-parsing the repeat.
+    """
+
+
 _STR_TO_ACCIDENTAL_TYPE: dict[str, AccidentalType] = {
     'sharp':   AccidentalType.SHARP,
     'flat':    AccidentalType.FLAT,
@@ -420,6 +432,11 @@ class BrailleParser:
                     active.add_measure(m)
             elif token.category == SymbolCategory.MEASURE_NUMBER:
                 self._handle_measure_number(token)
+            elif token.category == SymbolCategory.NUMERAL_REPEAT:
+                raise NumeralRepeatError(
+                    f"Line {token.line}: braille numeral repeats (BANA Sec. "
+                    "19) are not supported."
+                )
             elif token.category == SymbolCategory.WORD_SIGN:
                 piece_started = bool(right_staff.measures or left_staff.measures)
                 self._handle_word_sign(token, pending, piece_started)

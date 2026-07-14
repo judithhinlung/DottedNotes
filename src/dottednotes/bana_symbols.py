@@ -55,6 +55,7 @@ class SymbolCategory(Enum):
     CHORD_INDICATOR = auto()
     IN_ACCORD = auto()
     MEASURE_NUMBER = auto()
+    NUMERAL_REPEAT = auto()
     HAND_SIGN = auto()
     WORD_SIGN = auto()
     AUGMENTATION_DOT = auto()
@@ -403,6 +404,13 @@ TABLE_29_ENGLISH: dict[str, str] = {
 # verified ASCII_TO_DOTS shift, not independently developer-confirmed —
 # treat with the same caution as any un-exercised entry until a fixture
 # using them turns up.
+#
+# Also consulted by BrailleTokenizer for measure-number numeral repeats
+# (S8-5, BANA Sec. 19.1.2) — no longer §33.2-only, see NUMERAL_REPEAT
+# below. '⠶' (7) is the same cell as MEASURE_REPEAT_CELL, but the two are
+# never ambiguous in practice: MEASURE_REPEAT_CELL never legitimately
+# follows NUMBER_SIGN, which is the only context in which the tokenizer
+# consults LOWER_DIGIT_CELLS.
 # ---------------------------------------------------------------------------
 
 LOWER_DIGIT_CELLS: dict[str, int] = {
@@ -684,6 +692,41 @@ LITERARY_DIGITS: dict[str, int] = {
     '⠊': 9,   # dots 2,4     (I) — also A-eighth note mid-line
     '⠚': 0,   # dots 2,4,5   (J) — also B-eighth note mid-line
 }
+
+# ---------------------------------------------------------------------------
+# Braille numeral repeats (S8-5, BANA Music Braille Code 2015, Sec. 19,
+# Table 19). DottedNotes does not support these — they are layout-specific,
+# highly complex to parse correctly (octave/dynamic modifications, cross-
+# measure tie resolution per Secs. 19.2-19.3), and explicitly prohibited in
+# ensemble scores (Sec. 33.4.3) — so the parser raises a clear
+# BrailleParseError instead of silently ignoring or mis-parsing them.
+#
+# Table 19's own ASCII representations decode entirely via cell tables
+# already verified elsewhere in this module — no new dot patterns needed:
+#
+#   Conjunct backward-numeral repeat   "#b"     NUMBER_SIGN + one LITERARY_DIGITS
+#                                                letter (single count; used when
+#                                                the two backward-numeral counts,
+#                                                Sec. 19.1.1, are identical)
+#   Disjunct backward-numeral repeat   "#e#d"   NUMBER_SIGN + LITERARY_DIGITS,
+#                                                twice (count-back, count-to-repeat)
+#   Single measure-number repeat       "#2"     NUMBER_SIGN + one-or-more
+#                                                LOWER_DIGIT_CELLS digits
+#   Inclusive measure-number repeat    "#2-4"   NUMBER_SIGN + LOWER_DIGIT_CELLS
+#                                                digits + LITERARY_HYPHEN +
+#                                                LOWER_DIGIT_CELLS digits
+#
+# (Decoded via this module's own ASCII_TO_DOTS-equivalent letter convention:
+# Table 19's "b"/"e"/"d" are the standard literary digit-letters already in
+# LITERARY_DIGITS above — B=2, E=5, D=4 — used here WITH a NUMBER_SIGN prefix,
+# unlike LITERARY_DIGITS' line-start measure-number use, which has none.)
+#
+# BrailleTokenizer recognizes both shapes as a single NUMERAL_REPEAT token
+# (SymbolCategory.NUMERAL_REPEAT); BrailleParser raises NumeralRepeatError
+# the moment it sees one — see braille_parser.py.
+# ---------------------------------------------------------------------------
+
+LITERARY_HYPHEN: str = '⠤'  # dots 3,6 = U+2824 (BANA Sec. 19.1.2 measure-range separator)
 
 # ---------------------------------------------------------------------------
 # Fingering notation (BANA Section 15 & Table 15)

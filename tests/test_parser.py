@@ -973,6 +973,68 @@ def test_whole_measure_repeat_with_no_previous_measure_raises():
         BrailleParser(tokens=tokens).parse()
 
 
+# --- S8-5: braille numeral repeats (BANA Sec. 19) raise instead of parsing ---
+# Table 19's own ASCII examples, decoded via NUMBER_SIGN/LITERARY_DIGITS/
+# LOWER_DIGIT_CELLS/LITERARY_HYPHEN (all already-verified cells, see
+# bana_symbols.py): conjunct "#b", disjunct "#e#d", single "#2", range "#2-4".
+
+def test_tokenizer_recognizes_conjunct_backward_numeral_repeat():
+    tokens = BrailleTokenizer().tokenize('⠼⠃')  # "#b" — digit 2
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.NUMERAL_REPEAT
+    assert tokens[0].character == '⠼⠃'
+
+
+def test_tokenizer_recognizes_disjunct_backward_numeral_repeat():
+    tokens = BrailleTokenizer().tokenize('⠼⠑⠼⠙')  # "#e#d" — digits 5, 4
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.NUMERAL_REPEAT
+    assert tokens[0].character == '⠼⠑⠼⠙'
+
+
+def test_tokenizer_recognizes_single_measure_number_repeat():
+    tokens = BrailleTokenizer().tokenize('⠼⠆')  # "#2"
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.NUMERAL_REPEAT
+    assert tokens[0].character == '⠼⠆'
+
+
+def test_tokenizer_recognizes_inclusive_measure_number_repeat():
+    tokens = BrailleTokenizer().tokenize('⠼⠆⠤⠲')  # "#2-4"
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.NUMERAL_REPEAT
+    assert tokens[0].character == '⠼⠆⠤⠲'
+
+
+def test_backward_numeral_repeat_raises_braille_parse_error():
+    from dottednotes.exceptions import BrailleParseError
+    from dottednotes.parser.braille_parser import NumeralRepeatError
+
+    tokens = BrailleTokenizer().tokenize('⠼⠃')
+    assert issubclass(NumeralRepeatError, BrailleParseError)
+    with pytest.raises(NumeralRepeatError, match="numeral repeat"):
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_measure_number_repeat_raises_braille_parse_error():
+    from dottednotes.parser.braille_parser import NumeralRepeatError
+
+    tokens = BrailleTokenizer().tokenize('⠼⠆⠤⠲')
+    with pytest.raises(NumeralRepeatError, match="numeral repeat"):
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_numeral_repeat_mid_piece_raises_after_prior_measures_parsed():
+    # A numeral repeat encountered after real measures have already been
+    # parsed still raises -- it is never silently skipped or ignored
+    # regardless of how much valid content precedes it.
+    from dottednotes.parser.braille_parser import NumeralRepeatError
+
+    tokens = BrailleTokenizer().tokenize('⠐⠹⠱⠫⠻⠀⠼⠆')
+    with pytest.raises(NumeralRepeatError):
+        BrailleParser(tokens=tokens).parse()
+
+
 # --- S2-6: integration test — parse simple_melody.brf ---
 #
 # simple_melody.brf: 8 measures, 4/4, C major, quarter and half notes only.
