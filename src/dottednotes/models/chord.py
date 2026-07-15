@@ -47,9 +47,11 @@ class Chord:
         if len(self.notes) > 1:
             descending = self.notes[1]._midi_pitch() < self.notes[0]._midi_pitch()
 
+        from dottednotes.bana_symbols import INTERVAL_CELLS
+
         PITCH_CLASS_TO_DIATONIC = {'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6}
         _DIATONIC_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
-        _INTERVAL_TO_BRL = {2: '⠴', 3: '⠵', 4: '⠦', 5: '⠔', 6: '⠢', 7: '⠖', 8: '⠶'}
+        _INTERVAL_TO_BRL = {v: k for k, v in INTERVAL_CELLS.items()}
         _OCTAVE_TO_BRL = {1: '⠈', 2: '⠘', 3: '⠸', 4: '⠐', 5: '⠨', 6: '⠰', 7: '⠠'}
 
         written_diatonic = written.octave * 7 + PITCH_CLASS_TO_DIATONIC[written.note_name]
@@ -78,7 +80,10 @@ class Chord:
             if n.octave != calc_octave:
                 oct_brl = _OCTAVE_TO_BRL.get(n.octave, '')
 
-            # Interval cell
+            # Interval cell. Note: steps == 0 (a unison) falls through to the
+            # octave-interval cell here; no distinct BANA unison sign was found
+            # in bana_symbols.py or docs/bana_reference.md, so this is a known
+            # limitation pending BANA manual lookup rather than a guessed fix.
             int_cell = _INTERVAL_TO_BRL[((steps - 1) % 7) + 2]
 
             # Fingering

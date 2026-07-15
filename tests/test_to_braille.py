@@ -14,6 +14,7 @@ from dottednotes.models.tuplet import Tuplet
 from dottednotes.models.in_accord import InAccord
 from dottednotes.models.measure_repeat import MeasureRepeat
 from dottednotes.models.duration import Duration
+from dottednotes.models.measure import Measure
 
 
 def test_accidental_to_braille():
@@ -74,4 +75,52 @@ def test_chord_to_braille():
     n3 = Note(dots=frozenset(), category=None, raw_brl="", note_name="G", octave=4, duration=Duration(value=4, dots=0))
     # Chord C E G (in treble clef descending: G is highest/written note)
     c = Chord(notes=[n3, n2, n1])
-    assert c.to_braille(is_measure_start=True) == '⠐⠳⠵⠔'
+    # Interval cells per the authoritative INTERVAL_CELLS table (bana_symbols.py):
+    # E is a 3rd below G ('⠬'), C is a 5th below G ('⠔').
+    assert c.to_braille(is_measure_start=True) == '⠐⠳⠬⠔'
+
+
+def test_chord_interval_cells_match_bana_symbols():
+    from dottednotes.bana_symbols import INTERVAL_CELLS
+    _NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+    written = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=5, duration=Duration(value=4, dots=0))
+    written_diatonic = written.octave * 7 + _NAMES.index(written.note_name)
+    expected = {v: k for k, v in INTERVAL_CELLS.items()}
+    for steps in range(1, 8):
+        # An interval note `steps` diatonic scale-steps below the written note
+        # (steps=1 -> a 2nd, ..., steps=7 -> an octave).
+        target_diatonic = written_diatonic - steps
+        octave, idx = divmod(target_diatonic, 7)
+        interval_note = Note(dots=frozenset(), category=None, raw_brl="", note_name=_NAMES[idx], octave=octave, duration=Duration(value=4, dots=0))
+        c = Chord(notes=[written, interval_note])
+        brl = c.to_braille(is_measure_start=True)
+        assert expected[steps + 1] in brl, f"interval {steps + 1} should render {expected[steps + 1]!r}, got {brl!r}"
+
+
+def test_measure_repeat_to_braille():
+    assert MeasureRepeat(count=1, line=0).to_braille() == '⠶'
+    assert MeasureRepeat(count=3, line=0).to_braille() == '⠶⠶⠶'
+
+
+def test_measure_with_rest_to_braille_does_not_raise():
+    r = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=4, dots=0))
+    m = Measure(number=1, notes=[r])
+    brl, _ = m.to_braille(is_measure_start=True)
+    assert r.to_braille() in brl
+
+
+def test_measure_with_chord_to_braille_does_not_raise():
+    n1 = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(value=4, dots=0))
+    n2 = Note(dots=frozenset(), category=None, raw_brl="", note_name="E", octave=4, duration=Duration(value=4, dots=0))
+    n3 = Note(dots=frozenset(), category=None, raw_brl="", note_name="G", octave=4, duration=Duration(value=4, dots=0))
+    c = Chord(notes=[n3, n2, n1])
+    m = Measure(number=1, notes=[c])
+    brl, _ = m.to_braille(is_measure_start=True)
+    assert brl
+
+
+def test_measure_with_measure_repeat_to_braille_does_not_raise():
+    mr = MeasureRepeat(count=2, line=0)
+    m = Measure(number=1, notes=[mr])
+    brl, _ = m.to_braille(is_measure_start=True)
+    assert brl.count('⠶') == 2

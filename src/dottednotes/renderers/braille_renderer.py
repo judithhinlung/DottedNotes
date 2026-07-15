@@ -61,11 +61,14 @@ class BrailleRenderer:
         if not score.staves:
             return ""
 
-        # Determine layout type
-        is_ensemble = isinstance(score, OrchestraScore) or len(score.staves) > 2
-        is_piano = not is_ensemble and len(score.staves) == 2 and any(
+        # Determine layout type. is_piano is computed first and independent of
+        # isinstance(score, OrchestraScore): LilypondParser tags any parsed
+        # score containing "PianoStaff" as an OrchestraScore, so a 2-staff
+        # piano score must not automatically fall into ensemble layout.
+        is_piano = len(score.staves) == 2 and any(
             "piano" in s.name.lower() or "harp" in s.name.lower() for s in score.staves
         )
+        is_ensemble = not is_piano and (isinstance(score, OrchestraScore) or len(score.staves) > 2)
 
         if is_ensemble:
             return self._render_ensemble(score)

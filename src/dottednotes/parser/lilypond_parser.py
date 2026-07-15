@@ -63,7 +63,9 @@ def tokenize_lilypond(ly_text: str) -> list[str]:
 
     # Tokenize
     token_re = re.compile(
-        r'\\\(|\\\)|<<|>>|[{}[\]<>|~()=]|'
+        r'\\\(|\\\)|<<|>>|'
+        r'\-\.|\-\!|\-_|\-\-|\-\>|\-\^|\\<|\\>|\\!|\*|'
+        r'[{}[\]<>|~()=]|'
         r'\\[a-zA-Z]+|'
         r'"(?:[^"\\]|\\.)*"|'
         r'[a-zA-Z_][a-zA-Z_-]*\'*\,*|'
@@ -93,6 +95,34 @@ def get_absolute_pitch(note_name: str, octave_marks: str, prev_note: tuple[str, 
     base_octave = prev_note[1] + (prev_idx + diff) // 7
     octave = base_octave + octave_marks.count("'") - octave_marks.count(",")
     return note_name.upper(), octave
+
+
+def _skip_balanced_block(tokens: list[str], start_idx: int) -> int:
+    """Return the index just past the closing brace of a `{...}` block that
+    starts at tokens[start_idx]. Also balances `<<`/`>>` against `{`/`}`
+    using one shared depth counter, since real generated LilyPond never
+    interleaves them in a way that would make that ambiguous.
+
+    If tokens[start_idx] is not '{', returns start_idx unchanged so the
+    caller can decide how to handle a bare/braceless value.
+
+    String tokens are already emitted as a single atomic token by
+    tokenize_lilypond's `"(?:[^"\\]|\\.)*"` alternative, so a `{`/`}`
+    character embedded in a string literal is never seen here as a
+    separate token -- no string-aware skipping is needed.
+    """
+    i = start_idx
+    if i >= len(tokens) or tokens[i] != '{':
+        return start_idx
+    depth = 1
+    i += 1
+    while i < len(tokens) and depth > 0:
+        if tokens[i] in ('{', '<<'):
+            depth += 1
+        elif tokens[i] in ('}', '>>'):
+            depth -= 1
+        i += 1
+    return i
 
 
 class LilypondParser:
@@ -146,6 +176,8 @@ class LilypondParser:
             t = tokens[i]
             if t == '\\header':
                 i = self._parse_header(tokens, i + 1)
+            elif t in ('\\paper', '\\layout', '\\midi'):
+                i = _skip_balanced_block(tokens, i + 1)
             elif i + 1 < len(tokens) and tokens[i+1] == '=':
                 var_name = tokens[i]
                 i = self._parse_variable_def(tokens, i + 2, var_name)
@@ -186,22 +218,11 @@ class LilypondParser:
 
     def _parse_variable_def(self, tokens: list[str], start_idx: int, var_name: str) -> int:
         i = start_idx
-        brace_count = 0
-        var_tokens = []
-        while i < len(tokens):
-            t = tokens[i]
-            if t == '{':
-                brace_count += 1
-            elif t == '}':
-                brace_count -= 1
-                if brace_count == 0:
-                    var_tokens.append(t)
-                    i += 1
-                    break
-            var_tokens.append(t)
+        while i < len(tokens) and tokens[i] != '{':
             i += 1
-        self.variables[var_name] = var_tokens
-        return i
+        end_idx = _skip_balanced_block(tokens, i)
+        self.variables[var_name] = tokens[start_idx:end_idx]
+        return end_idx
 
     def _parse_score_block(self, tokens: list[str], start_idx: int) -> int:
         i = start_idx
@@ -414,6 +435,7 @@ class LilypondParser:
                 # Parse duration following it
                 dur_val = None
                 dur_dots = 0
+                multi_measure_count = 1
                 j = i + 1
                 if j < len(tokens) and tokens[j].isdigit():
                     dur_val = int(tokens[j])
@@ -422,17 +444,22 @@ class LilypondParser:
                     while j < len(tokens) and tokens[j] == '.':
                         dur_dots += 1
                         j += 1
+                    # multi-measure rest count, e.g. R1*8
+                    if j < len(tokens) and tokens[j] == '*' and j + 1 < len(tokens) and tokens[j + 1].isdigit():
+                        multi_measure_count = int(tokens[j + 1])
+                        j += 2
                     current_duration = Duration(value=dur_val, dots=dur_dots)
                     i = j
                 else:
                     i += 1
-                
+
                 rest_obj = Rest(
                     dots=frozenset(),
                     category=None,
                     raw_brl="",
                     duration=current_duration,
-                    is_full_measure=is_full
+                    is_full_measure=is_full,
+                    multi_measure_count=multi_measure_count
                 )
                 current_measure.add_note(rest_obj)
                 
@@ -487,11 +514,29 @@ class LilypondParser:
                         curr_ref = (name, octave)
                 
                 if chord_notes:
+                    # Preserve LilyPond's own \relative pitch-chain rule, which
+                    # references the note literally *written first in the
+                    # source* -- independent of the BANA written-note sort below.
+                    lilypond_first_note = chord_notes[0]
+
+                    # BANA written-note ordering (see Chord's docstring): treble/
+                    # alto clef writes the highest note first; bass/tenor writes
+                    # the lowest note first. current_measure.clef defaults to
+                    # "treble".
+                    if current_measure.clef in ('bass', 'tenor'):
+                        chord_notes = sorted(chord_notes, key=lambda n: n._midi_pitch())
+                    else:
+                        chord_notes = sorted(chord_notes, key=lambda n: n._midi_pitch(), reverse=True)
+
                     chord_obj = Chord(notes=chord_notes)
-                    # Update relative reference to first note of chord
-                    relative_base = (chord_notes[0].note_name, chord_notes[0].octave)
-                    
-                    # Parse dynamic or slur decoration after chord
+                    # Update relative reference to the note as literally written
+                    # in the source (not the BANA-sorted written note).
+                    relative_base = (lilypond_first_note.note_name, lilypond_first_note.octave)
+
+                    # Parse dynamic or slur decoration after chord; attach to
+                    # the same Note object that is now Chord.notes[0], since
+                    # Chord.to_lilypond() reads chord-level decorations from
+                    # notes[0].
                     self._parse_note_decorations(tokens, i, chord_notes[0])
                     current_measure.add_note(chord_obj)
                 

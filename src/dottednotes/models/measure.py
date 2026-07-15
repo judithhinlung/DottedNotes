@@ -9,13 +9,14 @@ if TYPE_CHECKING:
 
 from .chord import Chord
 from .in_accord import InAccord
+from .measure_repeat import MeasureRepeat
 from .note import Note, Rest
 from .text_marking import TextMarking
 from .tremolo import AlternatingTremolo
 from .tuplet import Tuplet
 
 NoteOrChord = Union[Note, Chord]
-MeasureItem = Union[Note, Rest, Chord, InAccord, Tuplet, AlternatingTremolo]
+MeasureItem = Union[Note, Rest, Chord, InAccord, Tuplet, AlternatingTremolo, MeasureRepeat]
 
 _BAR_LINE_TO_LY: dict[str, str] = {
     'measure_separator': '|',
@@ -137,14 +138,22 @@ def _render_note_list_to_braille(
                 'is_measure_start': curr_measure_start,
                 'time_signature': time_signature,
             }
-            if isinstance(item, Note) or isinstance(item, Chord):
+            if isinstance(item, Rest) or isinstance(item, MeasureRepeat):
+                kwargs = {}
+            elif isinstance(item, Note):
                 kwargs['key_signature'] = key_signature
                 kwargs['is_16th_run_continuation'] = is_16th_continuation[idx]
                 kwargs['tremolo_format'] = tremolo_formats[idx]
                 kwargs['articulation_format'] = articulation_formats[idx]
+            elif isinstance(item, Chord):
+                kwargs['key_signature'] = key_signature
+                kwargs['is_16th_run_continuation'] = is_16th_continuation[idx]
+                kwargs['tremolo_format'] = tremolo_formats[idx]
             elif isinstance(item, Tuplet):
                 kwargs['format'] = triplet_formats[idx]
             elif isinstance(item, InAccord):
+                kwargs['key_signature'] = key_signature
+            elif isinstance(item, AlternatingTremolo):
                 kwargs['key_signature'] = key_signature
 
             item_brl = item.to_braille(**kwargs)
