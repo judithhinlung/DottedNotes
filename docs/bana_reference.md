@@ -179,13 +179,54 @@ sequence is a prefix of the 3-cell one.
 
 ---
 
-## TODO (later sprints)
+## BANA Formatting, Validation & Compression Rules (Sprint 9b)
 
-- Key signatures (BANA section 7) — Sprint 3
-- Time signatures (BANA section 6) — Sprint 3
-- Articulations (BANA section 14) — Sprint 4
-- Dynamics (BANA section 16) — Sprint 4
-- Ornaments (BANA section 15) — Sprint 6
-- Chords and in-accord (BANA section 9) — Sprint 5
-- Ties and slurs (BANA section 13) — Sprint 4
-- Value indicator sign (duration disambiguation) — left as None; not encountered in real music
+DottedNotes enforces standard BANA formatting rules via its validation library (`BANAValidator`) and supports variable compression settings during Braille rendering.
+
+### 1. Octave Marks & Register Tracking (MBC 2015 Part I, Section 3)
+In BANA Music Braille, register/octave markings are kept to a minimum using contextual interval calculation:
+* **The First Note** of any voice, segment, or piece must always have an octave mark.
+* **Intervals Less than a Fourth** (seconds and thirds) are never marked, even if they cross into a neighboring octave.
+* **Intervals Greater than a Fifth** (sixths, sevenths, and larger leaps) are always marked, even if they remain in the same octave.
+* **Intervals of a Fourth or Fifth** are marked only if the register changes (i.e. the two notes are in different octaves).
+* **Reset Points** where register tracking resets and an octave mark is **always required**:
+  - The first note of a voice/piece.
+  - The first note of every measure (BANA resets octave tracking at every measure
+    boundary, not just line starts — this naturally covers double bar lines and every
+    other bar-line type too, since they all end a measure).
+  - The first note starting a new line of braille music.
+  - The first note immediately succeeding any numeric indicator (e.g. measure numbers at line-start or multi-measure rests).
+
+### 2. Articulation Carry Shorthand (MBC 2015 Part I, Section 14)
+To save space, runs of 4 or more notes with the same articulation (e.g. staccato `⠦`) use shorthand carry:
+* **First Note**: Starts carry by doubling the sign (e.g. `⠦⠦`).
+* **Middle Notes**: Articulation is completely omitted (runs carry the sign forward implicitly).
+* **Last Note**: Written as a plain, single occurrence of the sign (e.g. `⠦`) — the same
+  as an unshortened note, with no special termination prefix. This matches how
+  repeated-tremolo and triplet carry runs already end elsewhere in this codebase. (A
+  `⠘` termination prefix was tried in an earlier draft of this rule but was wrong: `⠘⠦`
+  is already a distinct, real BANA symbol — `expressive_accent` — so prefixing it here
+  would silently misrepresent the note on any re-parse.)
+
+*Note: In `compression_level="none"`, carry is disabled and all articulations are rendered explicitly on each note.*
+
+### 3. Measure Repeat Compression (MBC 2015 Part I, Section 18)
+When two or more consecutive measures are musically identical, the subsequent measures are replaced with a single measure repeat sign `⠶` (dots 2,3,5,6).
+
+### 4. Sign Ordering Guidelines
+Pre-note and post-note modifier signs must follow a strict sequential ordering around the note cell (order index 0 to 12):
+1. **Pedal Down** (`⠣⠉` / index 0)
+2. **Slur Bracket Open** (`⠰⠃` / index 1)
+3. **Dynamics** (e.g. `⠜⠋⠄` / index 2)
+4. **Articulations** (e.g. `⠦` / index 3)
+5. **Ornaments** (e.g. `⠘⠗` / index 4)
+6. **Accidentals** (e.g. `⠩` / index 5)
+7. **Octave Marks** (e.g. `⠐` / index 6)
+8. **Note Cell** (index 7)
+9. **Intervals** (e.g. `⠼` / index 8)
+10. **Tremolos** (index 9)
+11. **Fingerings** (e.g. `⠂` / index 10)
+12. **Ties / Slurs** (e.g. `⠉` / index 11)
+13. **Pedal Up** (`⠡⠉` / index 12)
+
+Any deviation from this non-decreasing order sequence triggers a warning (`S9b-sign-order`).

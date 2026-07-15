@@ -218,6 +218,9 @@ class _PendingNote:
     # very next item), so it needs no flag of its own -- see
     # BrailleParser._group_alternating_tremolos.
     pedal_sustain: str | None = None
+    has_octave_mark: bool = False
+    parsed_tokens: list = field(default_factory=list)
+    after_numeric_indicator: bool = False
 
 
 @dataclass
@@ -291,6 +294,30 @@ class BrailleParser:
         i = 0
         while i < len(self._tokens):
             token = self._tokens[i]
+
+            # Track tokens for sign order validation
+            if token.category not in (
+                SymbolCategory.OCTAVE_MARK,
+                SymbolCategory.ORNAMENT,
+                SymbolCategory.ARTICULATION,
+                SymbolCategory.DYNAMIC,
+                SymbolCategory.ACCIDENTAL,
+                SymbolCategory.PEDAL,
+                SymbolCategory.SLUR,
+                SymbolCategory.NOTE
+            ):
+                self._current_note_tokens = []
+            elif token.category in (
+                SymbolCategory.OCTAVE_MARK,
+                SymbolCategory.ORNAMENT,
+                SymbolCategory.ARTICULATION,
+                SymbolCategory.DYNAMIC,
+                SymbolCategory.ACCIDENTAL,
+                SymbolCategory.PEDAL,
+                SymbolCategory.SLUR
+            ):
+                self._current_note_tokens.append(token)
+
             if token.category == SymbolCategory.OCTAVE_MARK:
                 self._handle_octave_mark(token)
             elif token.category == SymbolCategory.ORNAMENT:
@@ -307,12 +334,17 @@ class BrailleParser:
                     # Middle grace note in carry mode — no indicator needed.
                     self._pending_grace_notes.append(self._build_grace_note_cell(token))
                 else:
+                    old_i = i
+                    self._current_note_tokens.append(token)
                     # Simple slur: single ⠉ between previous note and this one
                     if self._last_token_was_slur and not self._slur_carry_active:
                         if pending:
                             pending[-1].slur_start = True
+                            if hasattr(pending[-1], 'parsed_tokens') and getattr(self, '_pending_slur_token', None):
+                                pending[-1].parsed_tokens.append(self._pending_slur_token)
                         self._pending_slur_end = True
                         self._last_token_was_slur = False
+                        self._pending_slur_token = None
                     self._commit_pending_triplet_signs()
 
                     is_breve = False
@@ -342,12 +374,18 @@ class BrailleParser:
                     self._last_item_was_interval = False
                     i = self._parse_fingering_after_note_or_interval(i, pending)
                     i = self._parse_tremolo_after_note_or_chord(i, pending)
+
+                    suffix_tokens = self._tokens[old_i + 1 : i + 1]
+                    pnote.parsed_tokens = list(self._current_note_tokens) + suffix_tokens
+                    self._current_note_tokens = []
             elif token.category == SymbolCategory.PEDAL:
                 if token.character in ('⠣⠉', '⠐⠣⠉', '⠠⠣⠉'):
                     self._pending_pedal_down = "on"
                 elif token.character in ('⠡⠉', '⠐⠡⠉'):
                     active = left_staff if self._current_hand == 'left' else right_staff
                     if pending:
+                        if hasattr(pending[-1], 'parsed_tokens'):
+                            pending[-1].parsed_tokens.append(token)
                         if pending[-1].pedal_sustain == "on":
                             pending[-1].pedal_sustain = "on_off"
                         else:
@@ -355,11 +393,15 @@ class BrailleParser:
                     elif active.measures and active.measures[-1].notes:
                         last_item = active.measures[-1].notes[-1]
                         if isinstance(last_item, Chord):
+                            if hasattr(last_item.notes[0], 'parsed_tokens'):
+                                last_item.notes[0].parsed_tokens.append(token)
                             if last_item.notes[0].pedal_sustain == "on":
                                 last_item.notes[0].pedal_sustain = "on_off"
                             else:
                                 last_item.notes[0].pedal_sustain = "off"
                         elif isinstance(last_item, (Note, Rest)):
+                            if hasattr(last_item, 'parsed_tokens'):
+                                last_item.parsed_tokens.append(token)
                             if last_item.pedal_sustain == "on":
                                 last_item.pedal_sustain = "on_off"
                             else:
@@ -367,12 +409,18 @@ class BrailleParser:
                 elif token.character == '⠡⠣⠉':
                     active = left_staff if self._current_hand == 'left' else right_staff
                     if pending:
+                        if hasattr(pending[-1], 'parsed_tokens'):
+                            pending[-1].parsed_tokens.append(token)
                         pending[-1].pedal_sustain = "change"
                     elif active.measures and active.measures[-1].notes:
                         last_item = active.measures[-1].notes[-1]
                         if isinstance(last_item, Chord):
+                            if hasattr(last_item.notes[0], 'parsed_tokens'):
+                                last_item.notes[0].parsed_tokens.append(token)
                             last_item.notes[0].pedal_sustain = "change"
                         elif isinstance(last_item, (Note, Rest)):
+                            if hasattr(last_item, 'parsed_tokens'):
+                                last_item.parsed_tokens.append(token)
                             last_item.pedal_sustain = "change"
             elif token.category == SymbolCategory.HAND_SIGN:
                 # Octave state is tracked per hand: a BRF that interleaves
@@ -446,6 +494,7 @@ class BrailleParser:
                     self._pending_dynamics.append(dynamic)
             elif token.category == SymbolCategory.SLUR:
                 self._handle_slur(token, pending)
+                self._current_note_tokens = []
             elif token.category == SymbolCategory.INTERVAL:
                 self._handle_interval(token, pending)
                 self._last_item_was_interval = True
@@ -480,6 +529,7 @@ class BrailleParser:
                 self._apply_triplet_flag(pending[-1])
                 self._last_item_was_interval = False
             elif token.category == SymbolCategory.MULTI_MEASURE_REST:
+                self._numeric_indicator_pending = True
                 self._commit_pending_triplet_signs()
                 active = left_staff if self._current_hand == 'left' else right_staff
                 if pending:
@@ -518,6 +568,7 @@ class BrailleParser:
                     m.add_note(rest_obj)
                     active.add_measure(m)
             elif token.category == SymbolCategory.MEASURE_NUMBER:
+                self._numeric_indicator_pending = True
                 self._handle_measure_number(token)
             elif token.category == SymbolCategory.NUMERAL_REPEAT:
                 raise NumeralRepeatError(
@@ -794,6 +845,8 @@ class BrailleParser:
         if slur_type == 'tie':
             if pending:
                 pending[-1].tie = True
+                if hasattr(pending[-1], 'parsed_tokens'):
+                    pending[-1].parsed_tokens.append(token)
 
         elif slur_type == 'chord_tie':
             if self._chord_tie_carry_active:
@@ -801,11 +854,16 @@ class BrailleParser:
                 # (BANA Sec. 10.2.2). The last carried chord already got its
                 # tie via _buffer_note, so don't re-apply it here.
                 self._chord_tie_carry_active = False
+                if pending:
+                    if hasattr(pending[-1], 'parsed_tokens'):
+                        pending[-1].parsed_tokens.append(token)
             else:
                 # Single occurrence, or first of a doubled pair — either way
                 # ties the chord currently in progress to the next one.
                 if pending:
                     pending[-1].tie = True
+                    if hasattr(pending[-1], 'parsed_tokens'):
+                        pending[-1].parsed_tokens.append(token)
                 self._last_token_was_chord_tie = True
 
         elif slur_type == 'slur':
@@ -815,21 +873,33 @@ class BrailleParser:
                 # second cell, ⠨⠉⠉), not an ordinary phrase slur.
                 self._chord_tie_carry_active = True
                 self._last_token_was_chord_tie = False
+                if pending:
+                    if hasattr(pending[-1], 'parsed_tokens'):
+                        pending[-1].parsed_tokens.append(token)
                 return
             if self._slur_carry_active:
                 # Terminator: the next note ends the slurred passage.
                 self._pending_slur_end = True
                 self._slur_carry_active = False
                 self._last_token_was_slur = False
+                if pending:
+                    if hasattr(pending[-1], 'parsed_tokens'):
+                        pending[-1].parsed_tokens.append(token)
             elif self._last_token_was_slur:
                 # Doubled sign detected: activate carry, mark the preceding note.
                 if pending:
                     pending[-1].slur_start = True
+                    if hasattr(pending[-1], 'parsed_tokens'):
+                        if getattr(self, '_pending_slur_token', None):
+                            pending[-1].parsed_tokens.append(self._pending_slur_token)
+                        pending[-1].parsed_tokens.append(token)
                 self._slur_carry_active = True
                 self._last_token_was_slur = False
+                self._pending_slur_token = None
             else:
                 # First single slur sign — wait to see if it's doubled or simple.
                 self._last_token_was_slur = True
+                self._pending_slur_token = token
 
         elif slur_type == 'slur_bracket_open':
             self._pending_slur_bracket_open = True
@@ -837,6 +907,8 @@ class BrailleParser:
         elif slur_type == 'slur_bracket_close':
             if pending:
                 pending[-1].slur_bracket_close = True
+                if hasattr(pending[-1], 'parsed_tokens'):
+                    pending[-1].parsed_tokens.append(token)
 
     def _handle_interval(self, token: BrailleToken, pending: list[_PendingNote]) -> None:
         """Handle an interval cell, attaching a chord note to the most recent pending note.
@@ -1201,6 +1273,7 @@ class BrailleParser:
         note_name, base_duration = NOTE_CELLS[token.character]
         accidental = self._pending_accidental
         self._pending_accidental = None
+        has_octave_mark = self._octave_mark_pending
         self._octave_mark_pending = False  # octave mark was consumed by this note
 
         # Capture and clear pre-note dynamics.
@@ -1213,7 +1286,8 @@ class BrailleParser:
         articulations = list(self._pending_articulations)
         for art_type in self._active_articulations:
             if art_type not in pending_types:
-                articulations.append(Articulation(type=art_type))
+                # Carried articulations are not explicitly written in the source document
+                articulations.append(Articulation(type=art_type, explicit=False))
 
         self._pending_articulations = []
         # End carry for any articulations that were just terminated.
@@ -1244,6 +1318,9 @@ class BrailleParser:
         self._pending_slur_end = False
         self._pending_slur_bracket_open = False
 
+        after_num = self._numeric_indicator_pending
+        self._numeric_indicator_pending = False
+
         pnote = _PendingNote(
             note_name=note_name,
             octave=self._current_octave,
@@ -1257,6 +1334,8 @@ class BrailleParser:
             slur_end=slur_end,
             slur_bracket_open=slur_bracket_open,
             pedal_sustain=self._pending_pedal_down,
+            has_octave_mark=has_octave_mark,
+            after_numeric_indicator=after_num,
         )
         self._pending_pedal_down = None
 
@@ -1478,6 +1557,9 @@ class BrailleParser:
                 fingerings=list(pnote.fingerings),
                 tremolo=pnote.tremolo,
                 pedal_sustain=pnote.pedal_sustain,
+                has_octave_mark=pnote.has_octave_mark,
+                parsed_tokens=list(pnote.parsed_tokens),
+                after_numeric_indicator=pnote.after_numeric_indicator,
             )
             if pnote.is_divisi_octave and pnote.interval_notes:
                 # Divisi-in-octaves (BANA 33.4.2): the octave partner is a
@@ -2098,6 +2180,7 @@ class BrailleParser:
         self._grace_carry_active: bool = False
         self._grace_carry_ending: bool = False
         self._last_token_was_slur: bool = False
+        self._pending_slur_token: BrailleToken | None = None
         self._slur_carry_active: bool = False
         self._last_token_was_chord_tie: bool = False
         self._chord_tie_carry_active: bool = False
@@ -2205,6 +2288,8 @@ class BrailleParser:
         # value cell) closes the run. See _parse_tremolo_after_note_or_chord.
         self._tremolo_carry_active: bool = False
         self._tremolo_carry_subdivision: int | None = None
+        self._current_note_tokens: list[BrailleToken] = []
+        self._numeric_indicator_pending: bool = False
 
         if self._preserve_state and self._initial_state is not None:
             self.set_state(self._initial_state)

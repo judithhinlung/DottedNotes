@@ -6003,7 +6003,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S9-1: Add to_braille() method to all domain model classes
+### [x] S9-1: Add to_braille() method to all domain model classes
 
 **Why:** Currently, the internal domain model classes (Note, Rest, Chord, Measure, Staff, Score, etc.) only know how to render themselves to LilyPond via `to_lilypond()`. To enable the reverse translation path, these classes must implement `to_braille() -> str` using the dot-pattern tables in `src/dottednotes/bana_symbols.py`.
 
@@ -6029,15 +6029,15 @@ Estimated time: 1.5–2 weeks.
 6. Create `tests/test_to_braille.py` and write unit tests for every class's `to_braille()` output.
 
 **Definition of Done:**
-- [ ] Every domain model class implements `to_braille() -> str` returning correct BANA Unicode braille.
-- [ ] Unit tests in `tests/test_to_braille.py` assert on note durations, octave marks, accidentals, key/time signatures, chords, and simple measures.
-- [ ] All unit tests pass successfully.
+- [x] Every domain model class implements `to_braille() -> str` returning correct BANA Unicode braille.
+- [x] Unit tests in `tests/test_to_braille.py` assert on note durations, octave marks, accidentals, key/time signatures, chords, and simple measures.
+- [x] All unit tests pass successfully.
 
 **Senior note:** Keep `to_braille()` focused strictly on representing the object's own musical value. Do not hardcode line wrapping, page layouts, or part prefixing inside `Note.to_braille()` or `Measure.to_braille()`. Those layout concerns belong in `BrailleRenderer` (S9-2).
 
 ---
 
-### [ ] S9-2: Implement BrailleRenderer
+### [x] S9-2: Implement BrailleRenderer
 
 **Why:** Converting a `Score` to a formatted braille document requires coordination of layout rules, measure spacing, page numbering, and part indicators (e.g. hand signs for piano parts, or abbreviated instrument names for ensemble scores).
 
@@ -6051,15 +6051,15 @@ Estimated time: 1.5–2 weeks.
 5. Create `tests/test_braille_renderer.py` and test formatting of both single-staff and multi-staff scores.
 
 **Definition of Done:**
-- [ ] `BrailleRenderer` coordinates the translation and layout formatting of complete scores.
-- [ ] Part prefixes and measure spacing are output correctly according to BANA rules.
-- [ ] Unit tests verify formatting structure for piano and ensemble scores.
+- [x] `BrailleRenderer` coordinates the translation and layout formatting of complete scores.
+- [x] Part prefixes and measure spacing are output correctly according to BANA rules.
+- [x] Unit tests verify formatting structure for piano and ensemble scores.
 
 **Senior note:** Ensure `BrailleRenderer` only outputs Unicode braille characters (U+2800 to U+28FF) and spaces. Any conversion to ASCII braille for file writing should be handled at the file writing layer, not here.
 
 ---
 
-### [ ] S9-3: Implement resilient LilyPond parser for arbitrary scores
+### [x] S9-3: Implement resilient LilyPond parser for arbitrary scores
 
 **Why:** To translate arbitrary LilyPond files (such as those from Mutopia) back to the internal domain model, we need a resilient LilyPond parser. This parser must extract supported musical elements (pitch, duration, chords, slurs, ties, dynamics, articulations, vocal lyrics, multiple voices, staves, headers) and ignore unrecognized markup, stem overrides, beam markers, and layout code without throwing errors.
 
@@ -6089,16 +6089,16 @@ Estimated time: 1.5–2 weeks.
    - Parse real Mutopia fixtures (such as `tests/fixtures/vocal_test.ly` and `tests/fixtures/Children_s_Piece.ly`), asserting that all supported content (headers, notes, lyrics, chords, etc.) is successfully extracted while unsupported commands are skipped cleanly.
 
 **Definition of Done:**
-- [ ] `LilypondParser` successfully extracts supported elements (vocal lyrics, slurs, ties, chords, voices, staves, headers) from arbitrary LilyPond files into a musically correct `Score` domain model.
-- [ ] The parser silently skips all unrecognized commands, formatting overrides, custom layouts, and Scheme code.
-- [ ] Raises `LilyPondParseError` only on syntactically malformed LilyPond (e.g., unmatched braces, unclosed string literals).
-- [ ] Unit and integration tests cover various test cases, including parsing vocal scores and piano scores from fixtures.
+- [x] `LilypondParser` successfully extracts supported elements (vocal lyrics, slurs, ties, chords, voices, staves, headers) from arbitrary LilyPond files into a musically correct `Score` domain model.
+- [x] The parser silently skips all unrecognized commands, formatting overrides, custom layouts, and Scheme code.
+- [x] Raises `LilyPondParseError` only on syntactically malformed LilyPond (e.g., unmatched braces, unclosed string literals).
+- [x] Unit and integration tests cover various test cases, including parsing vocal scores and piano scores from fixtures.
 
 **Senior note:** Do not attempt to write a general compilation engine. Focus on structural block parsing and a robust fallback: if a command or block is not recognized, scan ahead to skip its parameters/scopes safely by balancing braces, brackets, and strings.
 
 ---
 
-### [ ] S9-4: Implement BRF file writer with BANA line length and pagination
+### [x] S9-4: Implement BRF file writer with BANA line length and pagination
 
 **Why:** Braille files (.brf) require strict layout constraints, typically 38-40 characters per line and 25 lines per page, with right-aligned page numbering. We must break lines only at safe boundaries (e.g., measure spaces) and output page-break indicators.
 
@@ -6111,14 +6111,14 @@ Estimated time: 1.5–2 weeks.
 6. Write tests in `tests/test_brf_writer.py` verifying page boundaries, line limits, and ASCII translation.
 
 **Definition of Done:**
-- [ ] BRF writer formats text into clean pages matching BANA dimension constraints.
-- [ ] Text wraps cleanly without breaking individual note symbols.
-- [ ] Output is written in ASCII braille format.
-- [ ] Unit tests pass.
+- [x] BRF writer formats text into clean pages matching BANA dimension constraints.
+- [x] Text wraps cleanly without breaking individual note symbols.
+- [x] Output is written in ASCII braille format.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9-5: Round-trip integration test
+### [x] S9-5: Round-trip integration test
 
 **Why:** The best way to ensure the reverse path works flawlessly is an end-to-end round-trip test: read a BRF, parse it, output to LilyPond, parse it back, render it back to BRF, and verify that the output matches the input.
 
@@ -6130,9 +6130,9 @@ Estimated time: 1.5–2 weeks.
 5. Run the round-trip check on all test fixtures.
 
 **Definition of Done:**
-- [ ] Integration tests verify the complete round-trip flow for all standard BRF fixtures.
-- [ ] The generated BRF is musically equivalent to the original.
-- [ ] All tests pass.
+- [x] Integration tests verify the complete round-trip flow for all standard BRF fixtures.
+- [x] The generated BRF is musically equivalent to the original.
+- [x] All tests pass.
 
 ---
 
@@ -6144,7 +6144,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S9b-1: Implement BANAValidator class with rule registry
+### [x] S9b-1: Implement BANAValidator class with rule registry
 
 **Why:** To ensure scores conform to BANA music notation rules, we need a centralized validation system that can run modular checks against the internal domain model and report errors/warnings.
 
@@ -6155,13 +6155,13 @@ Estimated time: 1.5–2 weeks.
 4. Write tests for rule registration and validation execution.
 
 **Definition of Done:**
-- [ ] `BANAValidator` class and registry are implemented.
-- [ ] Rules can be registered and toggled.
-- [ ] Unit tests pass.
+- [x] `BANAValidator` class and registry are implemented.
+- [x] Rules can be registered and toggled.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-2: Implement articulation series shorthand rule
+### [x] S9b-2: Implement articulation series shorthand rule
 
 **Why:** BANA rules (Section 14) allow repeated identical articulations (such as a string of staccatos) to be written using a shorthand sign instead of repeating it on every single note. We need to validate if shorthands are correctly used.
 
@@ -6171,12 +6171,12 @@ Estimated time: 1.5–2 weeks.
 3. Write unit tests for the articulation shorthand rule.
 
 **Definition of Done:**
-- [ ] Missing articulation shorthands are detected and reported.
-- [ ] Unit tests pass.
+- [x] Missing articulation shorthands are detected and reported.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-3: Implement octave mark validation and auto-insertion
+### [x] S9b-3: Implement octave mark validation and auto-insertion
 
 **Why:** BANA has complex rules for when octave marks are required (e.g. measure starts, leaps of seconds/thirds/fifths/etc. depending on direction). Checking these is critical to prevent pitch misreadings.
 
@@ -6187,13 +6187,13 @@ Estimated time: 1.5–2 weeks.
 4. Write tests verifying correct warnings for various leaps.
 
 **Definition of Done:**
-- [ ] Octave leap rules are validated and reported.
-- [ ] Redundant and missing octave marks are flagged.
-- [ ] Unit tests pass.
+- [x] Octave leap rules are validated and reported.
+- [x] Redundant and missing octave marks are flagged.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-4: Implement line length checking and automatic line breaking
+### [x] S9b-4: Implement line length checking and automatic line breaking
 
 **Why:** Rendered braille lines should never overflow BANA physical page margins (usually 40 columns).
 
@@ -6204,12 +6204,12 @@ Estimated time: 1.5–2 weeks.
 4. Write tests verifying line-length validations.
 
 **Definition of Done:**
-- [ ] Line overflow issues are flagged.
-- [ ] Unit tests pass.
+- [x] Line overflow issues are flagged.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-5: Implement Correction dataclass and ValidationResult
+### [x] S9b-5: Implement Correction dataclass and ValidationResult
 
 **Why:** We need structured feedback for validation findings rather than generic strings to allow programmatic correction and UI displays.
 
@@ -6220,12 +6220,12 @@ Estimated time: 1.5–2 weeks.
 4. Write tests verifying the fields.
 
 **Definition of Done:**
-- [ ] `Correction` and `ValidationResult` are implemented and used by the validator.
-- [ ] Unit tests pass.
+- [x] `Correction` and `ValidationResult` are implemented and used by the validator.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-6: Add --report flag to CLI that outputs plain text correction list
+### [x] S9b-6: Add --report flag to CLI that outputs plain text correction list
 
 **Why:** Command-line users (especially blind composers using VoiceOver) need a highly readable, plain-text report of validation errors and corrections.
 
@@ -6236,13 +6236,13 @@ Estimated time: 1.5–2 weeks.
 4. Write tests in `tests/test_cli.py` verifying the `--report` output.
 
 **Definition of Done:**
-- [ ] The CLI supports `--report`.
-- [ ] Output is plain-text, accessible, and contains all corrections.
-- [ ] Tests pass.
+- [x] The CLI supports `--report`.
+- [x] Output is plain-text, accessible, and contains all corrections.
+- [x] Tests pass.
 
 ---
 
-### [ ] S9b-7: Add validation step to web UI with corrections displayed after upload
+### [x] S9b-7: Add validation step to web UI with corrections displayed after upload
 
 **Why:** Prepare backend support and APIs so that when files are uploaded in the future web UI, validation results are returned and can be displayed.
 
@@ -6251,11 +6251,11 @@ Estimated time: 1.5–2 weeks.
 2. Write tests verifying the JSON format.
 
 **Definition of Done:**
-- [ ] JSON serialization of validation results is implemented and tested.
+- [x] JSON serialization of validation results is implemented and tested.
 
 ---
 
-### [ ] S9b-8: Integration test: input your Fengyang score with known rule violations, verify corrections match expected BANA output
+### [x] S9b-8: Integration test: input your Fengyang score with known rule violations, verify corrections match expected BANA output
 
 **Why:** End-to-end integration tests using real compositions ensure the validator is reliable under real-world conditions.
 
@@ -6264,11 +6264,11 @@ Estimated time: 1.5–2 weeks.
 2. Run the validator and assert the corrections match the expected output.
 
 **Definition of Done:**
-- [ ] Integration test passes.
+- [x] Integration test passes.
 
 ---
 
-### [ ] S9b-9: Document all implemented BANA rules in docs/bana_reference.md
+### [x] S9b-9: Document all implemented BANA rules in docs/bana_reference.md
 
 **Why:** Clear documentation ensures developers and users understand which BANA rules are being checked.
 
@@ -6276,11 +6276,11 @@ Estimated time: 1.5–2 weeks.
 1. Update `docs/bana_reference.md` to list all validator rules, citing the BANA manual sections and providing examples.
 
 **Definition of Done:**
-- [ ] `docs/bana_reference.md` is updated and complete.
+- [x] `docs/bana_reference.md` is updated and complete.
 
 ---
 
-### [ ] S9b-10: Implement BrailleRenderer class with compression_level parameter
+### [x] S9b-10: Implement BrailleRenderer class with compression_level parameter
 
 **Why:** Users should be able to control whether output braille is fully formatted, minimally formatted, or uncompressed.
 
@@ -6290,12 +6290,12 @@ Estimated time: 1.5–2 weeks.
 3. Write unit tests checking that output changes based on the compression level.
 
 **Definition of Done:**
-- [ ] `compression_level` is supported.
-- [ ] Unit tests pass.
+- [x] `compression_level` is supported.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-11: Implement measure repeat detection using musical_equals()
+### [x] S9b-11: Implement measure repeat detection using musical_equals()
 
 **Why:** In compressed mode, identical consecutive measures should be rendered using the BANA measure repeat sign (`⠍⠄`) to save space.
 
@@ -6305,12 +6305,12 @@ Estimated time: 1.5–2 weeks.
 3. Write unit tests.
 
 **Definition of Done:**
-- [ ] Consecutive identical measures are replaced by the measure repeat sign in compressed output.
-- [ ] Unit tests pass.
+- [x] Consecutive identical measures are replaced by the measure repeat sign in compressed output.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-12: Implement section repeat detection using sliding window comparison
+### [x] S9b-12: Implement section repeat detection using sliding window comparison
 
 **Why:** Larger repeated sections of music can be compressed using BANA section/part repeat signs.
 
@@ -6320,12 +6320,12 @@ Estimated time: 1.5–2 weeks.
 3. Write tests verifying correct detection and representation.
 
 **Definition of Done:**
-- [ ] Section repeats are detected and compressed correctly.
-- [ ] Unit tests pass.
+- [x] Section repeats are detected and compressed correctly.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-13: Implement articulation series shorthand detection at voice level
+### [x] S9b-13: Implement articulation series shorthand detection at voice level
 
 **Why:** Automatically compress repeated articulations into shorthand signs during rendering.
 
@@ -6334,12 +6334,12 @@ Estimated time: 1.5–2 weeks.
 2. Write unit tests.
 
 **Definition of Done:**
-- [ ] Repeated articulations are compressed into BANA shorthands.
-- [ ] Unit tests pass.
+- [x] Repeated articulations are compressed into BANA shorthands.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9b-14: Integration test: expanded Internal Model → compressed braille → verify against hand-formatted BANA output
+### [x] S9b-14: Integration test: expanded Internal Model → compressed braille → verify against hand-formatted BANA output
 
 **Why:** Verify that the complete compression pipeline matches expected output from a hand-formatted BANA score.
 
@@ -6347,11 +6347,11 @@ Estimated time: 1.5–2 weeks.
 1. Run a complex score through the compression pipeline and assert the output matches hand-formatted BANA reference data.
 
 **Definition of Done:**
-- [ ] Integration test passes.
+- [x] Integration test passes.
 
 ---
 
-### [ ] S9b-15: Add musical_equals() to Note, Rest, Chord, and Measure classes
+### [x] S9b-15: Add musical_equals() to Note, Rest, Chord, and Measure classes
 
 **Why:** To detect duplicates for compression, we need a way to compare objects for musical equivalence, ignoring non-musical attributes.
 
@@ -6360,14 +6360,14 @@ Estimated time: 1.5–2 weeks.
 2. Write unit tests.
 
 **Definition of Done:**
-- [ ] `musical_equals()` is implemented and verified on the core model classes.
-- [ ] Unit tests pass.
+- [x] `musical_equals()` is implemented and verified on the core model classes.
+- [x] Unit tests pass.
 
 **Senior note:** Place this ticket before the repeat detection tickets in execution, as they depend on it.
 
 ---
 
-### [ ] S9b-16: Implement compression_level parameter with full, minimal, and none modes
+### [x] S9b-16: Implement compression_level parameter with full, minimal, and none modes
 
 **Why:** Expose the compression level option via the command line interface so users can configure formatting.
 
@@ -6377,8 +6377,8 @@ Estimated time: 1.5–2 weeks.
 3. Write tests verifying CLI parameter handling.
 
 **Definition of Done:**
-- [ ] CLI supports `--compression none|minimal|full`.
-- [ ] CLI tests pass.
+- [x] CLI supports `--compression none|minimal|full`.
+- [x] CLI tests pass.
 
 ---
 

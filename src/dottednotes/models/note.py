@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .key_signature import KeySignature
@@ -61,6 +61,10 @@ class Note(BrailleSymbol):
     fingerings: list[Fingering] = field(default_factory=list)
     tremolo: Optional[RepeatedTremolo] = None
     pedal_sustain: Optional[str] = None
+    has_octave_mark: bool = False
+    articulation_format: str = "single"
+    parsed_tokens: list = field(default_factory=list)
+    after_numeric_indicator: bool = False
 
     def __post_init__(self):
         if self.note_name not in NOTE_NAME_TO_LILYPOND:
@@ -121,6 +125,7 @@ class Note(BrailleSymbol):
         articulation_format: str = "single",
         tremolo_str: str = "",
         key_signature: Optional["KeySignature"] = None,
+        force_octave_mark: Optional[bool] = None,
     ) -> str:
         from dottednotes.bana_symbols import NOTE_CELLS
         from .dynamic import DynamicLevel
@@ -135,21 +140,29 @@ class Note(BrailleSymbol):
 
         # 2. Octave mark
         octave_str = ""
-        if prev_note is None or is_measure_start:
+        if force_octave_mark is True:
             if self.octave == 0:
                 octave_str = '⠈⠈'
             else:
                 octave_str = _OCTAVE_TO_BRL.get(self.octave, '')
+        elif force_octave_mark is False:
+            octave_str = ""
         else:
-            PITCH_CLASS_TO_DIATONIC = {'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6}
-            curr_diatonic = self.octave * 7 + PITCH_CLASS_TO_DIATONIC[self.note_name]
-            prev_diatonic = prev_note.octave * 7 + PITCH_CLASS_TO_DIATONIC[prev_note.note_name]
-            diff = abs(curr_diatonic - prev_diatonic)
-            if diff >= 5 or (diff in (3, 4) and self.octave != prev_note.octave):
+            if prev_note is None or is_measure_start:
                 if self.octave == 0:
                     octave_str = '⠈⠈'
                 else:
                     octave_str = _OCTAVE_TO_BRL.get(self.octave, '')
+            else:
+                PITCH_CLASS_TO_DIATONIC = {'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6}
+                curr_diatonic = self.octave * 7 + PITCH_CLASS_TO_DIATONIC[self.note_name]
+                prev_diatonic = prev_note.octave * 7 + PITCH_CLASS_TO_DIATONIC[prev_note.note_name]
+                diff = abs(curr_diatonic - prev_diatonic)
+                if diff >= 5 or (diff in (3, 4) and self.octave != prev_note.octave):
+                    if self.octave == 0:
+                        octave_str = '⠈⠈'
+                    else:
+                        octave_str = _OCTAVE_TO_BRL.get(self.octave, '')
 
         # 3. Accidental
         accidental_str = self.accidental.to_braille() if self.accidental else ''
@@ -213,12 +226,19 @@ class Note(BrailleSymbol):
                 start_dynamics.append(d)
 
         # 10. Articulations & Ornaments
+        if articulation_format == "single" and self.articulation_format != "single":
+            articulation_format = self.articulation_format
         art_str = "".join(a.to_braille() for a in self.articulations)
         if len(self.articulations) == 1:
             if articulation_format == "start_carry":
                 art_str = art_str * 2
             elif articulation_format == "inside_carry":
                 art_str = ""
+            # stop_carry intentionally falls through unchanged: the run's last
+            # note is written as a plain, single occurrence (matching tremolo
+            # and triplet carry termination elsewhere in this file/tuplet.py),
+            # not prefixed -- '⠘' + a staccato sign would collide with the
+            # real BANA 'expressive_accent' symbol (bana_symbols.py).
 
         # Normal ornaments vs glissando
         norm_ornaments = [o for o in self.ornaments if o.type != OrnamentType.GLISSANDO]
@@ -265,6 +285,29 @@ class Note(BrailleSymbol):
         suffix = dots_str + gliss_str + intervals_str + tremolo_str + fingering_str + tie_str + slur_start_str + slur_bracket_close_str + end_dyn_str + pedal_up_str
 
         return prefix + note_cell + suffix
+
+    def musical_equals(self, other: Any) -> bool:
+        if not isinstance(other, Note):
+            return False
+        return (
+            self.note_name == other.note_name and
+            self.octave == other.octave and
+            self.duration == other.duration and
+            self.accidental == other.accidental and
+            self.tie == other.tie and
+            self.slur_start == other.slur_start and
+            self.slur_end == other.slur_end and
+            self.slur_bracket_open == other.slur_bracket_open and
+            self.slur_bracket_close == other.slur_bracket_close and
+            self.articulations == other.articulations and
+            self.ornaments == other.ornaments and
+            self.dynamics == other.dynamics and
+            self.fingerings == other.fingerings and
+            self.grace_note == other.grace_note and
+            self.tremolo == other.tremolo and
+            self.pedal_sustain == other.pedal_sustain and
+            self.after_numeric_indicator == other.after_numeric_indicator
+        )
 
     def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
         """Return (pitch_only_str, new_midi) for use inside a chord <...> block.
@@ -433,3 +476,13 @@ class Rest(BrailleSymbol):
             pedal_up_str = '⠡⠉'
 
         return pedal_down_str + cell + dots + pedal_up_str
+
+    def musical_equals(self, other: Any) -> bool:
+        if not isinstance(other, Rest):
+            return False
+        return (
+            self.duration == other.duration and
+            self.is_full_measure == other.is_full_measure and
+            self.multi_measure_count == other.multi_measure_count and
+            self.pedal_sustain == other.pedal_sustain
+        )

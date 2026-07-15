@@ -141,12 +141,38 @@ def _run_convert(args: argparse.Namespace) -> None:
     else:
         score = _parse_score(text, category_override=category_override)
 
-    rendered = score.to_lilypond(
-        category_override=category_override,
-        format_overrides=format_overrides
-    )
+    if getattr(args, 'report', False):
+        from dottednotes.validation.validator import BANAValidator
+        validator = BANAValidator()
+        result = validator.validate(score, raw_brl_text=text)
+        for c in result.corrections:
+            msg = ""
+            if c.line_number > 0:
+                msg += f"Line {c.line_number}: "
+            if c.measure_number > 0:
+                msg += f"Measure {c.measure_number}: "
+            msg += c.message
+            print(msg, file=sys.stderr)
 
     output_path = args.output
+    # A .brf/.brl output path means "render back to compressed braille"
+    # (Score.to_braille() / BrailleRenderer, Sprint 9) rather than the usual
+    # LilyPond path. Any other output path (or no output path -- stdout)
+    # keeps today's default LilyPond behavior.
+    is_braille_output = output_path is not None and Path(output_path).suffix.lower() in (".brf", ".brl")
+
+    if is_braille_output:
+        if args.compile:
+            raise DottedNotesError(
+                "--compile requires LilyPond (.ly) output, not a .brf/.brl output path."
+            )
+        rendered = score.to_braille(compression_level=args.compression)
+    else:
+        rendered = score.to_lilypond(
+            category_override=category_override,
+            format_overrides=format_overrides
+        )
+
     if args.compile and output_path is None:
         # lilypond compiles a file, not stdin -- an output path is required
         # to compile even when the caller didn't ask to keep the .ly file.
@@ -181,7 +207,10 @@ def main() -> None:
     )
     convert_parser.add_argument("input", help="Path to a .brf or .brl braille music file")
     convert_parser.add_argument(
-        "output", nargs="?", help="Output .ly file path (default: stdout)"
+        "output", nargs="?",
+        help="Output file path (default: stdout, as LilyPond). A .ly path (or "
+             "no path) produces LilyPond; a .brf/.brl path produces compressed "
+             "braille instead (see --compression).",
     )
     convert_parser.add_argument(
         "--compile",
@@ -203,6 +232,18 @@ def main() -> None:
     convert_parser.add_argument(
         "--format",
         help="Comma-separated formatting overrides (e.g. paper_size=a4,margin_mm=12)",
+    )
+    convert_parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Print BANA correction/validation report to stderr",
+    )
+    convert_parser.add_argument(
+        "--compression",
+        choices=["none", "minimal", "full"],
+        default="full",
+        help="Set repeat and shorthand compression level (none, minimal, full) "
+             "for .brf/.brl output; has no effect on .ly output",
     )
     convert_parser.set_defaults(func=_run_convert)
 

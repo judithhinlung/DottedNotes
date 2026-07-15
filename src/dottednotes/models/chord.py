@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .time_signature import TimeSignature
@@ -24,6 +24,13 @@ class Chord:
     """
 
     notes: list[Note] = field(default_factory=list)
+
+    def musical_equals(self, other: Any) -> bool:
+        if not isinstance(other, Chord):
+            return False
+        if len(self.notes) != len(other.notes):
+            return False
+        return all(n1.musical_equals(n2) for n1, n2 in zip(self.notes, other.notes))
 
     @property
     def duration(self) -> Duration:

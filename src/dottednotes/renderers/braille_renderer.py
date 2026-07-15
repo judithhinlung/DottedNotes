@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Optional, Union, Any
 from dottednotes.models.score import Score
 from dottednotes.models.orchestra_score import OrchestraScore
 from dottednotes.models.staff import Staff
@@ -39,7 +39,8 @@ def render_measure_slice(
     start_idx: int,
     size: int,
     prev_note: Optional[Note],
-    time_sig
+    time_sig,
+    compression_level: str = "full"
 ) -> tuple[list[str], Optional[Note]]:
     """Helper to render a slice of measures. Only the first measure of the slice is treated as a line start."""
     rendered = []
@@ -47,19 +48,29 @@ def render_measure_slice(
     for k in range(size):
         m = measures[start_idx + k]
         is_start = (k == 0)
-        m_brl, curr_prev = m.to_braille(prev_note=curr_prev, is_measure_start=is_start, time_signature=time_sig)
+        m_brl, curr_prev = m.to_braille(prev_note=curr_prev, is_measure_start=is_start, time_signature=time_sig, compression_level=compression_level)
         rendered.append(m_brl)
     return rendered, curr_prev
 
 
 class BrailleRenderer:
-    def __init__(self, line_width: int = 40, show_measure_numbers: bool = True):
+    def __init__(self, line_width: int = 40, show_measure_numbers: bool = True, compression_level: str = "full"):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
+        self.compression_level = compression_level
 
     def render(self, score: Score) -> str:
         if not score.staves:
             return ""
+
+        import copy
+        score = copy.deepcopy(score)
+
+        if self.compression_level != "none":
+            # Pass 1: Articulation carry shorthand pass
+            self._compress_articulations(score)
+            # Pass 2: Measure repeat compression pass
+            self._compress_measure_repeats(score)
 
         # Determine layout type. is_piano is computed first and independent of
         # isinstance(score, OrchestraScore): LilypondParser tags any parsed
@@ -105,8 +116,8 @@ class BrailleRenderer:
 
         for idx, m in enumerate(staff.measures):
             # Render both possibilities
-            brl_start, prev_start = m.to_braille(prev_note=prev_note, is_measure_start=True, time_signature=staff.time_signature)
-            brl_no_start, prev_no_start = m.to_braille(prev_note=prev_note, is_measure_start=False, time_signature=staff.time_signature)
+            brl_start, prev_start = m.to_braille(prev_note=prev_note, is_measure_start=True, time_signature=staff.time_signature, compression_level=self.compression_level)
+            brl_no_start, prev_no_start = m.to_braille(prev_note=prev_note, is_measure_start=False, time_signature=staff.time_signature, compression_level=self.compression_level)
 
             if not current_line:
                 num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
@@ -164,8 +175,8 @@ class BrailleRenderer:
             best_prev_lh = prev_note_lh
             
             while idx + group_size <= n_measures:
-                rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature)
-                lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature)
+                rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level)
+                lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level)
                 
                 test_rh = self._build_piano_line_from_strings(idx, rh_slice_strs, is_right=True)
                 test_lh = self._build_piano_line_from_strings(idx, lh_slice_strs, is_right=False)
@@ -181,8 +192,8 @@ class BrailleRenderer:
             
             if not best_rh_lines:
                 # Force at least one measure to avoid infinite loop
-                rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature)
-                lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature)
+                rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level)
+                lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level)
                 best_rh_lines = self._build_piano_line_from_strings(idx, rh_slice_strs, is_right=True)
                 best_lh_lines = self._build_piano_line_from_strings(idx, lh_slice_strs, is_right=False)
                 fit_size = 1
@@ -266,7 +277,7 @@ class BrailleRenderer:
                 temp_prev_notes = []
                 
                 for s_idx, staff in enumerate(score.staves):
-                    slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature)
+                    slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level)
                     music_str = "".join(slice_strs)
                     
                     abbrev = TABLE_29_ENGLISH.get(staff.name)
@@ -299,7 +310,7 @@ class BrailleRenderer:
                 best_staff_lines = []
                 best_prev_notes = []
                 for s_idx, staff in enumerate(score.staves):
-                    slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, 1, prev_notes[s_idx], staff.time_signature)
+                    slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, 1, prev_notes[s_idx], staff.time_signature, self.compression_level)
                     music_str = "".join(slice_strs)
                     abbrev = TABLE_29_ENGLISH.get(staff.name)
                     if not abbrev:
@@ -326,3 +337,99 @@ class BrailleRenderer:
             idx += fit_size
 
         return "\n".join(lines) + "\n"
+
+    def _compress_articulations(self, score: Score) -> None:
+        from dottednotes.models.note import Note, Rest
+        from dottednotes.models.chord import Chord
+        for staff in score.staves:
+            voices = self._get_staff_voices_raw(staff)
+            for voice in voices:
+                n_notes = len(voice)
+                i = 0
+                while i < n_notes:
+                    def get_note_art(item):
+                        n = item.notes[0] if isinstance(item, Chord) else item
+                        if isinstance(n, Note) and len(n.articulations) == 1:
+                            return n.articulations[0].type
+                        return None
+
+                    art_type = get_note_art(voice[i])
+                    if art_type is not None:
+                        run = [voice[i]]
+                        j = i + 1
+                        while j < n_notes:
+                            nxt = voice[j]
+                            if isinstance(nxt, Rest):
+                                break
+                            if get_note_art(nxt) == art_type:
+                                run.append(nxt)
+                                j += 1
+                            else:
+                                break
+                        
+                        if len(run) >= 4:
+                            # Apply carry
+                            first_n = run[0].notes[0] if isinstance(run[0], Chord) else run[0]
+                            first_n.articulation_format = "start_carry"
+                            for item in run[1:-1]:
+                                mid_n = item.notes[0] if isinstance(item, Chord) else item
+                                mid_n.articulation_format = "inside_carry"
+                            last_n = run[-1].notes[0] if isinstance(run[-1], Chord) else run[-1]
+                            last_n.articulation_format = "stop_carry"
+                        i = j
+                    else:
+                        i += 1
+
+    def _get_staff_voices_raw(self, staff: Staff) -> list[list[Any]]:
+        from dottednotes.models.in_accord import InAccord
+        max_parts = 1
+        for m in staff.measures:
+            for item in m.notes:
+                if isinstance(item, InAccord):
+                    max_parts = max(max_parts, len(item.parts))
+
+        voices = [[] for _ in range(max_parts)]
+        for m in staff.measures:
+            in_accord = None
+            for item in m.notes:
+                if isinstance(item, InAccord):
+                    in_accord = item
+                    break
+
+            if in_accord:
+                for i in range(max_parts):
+                    part_idx = min(i, len(in_accord.parts) - 1)
+                    voices[i].extend(self._flatten_items_raw(in_accord.parts[part_idx]))
+            else:
+                measure_notes = self._flatten_items_raw(m.notes)
+                for i in range(max_parts):
+                    voices[i].extend(measure_notes)
+        return voices
+
+    def _flatten_items_raw(self, items: list) -> list[Any]:
+        from dottednotes.models.note import Note, Rest
+        from dottednotes.models.chord import Chord
+        from dottednotes.models.tuplet import Tuplet
+        flat = []
+        for item in items:
+            if isinstance(item, (Note, Rest, Chord)):
+                flat.append(item)
+            elif isinstance(item, Tuplet):
+                flat.extend(self._flatten_items_raw(item.items))
+        return flat
+
+    def _compress_measure_repeats(self, score: Score) -> None:
+        import copy
+        from dottednotes.models.measure_repeat import MeasureRepeat
+        for staff in score.staves:
+            if not staff.measures:
+                continue
+            i = 1
+            last_non_repeat_measure = copy.deepcopy(staff.measures[0])
+            while i < len(staff.measures):
+                curr_m = staff.measures[i]
+                if curr_m.musical_equals(last_non_repeat_measure):
+                    curr_m.notes = [MeasureRepeat(count=1, line=1)]
+                else:
+                    last_non_repeat_measure = copy.deepcopy(curr_m)
+                i += 1

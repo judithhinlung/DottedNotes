@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Union, Optional, TYPE_CHECKING
+from typing import Union, Optional, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .time_signature import TimeSignature
@@ -33,6 +33,7 @@ def _render_note_list_to_braille(
     is_measure_start: bool = False,
     time_signature: Optional["TimeSignature"] = None,
     key_signature: Optional["KeySignature"] = None,
+    compression_level: str = "full",
 ) -> str:
     n_items = len(items)
 
@@ -105,27 +106,28 @@ def _render_note_list_to_braille(
 
     # 4. Articulation runs (consecutive 4+ notes/chords with identical articulation type)
     articulation_formats = ["single"] * n_items
-    i = 0
-    while i < n_items:
-        def get_single_art_type(item):
-            note_obj = item.notes[0] if hasattr(item, 'notes') and item.notes else item
-            if hasattr(note_obj, 'articulations') and len(note_obj.articulations) == 1:
-                return note_obj.articulations[0].type
-            return None
+    if compression_level != "none":
+        i = 0
+        while i < n_items:
+            def get_single_art_type(item):
+                note_obj = item.notes[0] if hasattr(item, 'notes') and item.notes else item
+                if hasattr(note_obj, 'articulations') and len(note_obj.articulations) == 1:
+                    return note_obj.articulations[0].type
+                return None
 
-        art_type = get_single_art_type(items[i])
-        if art_type is not None:
-            j = i
-            while j < n_items and get_single_art_type(items[j]) == art_type:
-                j += 1
-            if j - i >= 4:
-                articulation_formats[i] = "start_carry"
-                for k in range(i + 1, j - 1):
-                    articulation_formats[k] = "inside_carry"
-                articulation_formats[j - 1] = "stop_carry"
-            i = j
-        else:
-            i += 1
+            art_type = get_single_art_type(items[i])
+            if art_type is not None:
+                j = i
+                while j < n_items and get_single_art_type(items[j]) == art_type:
+                    j += 1
+                if j - i >= 4:
+                    articulation_formats[i] = "start_carry"
+                    for k in range(i + 1, j - 1):
+                        articulation_formats[k] = "inside_carry"
+                    articulation_formats[j - 1] = "stop_carry"
+                i = j
+            else:
+                i += 1
 
     # Render items
     rendered = []
@@ -144,7 +146,7 @@ def _render_note_list_to_braille(
                 kwargs['key_signature'] = key_signature
                 kwargs['is_16th_run_continuation'] = is_16th_continuation[idx]
                 kwargs['tremolo_format'] = tremolo_formats[idx]
-                kwargs['articulation_format'] = articulation_formats[idx]
+                kwargs['articulation_format'] = item.articulation_format if item.articulation_format != "single" else articulation_formats[idx]
             elif isinstance(item, Chord):
                 kwargs['key_signature'] = key_signature
                 kwargs['is_16th_run_continuation'] = is_16th_continuation[idx]
@@ -153,6 +155,7 @@ def _render_note_list_to_braille(
                 kwargs['format'] = triplet_formats[idx]
             elif isinstance(item, InAccord):
                 kwargs['key_signature'] = key_signature
+                kwargs['compression_level'] = compression_level
             elif isinstance(item, AlternatingTremolo):
                 kwargs['key_signature'] = key_signature
 
@@ -212,6 +215,7 @@ class Measure:
         prev_note: Optional[Note] = None,
         is_measure_start: bool = True,
         time_signature: Optional["TimeSignature"] = None,
+        compression_level: str = "full",
     ) -> tuple[str, Optional[Note]]:
         marking_strs = "".join(m.to_braille() for m in self.text_markings)
 
@@ -228,6 +232,7 @@ class Measure:
             is_measure_start=is_measure_start,
             time_signature=ts_obj,
             key_signature=key_sig_obj,
+            compression_level=compression_level,
         )
 
         from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES
@@ -269,3 +274,17 @@ class Measure:
                     break
 
         return marking_strs + notes_str + bar_cell, last_note
+
+    def musical_equals(self, other: Any) -> bool:
+        if not isinstance(other, Measure):
+            return False
+        if len(self.notes) != len(other.notes):
+            return False
+        for item1, item2 in zip(self.notes, other.notes):
+            if hasattr(item1, 'musical_equals'):
+                if not item1.musical_equals(item2):
+                    return False
+            else:
+                if item1 != item2:
+                    return False
+        return True

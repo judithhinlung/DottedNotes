@@ -94,6 +94,14 @@ dottednotes convert piece.brf piece.ly --category "Chamber"
 # Override specific formatting options using key=value pairs
 dottednotes convert piece.brf piece.ly --format "paper_size=a4,margin_mm=12,staff_size=18"
 
+# Print BANA validation report (corrections list) to stderr
+dottednotes convert piece.brf --report
+
+# Render back to compressed braille instead of LilyPond: a .brf/.brl output
+# path switches to BRF output. --compression controls shorthand carrying and
+# measure-repeat compression (full, minimal, none).
+dottednotes convert piece.brf piece.brf --compression minimal
+
 # Show version
 dottednotes --version
 ```
@@ -119,6 +127,18 @@ dottednotes --version
   * `staff_size` (float, global staff size in points)
   * `basic_distance` (float, basic distance between systems)
   * `padding` (float, padding spacing between systems)
+
+* **`--report`**:
+  Runs the BANA validator on the parsed music score and prints a line-by-line list of correction warnings (such as sign order violations, missing octave marks under register rules, and shorthand recommendations) to `stderr`.
+
+* **`--compression <Level>`**:
+  Sets the level of braille shorthand/compression used when the `convert` output path
+  ends in `.brf` or `.brl` (which renders back to braille instead of LilyPond). Has no
+  effect on ordinary `.ly` output.
+  Supported levels:
+  * `full` (Default; enables all shorthand carrying and measure repeat compression)
+  * `minimal` (Enables shorthand carrying and measure repeats, but disables long-span repeats if supported)
+  * `none` (Disables all shorthand carrying and repeat compression, rendering notes and articulations explicitly)
 
 ## Background
 

@@ -24,9 +24,9 @@ class Score:
     def add_staff(self, staff: Staff) -> None:
         self.staves.append(staff)
 
-    def to_braille(self) -> str:
+    def to_braille(self, compression_level: str = "full") -> str:
         from dottednotes.renderers.braille_renderer import BrailleRenderer
-        return BrailleRenderer().render(self)
+        return BrailleRenderer(compression_level=compression_level).render(self)
 
     @staticmethod
     def _group_by_family(staves: list[Staff]) -> list[tuple["InstrumentFamily | None", list[Staff]]]:
