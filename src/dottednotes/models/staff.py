@@ -30,6 +30,29 @@ class Staff:
     def add_measure(self, measure: Measure) -> None:
         self.measures.append(measure)
 
+    def to_braille(self) -> str:
+        sig_parts = []
+        if self.clef:
+            sig_parts.append(self.clef.to_braille())
+        if self.key_signature:
+            sig_parts.append(self.key_signature.to_braille())
+        if self.time_signature:
+            sig_parts.append(self.time_signature.to_braille())
+
+        sig_str = "".join(sig_parts)
+
+        measure_strs = []
+        prev_note = None
+        for m in self.measures:
+            m_brl, prev_note = m.to_braille(
+                prev_note=prev_note,
+                is_measure_start=True,
+                time_signature=self.time_signature
+            )
+            measure_strs.append(m_brl)
+
+        return sig_str + "".join(measure_strs)
+
     def relative_anchor(self) -> tuple[str, int]:
         """Return (anchor_pitch, start_midi) for this staff's \\relative block.
 

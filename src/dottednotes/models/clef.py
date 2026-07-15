@@ -20,6 +20,14 @@ CLEF_TO_LILYPOND: dict[ClefType, str] = {
 }
 
 
+_CLEF_TO_BRL = {
+    ClefType.TREBLE: '⠜⠌⠇',
+    ClefType.BASS:   '⠜⠼⠇',
+    ClefType.ALTO:   '⠜⠬⠇',
+    ClefType.TENOR:  '⠜⠬⠐⠇',
+}
+
+
 @dataclass
 class Clef(BrailleSymbol):
     """A clef sign."""
@@ -27,3 +35,6 @@ class Clef(BrailleSymbol):
 
     def to_lilypond(self) -> str:
         return f'\\clef {CLEF_TO_LILYPOND[self.clef_type]}'
+
+    def to_braille(self) -> str:
+        return _CLEF_TO_BRL[self.clef_type]

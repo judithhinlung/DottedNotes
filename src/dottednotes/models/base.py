@@ -15,6 +15,11 @@ class BrailleSymbol:
             f"{self.__class__.__name__} must implement to_lilypond()"
         )
 
+    def to_braille(self) -> str:
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement to_braille()"
+        )
+
     def __repr__(self) -> str:
         return (f"{self.__class__.__name__}("
                 f"dots={self.dots}, "

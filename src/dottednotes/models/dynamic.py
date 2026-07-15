@@ -39,6 +39,25 @@ DYNAMIC_TO_LILYPOND = {
 }
 
 
+_DYNAMIC_TO_BRL = {
+    DynamicLevel.PPP: '⠜⠏⠏⠏',
+    DynamicLevel.PP: '⠜⠏⠏',
+    DynamicLevel.P: '⠜⠏',
+    DynamicLevel.MP: '⠜⠍⠏',
+    DynamicLevel.MF: '⠜⠍⠋',
+    DynamicLevel.F: '⠜⠋',
+    DynamicLevel.FF: '⠜⠋⠋',
+    DynamicLevel.FFF: '⠜⠋⠋⠋',
+    DynamicLevel.SF: '⠜⠎⠋',
+    DynamicLevel.SFZ: '⠜⠎⠋⠵',
+    DynamicLevel.FP: '⠜⠋⠏',
+    DynamicLevel.CRESCENDO_START: '⠜⠉',
+    DynamicLevel.DECRESCENDO_START: '⠜⠙',
+    DynamicLevel.CRESCENDO_END: '⠜⠒',
+    DynamicLevel.DECRESCENDO_END: '⠜⠲',
+}
+
+
 @dataclass
 class Dynamic:
     """A dynamic marking."""
@@ -46,3 +65,6 @@ class Dynamic:
 
     def to_lilypond(self) -> str:
         return DYNAMIC_TO_LILYPOND[self.level]
+
+    def to_braille(self) -> str:
+        return _DYNAMIC_TO_BRL[self.level]

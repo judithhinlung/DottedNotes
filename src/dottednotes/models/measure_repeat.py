@@ -21,6 +21,9 @@ class MeasureRepeat:
     count: int
     line: int
 
+    def to_braille(self) -> str:
+        return '⠍⠄' * self.count
+
     def expand(self, source: list, source_line: int | None = None) -> list:
         """Return `count` deep copies of `source`, concatenated.
 

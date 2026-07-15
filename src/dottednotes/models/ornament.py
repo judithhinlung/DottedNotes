@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .note import Note
@@ -35,12 +35,29 @@ ORNAMENT_TO_LILYPOND: dict[OrnamentType, str] = {
 }
 
 
+_ORNAMENT_TO_BRL = {
+    OrnamentType.TRILL: '⠖',
+    OrnamentType.TRILL_SPAN_START: '⠖⠖',
+    OrnamentType.TRILL_SPAN_END: '⠖',
+    OrnamentType.MORDENT: '⠐⠖⠇',
+    OrnamentType.UPPER_MORDENT: '⠐⠖',
+    OrnamentType.EXTENDED_MORDENT: '⠰⠖⠇',
+    OrnamentType.EXTENDED_UPPER_MORDENT: '⠰⠖',
+    OrnamentType.TURN: '⠲',
+    OrnamentType.INVERTED_TURN: '⠲⠇',
+    OrnamentType.GLISSANDO: '⠈⠁',
+}
+
+
 @dataclass
 class Ornament:
     type: OrnamentType
 
     def to_lilypond(self) -> str:
         return ORNAMENT_TO_LILYPOND[self.type]
+
+    def to_braille(self) -> str:
+        return _ORNAMENT_TO_BRL[self.type]
 
 
 @dataclass
@@ -65,3 +82,31 @@ class GraceNote:
         prefix = r'\appoggiatura' if self.long_appoggiatura else r'\grace'
         notes_str = ' '.join(n.to_lilypond() for n in self.notes)
         return f'{prefix} {{ {notes_str} }}'
+
+    def to_braille(
+        self,
+        prev_note: Optional[Note] = None,
+        is_measure_start: bool = False,
+        time_signature: Optional[TimeSignature] = None,
+    ) -> str:
+        if not self.notes:
+            return ""
+
+        indicator = '⠐⠢' if self.long_appoggiatura else '⠢'
+        rendered_notes = []
+        curr_prev = prev_note
+
+        if len(self.notes) <= 3:
+            for n in self.notes:
+                rendered_notes.append(indicator + n.to_braille(prev_note=curr_prev, is_measure_start=False, time_signature=time_signature))
+                curr_prev = n
+        else:
+            # 4+ notes: doubled indicator before first, none for middle, single before last
+            rendered_notes.append(indicator + indicator + self.notes[0].to_braille(prev_note=curr_prev, is_measure_start=False, time_signature=time_signature))
+            curr_prev = self.notes[0]
+            for n in self.notes[1:-1]:
+                rendered_notes.append(n.to_braille(prev_note=curr_prev, is_measure_start=False, time_signature=time_signature))
+                curr_prev = n
+            rendered_notes.append(indicator + self.notes[-1].to_braille(prev_note=curr_prev, is_measure_start=False, time_signature=time_signature))
+
+        return "".join(rendered_notes)

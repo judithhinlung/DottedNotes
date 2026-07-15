@@ -1,6 +1,9 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .note import Note
+    from .time_signature import TimeSignature
 
 
 @dataclass
@@ -37,3 +40,37 @@ class Tuplet:
         inner = ' '.join(parts)
         num, den = self.ratio
         return f'\\tuplet {num}/{den} {{ {inner} }}', cur_midi
+
+    def to_braille(
+        self,
+        prev_note: Optional["Note"] = None,
+        is_measure_start: bool = False,
+        time_signature: Optional["TimeSignature"] = None,
+        format: str = "single",
+    ) -> str:
+        indicator = ""
+        if format == "single":
+            indicator = '⠆'
+        elif format == "start_carry":
+            indicator = '⠆⠆'
+        elif format == "stop_carry":
+            indicator = '⠆'
+
+        rendered_items = []
+        curr_prev = prev_note
+        curr_measure_start = is_measure_start
+        for item in self.items:
+            # Pass all appropriate context args
+            # Some items (like Note/Chord) accept is_16th_run_continuation etc. which will be default
+            kwargs = {
+                'prev_note': curr_prev,
+                'is_measure_start': curr_measure_start,
+                'time_signature': time_signature,
+            }
+            rendered_items.append(item.to_braille(**kwargs))
+            curr_prev = item.notes[0] if hasattr(item, 'notes') else item
+            curr_measure_start = False
+
+        if rendered_items:
+            rendered_items[0] = indicator + rendered_items[0]
+        return "".join(rendered_items)

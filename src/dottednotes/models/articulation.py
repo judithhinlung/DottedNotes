@@ -35,9 +35,27 @@ _ARTICULATION_TO_LILYPOND = {
 }
 
 
+_ARTICULATION_TO_BRL = {
+    ArticulationType.STACCATO: '⠦',
+    ArticulationType.STACCATISSIMO: '⠠⠦',
+    ArticulationType.MEZZO_STACCATO: '⠐⠦',
+    ArticulationType.TENUTO: '⠸⠦',
+    ArticulationType.ACCENT: '⠨⠦',
+    ArticulationType.EXPRESSIVE_ACCENT: '⠘⠦',
+    ArticulationType.SWELL: '⠤⠄',
+    ArticulationType.DOWN_BOW: '⠣⠃',
+    ArticulationType.STOPPED: '⠣⠃',
+    ArticulationType.UP_BOW: '⠣⠄',
+    ArticulationType.OPEN: '⠅',
+}
+
+
 @dataclass
 class Articulation:
     type: ArticulationType
 
     def to_lilypond(self) -> str:
         return _ARTICULATION_TO_LILYPOND[self.type]
+
+    def to_braille(self) -> str:
+        return _ARTICULATION_TO_BRL[self.type]

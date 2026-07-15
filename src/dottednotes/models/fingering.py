@@ -33,3 +33,20 @@ class Fingering(BrailleSymbol):
             # Single fingering
             return f"-{self.finger}"
         return ""
+
+    def to_braille(self) -> str:
+        _FINGER_TO_BRL = {1: '⠁', 2: '⠃', 3: '⠇', 4: '⠂', 5: '⠅'}
+        if self.change_to is not None:
+            # Change of fingering: finger + change_cell + change_to
+            t1 = _FINGER_TO_BRL.get(self.finger, '⠠')  # fallback to '⠠' for first omitted
+            t3 = _FINGER_TO_BRL.get(self.change_to, '')
+            return t1 + '⠉' + t3
+        elif self.alternative is not None or self.first_omitted or self.second_omitted:
+            # Alternative fingering
+            t1 = '⠠' if self.first_omitted else _FINGER_TO_BRL.get(self.finger, '')
+            t2 = '⠄' if self.second_omitted else _FINGER_TO_BRL.get(self.alternative, '')
+            return t1 + t2
+        elif self.finger is not None:
+            # Single fingering
+            return _FINGER_TO_BRL.get(self.finger, '')
+        return ""

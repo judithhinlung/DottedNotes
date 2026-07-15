@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .key_signature import KeySignature
 
 from .accidental import Accidental
 from .base import BrailleSymbol
@@ -26,6 +29,16 @@ _NOTE_SEMITONES: dict[str, int] = {
 # How each accidental type shifts the MIDI pitch (keyed by AccidentalType.name)
 _ACCIDENTAL_MIDI_OFFSETS: dict[str, int] = {
     'SHARP': 1, 'FLAT': -1, 'NATURAL': 0, 'DOUBLE_SHARP': 2, 'DOUBLE_FLAT': -2,
+}
+
+_OCTAVE_TO_BRL: dict[int, str] = {
+    1: '⠈',
+    2: '⠘',
+    3: '⠸',
+    4: '⠐',
+    5: '⠨',
+    6: '⠰',
+    7: '⠠',
 }
 
 
@@ -96,6 +109,162 @@ class Note(BrailleSymbol):
             pedal_str = r"\sustainOn\sustainOff"
         return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
                 f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}")
+
+    def to_braille(
+        self,
+        prev_note: Optional[Note] = None,
+        is_measure_start: bool = False,
+        time_signature: Optional["TimeSignature"] = None,
+        is_16th_run_continuation: bool = False,
+        tremolo_format: str = "single",
+        intervals_str: str = "",
+        articulation_format: str = "single",
+        tremolo_str: str = "",
+        key_signature: Optional["KeySignature"] = None,
+    ) -> str:
+        from dottednotes.bana_symbols import NOTE_CELLS
+        from .dynamic import DynamicLevel
+        from .ornament import OrnamentType
+
+        # 1. Grace notes
+        grace_str = ""
+        if self.grace_note:
+            grace_str = self.grace_note.to_braille(prev_note=prev_note, is_measure_start=is_measure_start, time_signature=time_signature)
+            prev_note = self.grace_note.notes[-1]
+            is_measure_start = False
+
+        # 2. Octave mark
+        octave_str = ""
+        if prev_note is None or is_measure_start:
+            if self.octave == 0:
+                octave_str = '⠈⠈'
+            else:
+                octave_str = _OCTAVE_TO_BRL.get(self.octave, '')
+        else:
+            PITCH_CLASS_TO_DIATONIC = {'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6}
+            curr_diatonic = self.octave * 7 + PITCH_CLASS_TO_DIATONIC[self.note_name]
+            prev_diatonic = prev_note.octave * 7 + PITCH_CLASS_TO_DIATONIC[prev_note.note_name]
+            diff = abs(curr_diatonic - prev_diatonic)
+            if diff >= 5 or (diff in (3, 4) and self.octave != prev_note.octave):
+                if self.octave == 0:
+                    octave_str = '⠈⠈'
+                else:
+                    octave_str = _OCTAVE_TO_BRL.get(self.octave, '')
+
+        # 3. Accidental
+        accidental_str = self.accidental.to_braille() if self.accidental else ''
+
+        # 4. Note cell
+        _NOTE_TO_BRL = {}
+        for cell, info in NOTE_CELLS.items():
+            if info is not None:
+                name, base_dur = info
+                _NOTE_TO_BRL[(name, base_dur)] = cell
+
+        if self.duration.value == 0:
+            # Breve
+            whole_cell = _NOTE_TO_BRL[(self.note_name, 1)]
+            if time_signature and time_signature.beats_per_measure() >= 8.0:
+                note_cell = whole_cell + '⠅'
+            else:
+                note_cell = whole_cell + '⠘⠉' + whole_cell
+        else:
+            if is_16th_run_continuation:
+                base_dur = 8
+            else:
+                if self.duration.value in (1, 16):
+                    base_dur = 1
+                elif self.duration.value in (2, 32):
+                    base_dur = 2
+                elif self.duration.value in (4, 64):
+                    base_dur = 4
+                elif self.duration.value == 8:
+                    base_dur = 8
+                else:
+                    raise ValueError(f"Unsupported duration value: {self.duration.value}")
+            note_cell = _NOTE_TO_BRL[(self.note_name, base_dur)]
+
+        # 5. Dots
+        dots_str = '⠄' * self.duration.dots
+
+        # 6. Pedal down
+        pedal_down_str = ""
+        if self.pedal_sustain in ("on", "on_off"):
+            pedal_down_str = '⠣⠉'
+        elif self.pedal_sustain == "change":
+            pedal_down_str = '⠡⠣⠉'
+
+        # 7. Pedal up
+        pedal_up_str = ""
+        if self.pedal_sustain in ("off", "on_off"):
+            pedal_up_str = '⠡⠉'
+
+        # 8. Slur bracket open/close
+        slur_bracket_open_str = '⠰⠃' if self.slur_bracket_open else ''
+        slur_bracket_close_str = '⠘⠆' if self.slur_bracket_close else ''
+
+        # 9. Dynamics
+        start_dynamics = []
+        end_dynamics = []
+        for d in self.dynamics:
+            if d.level in (DynamicLevel.CRESCENDO_END, DynamicLevel.DECRESCENDO_END):
+                end_dynamics.append(d)
+            else:
+                start_dynamics.append(d)
+
+        # 10. Articulations & Ornaments
+        art_str = "".join(a.to_braille() for a in self.articulations)
+        if len(self.articulations) == 1:
+            if articulation_format == "start_carry":
+                art_str = art_str * 2
+            elif articulation_format == "inside_carry":
+                art_str = ""
+
+        # Normal ornaments vs glissando
+        norm_ornaments = [o for o in self.ornaments if o.type != OrnamentType.GLISSANDO]
+        gliss_ornaments = [o for o in self.ornaments if o.type == OrnamentType.GLISSANDO]
+        orn_str = "".join(o.to_braille() for o in norm_ornaments)
+        gliss_str = "".join(o.to_braille() for o in gliss_ornaments)
+
+        # Combine preceding elements:
+        # dynamics + articulations + ornaments + accidental + octave_mark + note_cell
+        pre_rest = art_str + orn_str + accidental_str + octave_str + note_cell
+
+        # Determine start dynamics string and if ambiguity terminator is needed
+        start_dyn_parts = []
+        for d in start_dynamics:
+            start_dyn_parts.append(d.to_braille())
+        start_dyn_str = "".join(start_dyn_parts)
+        if start_dyn_str and pre_rest:
+            first_cell = pre_rest[0]
+            if (ord(first_cell) - 0x2800) & 0x07 != 0:
+                start_dyn_str += '⠄'
+
+        # Suffix parts: tremolo + fingerings + tie + slur
+        if not tremolo_str:
+            if self.tremolo:
+                from dottednotes.bana_symbols import TREMOLO_REPEATED_VALUE_CELLS
+                _REP_TREM_TO_BRL = {v: k for k, v in TREMOLO_REPEATED_VALUE_CELLS.items()}
+                cell_val = _REP_TREM_TO_BRL.get(self.tremolo.subdivision, '⠇')
+                if tremolo_format == "single":
+                    tremolo_str = '⠘' + cell_val
+                elif tremolo_format == "start_carry":
+                    tremolo_str = cell_val * 2
+                elif tremolo_format == "stop_carry":
+                    tremolo_str = '⠘' + cell_val
+                elif tremolo_format == "inside_carry":
+                    tremolo_str = ""
+
+        fingering_str = "".join(f.to_braille() for f in self.fingerings)
+        tie_str = '⠨⠉' if getattr(self, '_is_chord_written_note', False) and self.tie else ('⠈⠉' if self.tie else '')
+        slur_start_str = '⠉' if self.slur_start else ''
+
+        end_dyn_str = "".join(d.to_braille() for d in end_dynamics)
+
+        prefix = grace_str + pedal_down_str + slur_bracket_open_str + start_dyn_str + art_str + orn_str + accidental_str + octave_str
+        suffix = dots_str + gliss_str + intervals_str + tremolo_str + fingering_str + tie_str + slur_start_str + slur_bracket_close_str + end_dyn_str + pedal_up_str
+
+        return prefix + note_cell + suffix
 
     def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
         """Return (pitch_only_str, new_midi) for use inside a chord <...> block.
@@ -236,3 +405,31 @@ class Rest(BrailleSymbol):
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Rests do not change the pitch reference; pass prev_midi through unchanged."""
         return self.to_lilypond(), prev_midi
+
+    def to_braille(self) -> str:
+        if self.duration.value == 0:
+            cell = '⠍⠅'
+        elif self.duration.value in (1, 16):
+            cell = '⠍'
+        elif self.duration.value in (2, 32):
+            cell = '⠥'
+        elif self.duration.value in (4, 64):
+            cell = '⠧'
+        elif self.duration.value == 8:
+            cell = '⠭'
+        else:
+            raise ValueError(f"Unsupported rest duration: {self.duration.value}")
+        dots = '⠄' * self.duration.dots
+
+        # Sustain Pedal
+        pedal_down_str = ""
+        if self.pedal_sustain in ("on", "on_off"):
+            pedal_down_str = '⠣⠉'
+        elif self.pedal_sustain == "change":
+            pedal_down_str = '⠡⠣⠉'
+
+        pedal_up_str = ""
+        if self.pedal_sustain in ("off", "on_off"):
+            pedal_up_str = '⠡⠉'
+
+        return pedal_down_str + cell + dots + pedal_up_str

@@ -24,6 +24,10 @@ class Score:
     def add_staff(self, staff: Staff) -> None:
         self.staves.append(staff)
 
+    def to_braille(self) -> str:
+        from dottednotes.renderers.braille_renderer import BrailleRenderer
+        return BrailleRenderer().render(self)
+
     @staticmethod
     def _group_by_family(staves: list[Staff]) -> list[tuple["InstrumentFamily | None", list[Staff]]]:
         """Group staves into contiguous runs by instrument family (e.g. winds,
