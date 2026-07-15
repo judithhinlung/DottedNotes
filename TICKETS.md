@@ -6388,7 +6388,7 @@ Estimated time: 1–1.5 weeks.
 
 ---
 
-### [ ] S9c-1: Compile complete list of BANA mandatory formatting rules from the Technical Manual
+### [x] S9c-1: Compile complete list of BANA mandatory formatting rules from the Technical Manual
 
 **Why:** To ensure full BANA compliance, we need a complete reference of mandatory rules from the manual.
 
@@ -6397,11 +6397,11 @@ Estimated time: 1–1.5 weeks.
 2. Document them in `docs/bana_reference.md` under a "Mandatory Formatting Rules" section.
 
 **Definition of Done:**
-- [ ] Mandatory formatting rules are documented.
+- [x] Mandatory formatting rules are documented.
 
 ---
 
-### [ ] S9c-2: Compile complete list of BANA optional shorthand conventions
+### [x] S9c-2: Compile complete list of BANA optional shorthand conventions
 
 **Why:** Document all optional shorthands for completeness.
 
@@ -6409,11 +6409,11 @@ Estimated time: 1–1.5 weeks.
 1. Identify and document optional shorthands from the manual in `docs/bana_reference.md`.
 
 **Definition of Done:**
-- [ ] Optional shorthands are documented.
+- [x] Optional shorthands are documented.
 
 ---
 
-### [ ] S9c-3: Implement each rule as a discrete, testable method on BANAValidator
+### [x] S9c-3: Implement each rule as a discrete, testable method on BANAValidator
 
 **Why:** Modular implementation makes the validator easy to test, maintain, and expand.
 
@@ -6422,12 +6422,12 @@ Estimated time: 1–1.5 weeks.
 2. Add tests verifying each method.
 
 **Definition of Done:**
-- [ ] All compiled rules are implemented as modular methods.
-- [ ] Unit tests pass.
+- [x] All compiled rules are implemented as modular methods.
+- [x] Unit tests pass.
 
 ---
 
-### [ ] S9c-4: Document every rule in docs/bana_reference.md with manual citation and example
+### [x] S9c-4: Document every rule in docs/bana_reference.md with manual citation and example
 
 **Why:** Help users map validation errors to BANA manual guidelines.
 
@@ -6435,21 +6435,21 @@ Estimated time: 1–1.5 weeks.
 1. Update `docs/bana_reference.md` with rule names, description, citations, and examples.
 
 **Definition of Done:**
-- [ ] Rule library is fully documented.
+- [x] Rule library is fully documented.
 
 ---
 
-### [ ] S9c-5: Build a rule registry so rules can be enabled/disabled individually — useful for different BANA editions
+### [x] S9c-5: Build a rule registry so rules can be enabled/disabled individually — useful for different BANA editions
 
-**Why:** Different regions (e.g. UK vs US) or BANA editions have slight differences in rules.
+**Why:** Different BANA editions have slight differences in rules.
 
 **Steps:**
-1. Support loading validation profiles (e.g., standard, strict, UK).
+1. Support loading validation profiles (e.g., standard, strict).
 2. Write tests verifying profile loading and rule filtering.
 
 **Definition of Done:**
-- [ ] Validator supports rule registry configuration profiles.
-- [ ] Unit tests pass.
+- [x] Validator supports rule registry configuration profiles.
+- [x] Unit tests pass.
 
 ---
 

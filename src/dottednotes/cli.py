@@ -143,7 +143,7 @@ def _run_convert(args: argparse.Namespace) -> None:
 
     if getattr(args, 'report', False):
         from dottednotes.validation.validator import BANAValidator
-        validator = BANAValidator()
+        validator = BANAValidator(profile=args.profile)
         result = validator.validate(score, raw_brl_text=text)
         for c in result.corrections:
             msg = ""
@@ -244,6 +244,12 @@ def main() -> None:
         default="full",
         help="Set repeat and shorthand compression level (none, minimal, full) "
              "for .brf/.brl output; has no effect on .ly output",
+    )
+    convert_parser.add_argument(
+        "--profile",
+        choices=["standard", "strict"],
+        default="standard",
+        help="Set the validation profile (standard, strict) for formatting checks",
     )
     convert_parser.set_defaults(func=_run_convert)
 

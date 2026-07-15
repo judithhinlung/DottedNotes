@@ -402,3 +402,17 @@ def test_cli_compile_with_braille_output_errors(monkeypatch, tmp_path, capsys):
     assert "Error: --compile requires LilyPond (.ly) output" in captured.err
     assert "Traceback" not in captured.err
 
+
+def test_cli_profile_option(monkeypatch, tmp_path, capsys):
+    brf_file = tmp_path / "test_cli_profile.brf"
+    brf_file.write_text("⠐⠹⠀⠐⠹", encoding="utf-8")
+
+    _run_main(monkeypatch, ["convert", str(brf_file), "--report", "--profile", "standard"])
+    captured_std = capsys.readouterr()
+    assert "identical to measure" not in captured_std.err
+
+    _run_main(monkeypatch, ["convert", str(brf_file), "--report", "--profile", "strict"])
+    captured_strict = capsys.readouterr()
+    assert "identical to measure" in captured_strict.err
+
+

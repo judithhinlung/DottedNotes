@@ -18,7 +18,7 @@ def test_validation_octave_marks_first_note():
     # First note of piece lacks octave mark (⠹ is C4, duration 8, no octave mark before it)
     brf = "⠹"
     score = parse_brf(brf)
-    validator = BANAValidator()
+    validator = BANAValidator(enabled_rules=["S9b-3"])
     result = validator.validate(score)
     assert len(result.corrections) == 1
     assert result.corrections[0].rule_id == "S9b-3"
@@ -148,3 +148,71 @@ def test_validation_to_json():
     json_str = result.to_json()
     assert isinstance(json_str, str)
     assert "S9b-3" in json_str
+
+
+def test_rule_registry_and_profiles():
+    validator_std = BANAValidator(profile="standard")
+    assert "S9c-beat-count" in validator_std.enabled_rules
+    assert "S9c-redundant-accidental" not in validator_std.enabled_rules
+
+    validator_strict = BANAValidator(profile="strict")
+    assert "S9c-redundant-accidental" in validator_strict.enabled_rules
+    assert "S9c-measure-repeat" in validator_strict.enabled_rules
+
+    validator_custom = BANAValidator(enabled_rules=["S9b-4"])
+    assert validator_custom.enabled_rules == {"S9b-4"}
+
+
+def test_validation_beat_count():
+    # expected 4 beats, but only has 1 beat (quarter note C4)
+    brf = "⠼⠙⠲⠐⠹"
+    score = parse_brf(brf)
+    validator = BANAValidator()
+    result = validator.validate(score)
+    beat_errs = [c for c in result.corrections if c.rule_id == "S9c-beat-count"]
+    assert len(beat_errs) == 1
+    assert "expected 4.0 beats but counted 1.0" in beat_errs[0].message
+
+
+def test_validation_slur_matching():
+    # 1. Unclosed slur bracket open: ⠰⠃⠐⠹⠱
+    brf = "⠰⠃⠐⠹⠱"
+    score = parse_brf(brf)
+    validator = BANAValidator()
+    result = validator.validate(score)
+    slur_errs = [c for c in result.corrections if c.rule_id == "S9c-slur-matching"]
+    assert len(slur_errs) == 1
+    assert "Unclosed slur bracket starting at measure 1" in slur_errs[0].message
+
+    # 2. Slur bracket close without open: ⠐⠹⠘⠆
+    brf = "⠐⠹⠘⠆"
+    score = parse_brf(brf)
+    result = validator.validate(score)
+    slur_errs = [c for c in result.corrections if c.rule_id == "S9c-slur-matching"]
+    assert len(slur_errs) == 1
+    assert "Slur bracket close without preceding bracket open" in slur_errs[0].message
+
+
+def test_validation_redundant_accidental():
+    # Key signature G major (1 sharp: F sharp is ⠩).
+    # Writing F sharp with explicit sharp accidental: ⠩\n⠐⠩⠻ (accidental ⠩ before F note ⠻)
+    brf = "⠩\n⠐⠩⠻"
+    score = parse_brf(brf)
+
+    validator = BANAValidator(profile="strict")
+    result = validator.validate(score)
+    red_accs = [c for c in result.corrections if c.rule_id == "S9c-redundant-accidental"]
+    assert len(red_accs) == 1
+    assert "Redundant accidental on note 'F'" in red_accs[0].message
+
+
+def test_validation_measure_repeat():
+    # Two identical measures: ⠐⠹⠀⠐⠹
+    brf = "⠐⠹⠀⠐⠹"
+    score = parse_brf(brf)
+    validator = BANAValidator(profile="strict")
+    result = validator.validate(score)
+    repeats = [c for c in result.corrections if c.rule_id == "S9c-measure-repeat"]
+    assert len(repeats) == 1
+    assert "Measure 2 is identical to measure 1" in repeats[0].message
+

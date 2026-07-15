@@ -424,7 +424,7 @@ See TICKETS.md for full ticket details and step-by-step instructions.
 - [x] Sprint 8: Accessibility and Polish
 - [x] Sprint 9: Reverse Direction — LilyPond to BRF
 - [x] Sprint 9b: BANA Validator
-- [ ] Sprint 9c: BANA Formatting Rule Library
+- [x] Sprint 9c: BANA Formatting Rule Library
 - [ ] Sprint 10: MusicXML Bridge
 
 ---

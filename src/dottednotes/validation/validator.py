@@ -12,6 +12,73 @@ from dottednotes.models.chord import Chord
 from dottednotes.models.in_accord import InAccord
 from dottednotes.models.tremolo import RepeatedTremolo
 from dottednotes.models.tuplet import Tuplet
+from dottednotes.models.accidental import AccidentalType
+
+
+@dataclass
+class Rule:
+    rule_id: str
+    name: str
+    description: str
+    citation: str
+    default_severity: str = "warning"
+
+
+RULE_REGISTRY: dict[str, Rule] = {
+    "S9b-2": Rule(
+        rule_id="S9b-2",
+        name="Articulation Carry Shorthand",
+        description="To save space, runs of 4 or more notes with the same articulation should use shorthand carry.",
+        citation="MBC 2015 Part I, Section 14.1"
+    ),
+    "S9b-3": Rule(
+        rule_id="S9b-3",
+        name="Octave Register Tracking",
+        description="Octave mark register tracking requires octave indicators at reset points and large intervals.",
+        citation="MBC 2015 Part I, Section 3"
+    ),
+    "S9b-4": Rule(
+        rule_id="S9b-4",
+        name="Line Length Limit",
+        description="A line of braille music must not exceed the standard column limit (default 40 cells).",
+        citation="MBC 2015 Part I, Section 1.2"
+    ),
+    "S9b-sign-order": Rule(
+        rule_id="S9b-sign-order",
+        name="BANA Sign Ordering",
+        description="Pre-note and post-note modifier signs must follow a strict sequential ordering around the note cell.",
+        citation="MBC 2015 Appendix A, Section A.1"
+    ),
+    "S9c-beat-count": Rule(
+        rule_id="S9c-beat-count",
+        name="Measure Beat-Count Validation",
+        description="The sum of note, rest, and chord durations within a measure must equal the expected beats defined by the time signature.",
+        citation="MBC 2015 Part I, Section 2.1"
+    ),
+    "S9c-slur-matching": Rule(
+        rule_id="S9c-slur-matching",
+        name="Slur & Tie Matching",
+        description="All opened slurs, ties, and slur brackets must be resolved and closed.",
+        citation="MBC 2015 Part I, Section 13"
+    ),
+    "S9c-redundant-accidental": Rule(
+        rule_id="S9c-redundant-accidental",
+        name="Redundant Accidental Check",
+        description="Explicit accidentals in braille should not be written if they match the key signature or active accidental state.",
+        citation="MBC 2015 Part I, Section 5.1"
+    ),
+    "S9c-measure-repeat": Rule(
+        rule_id="S9c-measure-repeat",
+        name="Measure Repeat Shorthand Recommendation",
+        description="Suggest using the measure repeat sign when two or more consecutive measures are musically identical.",
+        citation="MBC 2015 Part I, Section 18.1"
+    ),
+}
+
+VALIDATION_PROFILES: dict[str, list[str]] = {
+    "standard": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching"],
+    "strict": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S9c-redundant-accidental", "S9c-measure-repeat"],
+}
 
 
 @dataclass
@@ -36,14 +103,19 @@ class ValidationResult:
 
 
 class BANAValidator:
-    def __init__(self, column_limit: int = 40):
+    def __init__(self, column_limit: int = 40, profile: str = "standard", enabled_rules: Optional[list[str]] = None):
         self.column_limit = column_limit
+        self.profile = profile
+        if enabled_rules is not None:
+            self.enabled_rules = set(enabled_rules)
+        else:
+            self.enabled_rules = set(VALIDATION_PROFILES.get(profile, VALIDATION_PROFILES["standard"]))
 
     def validate(self, score: Score, raw_brl_text: Optional[str] = None) -> ValidationResult:
         corrections: list[Correction] = []
 
         # Rule S9b-4: Line Length (BF 2016 Section 1)
-        if raw_brl_text:
+        if "S9b-4" in self.enabled_rules and raw_brl_text:
             lines = raw_brl_text.splitlines()
             for idx, line in enumerate(lines):
                 # We strip trailing whitespaces/newlines for column check
@@ -75,11 +147,26 @@ class BANAValidator:
 
         # Build melodic voices for each staff to validate octave marks and articulation carry
         for staff in score.staves:
+            # Rule S9c-beat-count
+            if "S9c-beat-count" in self.enabled_rules:
+                corrections.extend(self._validate_beat_count(staff))
+
+            # Rule S9c-measure-repeat
+            if "S9c-measure-repeat" in self.enabled_rules:
+                corrections.extend(self._validate_measure_repeats(staff))
+
             voices = self._get_staff_voices(staff)
             for voice in voices:
-                corrections.extend(self._validate_octave_marks(voice))
-                corrections.extend(self._validate_articulation_shorthand(voice))
-                corrections.extend(self._validate_sign_order(voice))
+                if "S9b-3" in self.enabled_rules:
+                    corrections.extend(self._validate_octave_marks(voice))
+                if "S9b-2" in self.enabled_rules:
+                    corrections.extend(self._validate_articulation_shorthand(voice))
+                if "S9b-sign-order" in self.enabled_rules:
+                    corrections.extend(self._validate_sign_order(voice))
+                if "S9c-slur-matching" in self.enabled_rules:
+                    corrections.extend(self._validate_slur_matching(voice))
+                if "S9c-redundant-accidental" in self.enabled_rules:
+                    corrections.extend(self._validate_redundant_accidentals(voice, staff))
 
         # Deduplicate corrections based on unique attributes
         seen = set()
@@ -361,4 +448,194 @@ class BANAValidator:
                         proposed_fix="Reorder signs in preceding/succeeding BANA order."
                     ))
 
+        return corrections
+
+    def _find_measure(self, staff: Staff, m_num: int) -> Optional[Measure]:
+        for m in staff.measures:
+            if m.number == m_num:
+                return m
+        return None
+
+    def _validate_beat_count(self, staff: Staff) -> list[Correction]:
+        from dottednotes.models.duration import TICKS_PER_QUARTER
+        from dottednotes.models.tremolo import AlternatingTremolo
+        corrections = []
+
+        def _item_ticks(item) -> int:
+            if isinstance(item, Tuplet):
+                return sum(_item_ticks(sub) for sub in item.items)
+            if isinstance(item, AlternatingTremolo):
+                return item.items[0].duration.duration_in_ticks()
+            return item.duration.duration_in_ticks()
+
+        for measure in staff.measures:
+            num, den = measure.time_signature
+            expected_beats = num * (4 / den)
+            expected_ticks = round(expected_beats * TICKS_PER_QUARTER)
+
+            actual_ticks = 0
+            for item in measure.notes:
+                if isinstance(item, InAccord):
+                    if item.parts:
+                        actual_ticks += max(
+                            sum(_item_ticks(n) for n in part)
+                            for part in item.parts
+                        )
+                else:
+                    actual_ticks += _item_ticks(item)
+
+            if actual_ticks != expected_ticks:
+                line_num = measure.line if measure.line > 0 else 1
+                for item in measure.notes:
+                    note = item.notes[0] if isinstance(item, Chord) else item
+                    if isinstance(note, Note) and note.parsed_tokens:
+                        line_num = note.parsed_tokens[0].line
+                        break
+
+                corrections.append(Correction(
+                    line_number=line_num,
+                    measure_number=measure.number,
+                    message=f"Measure {measure.number}: expected {expected_beats} beats but counted {actual_ticks / TICKS_PER_QUARTER}. Check for notation ambiguity or missing/extra notes.",
+                    severity="warning",
+                    rule_id="S9c-beat-count"
+                ))
+
+        return corrections
+
+    def _validate_measure_repeats(self, staff: Staff) -> list[Correction]:
+        corrections = []
+        n_measures = len(staff.measures)
+        for i in range(1, n_measures):
+            m_prev = staff.measures[i - 1]
+            m_curr = staff.measures[i]
+            if m_curr.musical_equals(m_prev):
+                line_num = m_curr.line if m_curr.line > 0 else 1
+                for item in m_curr.notes:
+                    note = item.notes[0] if isinstance(item, Chord) else item
+                    if isinstance(note, Note) and note.parsed_tokens:
+                        line_num = note.parsed_tokens[0].line
+                        break
+                corrections.append(Correction(
+                    line_number=line_num,
+                    measure_number=m_curr.number,
+                    message=f"Measure {m_curr.number} is identical to measure {m_prev.number}. Consider using a measure repeat sign.",
+                    severity="warning",
+                    rule_id="S9c-measure-repeat"
+                ))
+        return corrections
+
+    def _validate_slur_matching(self, voice: list[tuple[Any, int]]) -> list[Correction]:
+        corrections = []
+        open_slur_starts = []
+        open_brackets = []
+
+        for item, m_num in voice:
+            if isinstance(item, Rest):
+                continue
+
+            curr_note = item.notes[0] if isinstance(item, Chord) else item
+            line_num = curr_note.parsed_tokens[0].line if curr_note.parsed_tokens else 1
+
+            if curr_note.slur_start:
+                open_slur_starts.append((m_num, line_num))
+
+            if curr_note.slur_end:
+                if open_slur_starts:
+                    open_slur_starts.pop()
+                else:
+                    corrections.append(Correction(
+                        line_number=line_num,
+                        measure_number=m_num,
+                        message="Slur end without preceding slur start.",
+                        severity="warning",
+                        rule_id="S9c-slur-matching"
+                    ))
+
+            if curr_note.slur_bracket_open:
+                open_brackets.append((m_num, line_num))
+
+            if curr_note.slur_bracket_close:
+                if open_brackets:
+                    open_brackets.pop()
+                else:
+                    corrections.append(Correction(
+                        line_number=line_num,
+                        measure_number=m_num,
+                        message="Slur bracket close without preceding bracket open.",
+                        severity="warning",
+                        rule_id="S9c-slur-matching"
+                    ))
+
+        for m_start, l_start in open_slur_starts:
+            corrections.append(Correction(
+                line_number=l_start,
+                measure_number=m_start,
+                message=f"Unclosed slur starting at measure {m_start}.",
+                severity="warning",
+                rule_id="S9c-slur-matching"
+            ))
+
+        for m_start, l_start in open_brackets:
+            corrections.append(Correction(
+                line_number=l_start,
+                measure_number=m_start,
+                message=f"Unclosed slur bracket starting at measure {m_start}.",
+                severity="warning",
+                rule_id="S9c-slur-matching"
+            ))
+
+        return corrections
+
+    def _validate_redundant_accidentals(self, voice: list[tuple[Any, int]], staff: Staff) -> list[Correction]:
+        def get_key_sig_accidental(key_sig: int, note_name: str) -> AccidentalType:
+            if key_sig > 0:
+                sharps = ['F', 'C', 'G', 'D', 'A', 'E', 'B'][:key_sig]
+                if note_name in sharps:
+                    return AccidentalType.SHARP
+            elif key_sig < 0:
+                flats = ['B', 'E', 'A', 'D', 'G', 'C', 'F'][:abs(key_sig)]
+                if note_name in flats:
+                    return AccidentalType.FLAT
+            return AccidentalType.NATURAL
+
+        corrections = []
+        last_measure = None
+        active_accidentals = {}
+
+        for item, m_num in voice:
+            if isinstance(item, Rest):
+                continue
+
+            if m_num != last_measure:
+                active_accidentals = {}
+                last_measure = m_num
+
+            measure_obj = self._find_measure(staff, m_num)
+            key_sig = 0
+            if measure_obj and measure_obj.key_signature != 0:
+                key_sig = measure_obj.key_signature
+            elif staff.key_signature:
+                key_sig = staff.key_signature.sharps_or_flats
+
+            notes_in_item = item.notes if isinstance(item, Chord) else [item]
+
+            for note in notes_in_item:
+                note_name = note.note_name
+                octave = note.octave
+                has_acc = note.accidental is not None
+
+                curr_state = active_accidentals.get((note_name, octave), get_key_sig_accidental(key_sig, note_name))
+
+                if has_acc:
+                    acc_type = note.accidental.type
+                    if acc_type == curr_state:
+                        line_num = note.parsed_tokens[0].line if note.parsed_tokens else 1
+                        corrections.append(Correction(
+                            line_number=line_num,
+                            measure_number=m_num,
+                            message=f"Redundant accidental on note '{note_name}' (matches key signature or active accidental).",
+                            severity="warning",
+                            rule_id="S9c-redundant-accidental"
+                        ))
+                    active_accidentals[(note_name, octave)] = acc_type
         return corrections
