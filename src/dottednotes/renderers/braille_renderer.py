@@ -200,6 +200,9 @@ class BrailleRenderer:
             else:
                 fit_size = group_size - 1
                 
+            if idx > 0:
+                lines.append("")
+                lines.append("")
             lines.append(best_rh_lines)
             lines.append(best_lh_lines)
             prev_note_rh = best_prev_rh
@@ -330,6 +333,8 @@ class BrailleRenderer:
             # Print heading
             first_num = idx + 1
             heading_line = "     ⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(first_num))
+            if idx > 0:
+                lines.append("")
             lines.append(heading_line)
             
             lines.extend(best_staff_lines)

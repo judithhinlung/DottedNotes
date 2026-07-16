@@ -188,11 +188,33 @@ class Score:
             anchor, start_midi = staff.relative_anchor()
             staff_content = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
             if staff.lyrics and self.chord_names is not None:
-                raise NotImplementedError(
-                    "Chord symbols alongside lyrics (BANA Sec. 36) are not supported; "
-                    "Sec. 27 lead sheets are melody-only."
-                )
-            if staff.lyrics:
+                # BANA Sec. 36: a strophic song with lyrics, chords, and
+                # melody together (see strophic_song_parser.py) -- combines
+                # the chord-names-only and lyrics-only renderings below into
+                # one ChordNames + Voice + Lyrics stack.
+                relative_block = [f"    \\relative {anchor} {{", staff_content, '    }']
+                transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
+                voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
+                lyrics_lines = []
+                verses = staff.verses if staff.verses else [staff.lyrics]
+                for v_idx, v in enumerate(verses):
+                    prefix_str = ""
+                    if staff.verse_prefixes and v_idx < len(staff.verse_prefixes) and staff.verse_prefixes[v_idx]:
+                        prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "
+                    lyrics_content = prefix_str + " ".join(v)
+                    lyrics_lines.append(f"    \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}")
+                body = [
+                    "<<",
+                    "  " + self.chord_names.to_lilypond().replace('\n', '\n  '),
+                    "  \\new Staff <<",
+                    f"    \\new Voice = \"{voice_name}\" {{",
+                    *transposed,
+                    "    }",
+                    *lyrics_lines,
+                    "  >>",
+                    ">>",
+                ]
+            elif staff.lyrics:
                 relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
                 transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
                 voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"

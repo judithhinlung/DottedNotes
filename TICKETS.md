@@ -5949,7 +5949,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-8: Support strophic songs and multi-verse vocal formats
+### [x] S8b-8: Support strophic songs and multi-verse vocal formats
 
 **Why:** Vocal music (hymns, folk songs) frequently features multiple verses of lyrics under the same melody, or strophic structures. Currently, the lyric parser does not align multiple verses or handle refrain markings.
 
@@ -5961,9 +5961,9 @@ Estimated time: 1.5–2 weeks.
 5. Write integration tests for multi-verse vocal scores.
 
 **Definition of Done:**
-- [ ] Multiple verses of lyrics are parsed and aligned to a single melody.
-- [ ] LilyPond output renders multiple verse lines cleanly under the music.
-- [ ] Integration tests pass.
+- [x] Multiple verses of lyrics are parsed and aligned to a single melody.
+- [x] LilyPond output renders multiple verse lines cleanly under the music.
+- [x] Integration tests pass.
 
 ---
 
@@ -5990,7 +5990,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-10: Compose a combined test fixture for breve/bowing/pedal/chord-tie/glissando/mute + real-compile integration tests
+### [x] S8b-10: Compose a combined test fixture for breve/bowing/pedal/chord-tie/glissando/mute + real-compile integration tests
 
 **Why:** S8b-1 through S8b-4 and S8b-6 (breve, bowing, sustain pedal, chord ties, glissando/mute) each have unit- and parser-level tests only — string-equality checks on `to_lilypond()` output. None of them are exercised together in one real, hand-authored `.brf` the way `fengyang_flower_drum.brf` anchors earlier sprints, and none are run through the real `lilypond` binary and checked for a clean compile log (the `_compile_and_check_no_warnings` pattern already established in `test_lilypond_formatter.py` and `test_vocal.py`). A feature can pass every existing test and still emit LilyPond that's syntactically wrong in combination with another feature (e.g. a glissando spanning a pedal marking, or a chord tie on a bowed chord) — nothing today would catch that. Lead-sheet chord symbols (S8b-5) are covered by their own fixture instead (S8b-9) since that format can't host these staff-based features. S8b-8 (strophic/multi-verse) is also excluded from this fixture's scope since it's still in progress as of this writing; fold it in (or add a further fixture) once it lands.
 
@@ -6010,13 +6010,13 @@ Estimated time: 1.5–2 weeks.
 - `test_sprint8b_fixture_renders_expected_markup` — asserts the compiled `.ly` text contains each feature's expected LilyPond token at least once (`\breve`, `\downbow`/`\upbow`, `\sustainOn`/`\sustainOff`, chord tie `~` inside `<...>`, `\glissando`, `\stopped`/`\open`) so a future regression that silently drops one feature while the others still compile is caught.
 
 **Definition of Done:**
-- [ ] Fixture `.brf` file(s) composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
-- [ ] Ground-truth `.ly` output confirmed by the developer.
-- [ ] `tests/test_sprint8b_integration.py` written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
+- [x] Fixture `.brf` file(s) composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [x] Ground-truth `.ly` output confirmed by the developer.
+- [x] `tests/test_sprint8b_integration.py` written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
 
 ---
 
-### [ ] S8b-11: Compose a strophic/multi-verse vocal test fixture + real-compile integration tests
+### [x] S8b-11: Compose a strophic/multi-verse vocal test fixture + real-compile integration tests
 
 **Why:** S8b-8 (strophic songs and multi-verse vocal formats) only has synthetic inline-string tests today — `test_parse_strophic_multiverse_lyrics_and_refrain` and `test_parse_strophic_with_word_number_verse_prefixes` in `test_vocal.py` construct minimal hand-built BRF strings and assert on `staff.verses`/`staff.verse_prefixes` and substring checks against `to_lilypond()` output. Neither is a real hand-authored `.brf` run through the real `lilypond` binary and checked for a clean compile log (the `_compile_and_check_no_warnings` pattern already established in `test_lilypond_formatter.py`, `test_vocal.py`'s own `vocal_test.brf` tests, and `test_lead_sheet_integration.py`). `vocal_test.brf` (the existing S7b-9 fixture) is single-verse and doesn't exercise multiple verses, verse-number prefixes, or refrain replication at all. S8b-10's own ticket text excluded strophic/multi-verse from its fixture's scope pending S8b-8 landing (3146a03) — it's landed now, so it's time to fold it in with its own fixture, the same way S8b-9 did for lead sheets.
 
@@ -6034,13 +6034,13 @@ Estimated time: 1.5–2 weeks.
 - `test_strophic_fixture_compiles_cleanly` — reuses the `shutil.which("lilypond")` skip-if guard and the `_compile_and_check_no_warnings` helper (or an equivalent local copy) to run the real `lilypond` binary and assert a clean log, not just exit code 0.
 
 **Definition of Done:**
-- [ ] Fixture `.brf` composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
-- [ ] Ground-truth `.ly` output confirmed by the developer.
-- [ ] Integration tests written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
+- [x] Fixture `.brf` composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [x] Ground-truth `.ly` output confirmed by the developer.
+- [x] Integration tests written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
 
 ---
 
-### [ ] S8b-12: Fix octave resolution for unmarked notes to follow BANA Sec. 3.2.2's melodic-interval rule (found via S8b-10)
+### [x] S8b-12: Fix octave resolution for unmarked notes to follow BANA Sec. 3.2.2's melodic-interval rule (found via S8b-10)
 
 **Why:** While composing the S8b-10 fixture, an unmarked chord base note (`⠺`/B, following a `⠹`/C base note with no intervening octave mark) resolved to the wrong octave — B4 instead of B3 — producing a wrong pitch and, in one case, an "unterminated tie" warning on real `lilypond` compile. Tracing this in `braille_parser.py` shows the parser's octave handling for unmarked notes is a simple sticky counter: `_current_octave` is set only by explicit octave-mark cells (`_handle_octave_mark`) and otherwise reused as-is for whatever note letter comes next (see `test_octave_persists_without_mark`, which names and asserts exactly this behavior: `⠐⠹⠱` → C4, D4, "octave persists"). That happens to be correct for ascending/small stepwise motion within an octave, but it is not the actual BANA rule, and it silently produces wrong pitches whenever sticking to the same octave number would put the new note a fourth or more away from the previous one in the wrong direction — exactly the C4→B case here, where the intended reading (no mark needed) is the *nearest* B, a 2nd below (B3), not a major 7th above (B4).
 
@@ -6061,10 +6061,10 @@ Sprint 9b's `BANAValidator` (S9b-3) independently flags the same category of iss
 7. Re-run the full suite to confirm no existing fixture/ground-truth `.ly` regresses — several existing fixtures likely have unmarked passages that happen to work under the old sticky logic and must still resolve to the same pitches under the corrected one. (`children_s_piece.brf`'s hand-authored ground truth, `instrumental_techniques_test.brf`, and the in-accord unit tests in `test_parser.py` all had genuinely wrong resolved octaves under the old sticky logic — confirmed correct under the fix by cross-checking `Children_s_Piece.ly` against real `lilypond` output, not just re-asserting whatever the parser happened to produce.)
 
 **Definition of Done:**
-- [ ] Unmarked notes resolve to the nearest octave per BANA Sec. 3.2.2, not a sticky persisted value, for both plain notes and chord base notes.
-- [ ] In-accord voices resolve octave continuity from the primary (first-written) voice, not whichever voice was written last.
-- [ ] New unit tests cover the descending- and ascending-across-an-octave-boundary cases that motivated this ticket.
-- [ ] Full existing test suite still passes; `test_octave_persists_without_mark`'s comment updated to describe the real rule rather than "always sticky."
+- [x] Unmarked notes resolve to the nearest octave per BANA Sec. 3.2.2, not a sticky persisted value, for both plain notes and chord base notes.
+- [x] In-accord voices resolve octave continuity from the primary (first-written) voice, not whichever voice was written last.
+- [x] New unit tests cover the descending- and ascending-across-an-octave-boundary cases that motivated this ticket.
+- [x] Full existing test suite still passes; `test_octave_persists_without_mark`'s comment updated to describe the real rule rather than "always sticky."
 
 ---
 
@@ -6678,4 +6678,40 @@ Estimated time: 1–1.5 weeks.
 
 **Sprint 11c: BRF Reformatting & Malformed Input Robustness (future sprint)**
 - [ ] S11c-1: Add test cases and validator rules for malformed .brf music files, such as having measure numbers or notes in the left margins when the score is an ensemble score.
+- [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
+
+---
+
+### [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
+
+**Why:** To ensure that exported braille scores are fully compliant with standard BANA page layout and formatting guidelines, making them easy and natural for blind musicians to read using physical embossers or refreshable braille displays.
+
+**BANA Page Layout and Formatting Rules Compilation & Citations:**
+1. **Title Centering (MBC 2015, Part IV, Section 31.1 / Section 32.1)**
+   - The composition title must be centered as a literary heading on the first page of music. It must be centered within the page line width (default 40 cells) and have at least 3 blank cells on each side.
+2. **Key and Time Signature Placement (MBC 2015, Part I, Section 21 & Part IV, Section 31.5)**
+   - Key and time signatures must be written as a combined unit without any intervening spaces.
+   - In solo instrument formatting, the signature unit should be placed on a separate line indented by 8 spaces (starting in cell 9) directly below the title. If the signatures and initial tempo/expression markings are centered, they must have at least 3 blank cells on each side.
+3. **No Intervening Blank Lines (MBC 2015, Part IV, Section 32.2.1)**
+   - There must be no blank lines between the title/signature header line and the first line of the music.
+4. **Running Heads on Subsequent Pages (MBC 2015, Part IV, Section 32.1)**
+   - Centered running heads (abbreviated titles) are required on the first line of all braille pages following the first page of music.
+   - The running head must be centered and have at least 3 blank cells of separation from the print page numbers on the left and braille page numbers on the right.
+5. **Blank Line Preceding Headings (MBC 2015, Part IV, Section 32.2)**
+   - A blank line must precede the initial music heading of a composition, movement, or part, unless it starts at the top of a page immediately following a running head.
+6. **Spacing Between Parallels (MBC 2015, Part IV, Section 32.3)**
+   - Consecutive parallels must be separated by at least 1 blank line (for solo music) or 2 blank lines (for keyboard/organ music parallels).
+7. **Line Indentation and Run-overs (MBC 2015, Part I, Section 1.3 & Part II, Section 26.1 & Part III, Section 29.1)**
+   - In solo/bar-over-bar formats, main music lines start in cell 1, and run-over lines must be indented to cell 3.
+   - In vocal formats (line-by-line), lyrics lines start in cell 1, music lines are indented to cell 3 (indented by 2 spaces), and run-over lines of both are indented to cell 5 (indented by 4 spaces).
+
+**Definition of Done:**
+- [x] Braille export format strictly centers titles with at least 3 blank cells on each side.
+- [x] Key and time signatures are combined as a single unit without spaces.
+- [x] For solo formatting, signature lines are indented by 8 spaces (starting in cell 9) on the line below the title.
+- [x] No blank line is present between the signature/header line and the first music line.
+- [x] Multi-page exports include centered running heads on line 1 of page 2 onwards, padded by at least 3 blank cells from page numbers.
+- [x] Consecutive parallels are separated by exactly 1 blank line for solo scores and 2 blank lines for keyboard scores.
+- [x] Run-over lines are properly indented (to cell 3 for solo/keyboard, cell 5 for vocal).
+- [x] All unit and integration tests pass.
 
