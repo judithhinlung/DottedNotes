@@ -433,13 +433,8 @@ class BrailleParser:
                 # recently.
                 if self._current_hand is not None:
                     self._octave_by_hand[self._current_hand] = self._current_octave
-                    if self._previous_note_letter is not None:
-                        self._previous_note_letter_by_hand[self._current_hand] = (
-                            self._previous_note_letter
-                        )
                 new_hand = token.character
                 self._current_octave = self._octave_by_hand.get(new_hand, 4)
-                self._previous_note_letter = self._previous_note_letter_by_hand.get(new_hand)
                 self._current_hand = new_hand
             elif token.category == SymbolCategory.BAR_LINE:
                 self._check_triplet_group_not_open_at_bar_line()
@@ -1274,59 +1269,12 @@ class BrailleParser:
             accidental=accidental,
         )
 
-    def _resolve_unmarked_octave(self, note_name: str) -> int:
-        """BANA Sec. 3.2.2, "Need Determined by Melodic Interval": when no
-        octave mark precedes a note, its octave is implied by the melodic
-        interval from the previous sounding note, not by sticking to
-        whatever octave number was last set.
-
-        (a) interval < 4th (unison/2nd/3rd): unmarked note stays in the
-            same octave as the previous note.
-        (b) interval > 5th (6th/7th): never left unmarked in real BANA
-            input -- but if the *same-octave* reading of this note's letter
-            would be a 6th/7th away, the correct reading is always its
-            complement a 2nd/3rd away in the adjacent octave (this is
-            exactly the ambiguity a missing mark is allowed to resolve).
-        (c) interval of a 4th or 5th: BANA fixes the direction-of-crossing
-            ambiguity by declaring the unmarked reading stays in the *same*
-            octave as the previous note (never the octave-crossing
-            complement), even though that complement can be numerically
-            "nearer" in raw semitone terms.
-
-        Since there are only 7 diatonic letters, the signed difference
-        between the new note's letter and the previous note's letter
-        (`raw_diff`, in the previous note's own octave) fully determines
-        which of these three buckets applies -- there is no case left over
-        that needs a raise/warn fallback.
-        """
-        if self._previous_note_letter is None:
-            return self._current_octave
-
-        raw_diff = _DIATONIC_NOTES.index(note_name) - _DIATONIC_NOTES.index(
-            self._previous_note_letter
-        )
-        if raw_diff >= 5:
-            return self._current_octave - 1
-        if raw_diff <= -5:
-            return self._current_octave + 1
-        return self._current_octave
-
     def _buffer_note(self, token: BrailleToken) -> _PendingNote:
         note_name, base_duration = NOTE_CELLS[token.character]
         accidental = self._pending_accidental
         self._pending_accidental = None
         has_octave_mark = self._octave_mark_pending
-        if not has_octave_mark and not self._in_accord_voice_restart:
-            # The melodic-interval rule only applies within one continuous
-            # melodic line. The first note of a new in-accord voice isn't
-            # "consecutive" with the previous voice's last note in that
-            # sense (BANA Sec. 3.2.2's scope is a single voice's own
-            # sequence of notes) -- see _handle_in_accord -- so it just
-            # keeps whatever octave number was last set instead.
-            self._current_octave = self._resolve_unmarked_octave(note_name)
-        self._in_accord_voice_restart = False
         self._octave_mark_pending = False  # octave mark was consumed by this note
-        self._previous_note_letter = note_name
 
         # Capture and clear pre-note dynamics.
         dynamics = list(self._pending_dynamics)
@@ -1538,18 +1486,6 @@ class BrailleParser:
         In all three cases, resets accidental state per BANA 11.2.
         """
         in_accord_type = IN_ACCORD_CELLS[token.character]
-
-        if not (self._in_accord_parts or self._in_accord_sections or self._current_section_parts):
-            # First separator of a new in-accord/section group: this closes
-            # voice 1 (the primary melodic line). Remember where it left
-            # off so _finalize_measure can restore it once the whole group
-            # closes, rather than leaving whatever voice 2/3 ends on.
-            self._in_accord_primary_octave = self._current_octave
-            self._in_accord_primary_note_letter = self._previous_note_letter
-
-        # The note immediately after this separator starts a new voice --
-        # see _buffer_note's use of this flag.
-        self._in_accord_voice_restart = True
 
         if in_accord_type == 'full_measure':
             self._in_accord_parts.append(self._finalize_voice_part(pending))
@@ -1835,12 +1771,6 @@ class BrailleParser:
             for item in self._finalize_voice_part(pending):
                 measure.add_note(item)
 
-        if self._in_accord_primary_octave is not None:
-            self._current_octave = self._in_accord_primary_octave
-            self._previous_note_letter = self._in_accord_primary_note_letter
-            self._in_accord_primary_octave = None
-            self._in_accord_primary_note_letter = None
-
         self._validate_measure_beat_count(measure)
         return measure
 
@@ -2123,11 +2053,6 @@ class BrailleParser:
         return {
             '_current_octave': self._current_octave,
             '_octave_by_hand': dict(self._octave_by_hand),
-            '_previous_note_letter': self._previous_note_letter,
-            '_previous_note_letter_by_hand': dict(self._previous_note_letter_by_hand),
-            '_in_accord_primary_octave': self._in_accord_primary_octave,
-            '_in_accord_primary_note_letter': self._in_accord_primary_note_letter,
-            '_in_accord_voice_restart': self._in_accord_voice_restart,
             '_key_signature': self._key_signature,
             '_time_signature': self._time_signature,
             '_clef': self._clef,
@@ -2190,24 +2115,6 @@ class BrailleParser:
         self._is_ensemble: bool = self._ensemble_opt or bool(self._instruments)
         self._current_octave: int = 4
         self._octave_by_hand: dict[str, int] = {}
-        # BANA Sec. 3.2.2: the previous *sounding* note's letter, used to
-        # resolve an unmarked note to the nearest octave rather than reusing
-        # _current_octave as a sticky value (see _resolve_unmarked_octave).
-        # None means no sounding note has been read yet (start of piece, or
-        # of this hand's line the first time it appears).
-        self._previous_note_letter: str | None = None
-        self._previous_note_letter_by_hand: dict[str, str] = {}
-        # BANA reads octave continuity from the primary (first-written)
-        # in-accord voice, not whichever voice was written last -- once an
-        # in-accord group finishes, _finalize_measure restores these so the
-        # next single-voice material resolves against voice 1's ending
-        # note, not voice 2/3's (see _handle_in_accord).
-        self._in_accord_primary_octave: int | None = None
-        self._in_accord_primary_note_letter: str | None = None
-        # True right after an in-accord separator until the next note is
-        # buffered: that note starts a fresh voice, so _buffer_note skips
-        # the melodic-interval computation for it (see _handle_in_accord).
-        self._in_accord_voice_restart: bool = False
         self._key_signature: KeySignature = KeySignature(
             dots=frozenset(),
             category=SymbolCategory.KEY_SIGNATURE,

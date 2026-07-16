@@ -285,6 +285,17 @@ class BANAValidator:
                 prev_val = last_note.octave * 7 + PITCH_CLASS_TO_DIATONIC[last_note.note_name]
                 diff = abs(curr_val - prev_val)
 
+                # "Missing octave mark" checks for a 6th+ interval, or a
+                # 4th/5th that crosses octaves, are NOT done here: the
+                # parser itself (BrailleParser._resolve_unmarked_octave)
+                # now resolves any unmarked note to the nearest octave per
+                # this same rule (BANA Sec. 3.2.2), so curr_note.octave is
+                # never actually a 6th+ away, and never crosses octaves on
+                # an unmarked 4th/5th -- there is nothing left to flag from
+                # the resolved pitches. Only redundant (unnecessary)
+                # explicit marks are still detectable here, since the
+                # parser trusts an explicit mark at face value rather than
+                # second-guessing it.
                 if diff <= 2:
                     # 2nd or 3rd: octave mark must not be present
                     if has_mark:
@@ -295,28 +306,10 @@ class BANAValidator:
                             severity="warning",
                             rule_id="S9b-3"
                         ))
-                elif diff >= 5:
-                    # 6th or greater: octave mark must be present
-                    if not has_mark:
-                        corrections.append(Correction(
-                            line_number=line_num,
-                            measure_number=m_num,
-                            message=f"Missing octave mark on note '{curr_note.note_name}' (interval of 6th or greater).",
-                            severity="warning",
-                            rule_id="S9b-3"
-                        ))
                 elif diff in (3, 4):
-                    # 4th or 5th: mark only if crossing octaves
+                    # 4th or 5th: redundant if marked but not crossing octaves
                     crosses = (curr_note.octave != last_note.octave)
-                    if crosses and not has_mark:
-                        corrections.append(Correction(
-                            line_number=line_num,
-                            measure_number=m_num,
-                            message=f"Missing octave mark on note '{curr_note.note_name}' (interval of 4th/5th crossing octaves).",
-                            severity="warning",
-                            rule_id="S9b-3"
-                        ))
-                    elif not crosses and has_mark:
+                    if not crosses and has_mark:
                         corrections.append(Correction(
                             line_number=line_num,
                             measure_number=m_num,
