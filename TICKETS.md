@@ -5995,6 +5995,58 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
+### [ ] S8b-11: Compose a strophic/multi-verse vocal test fixture + real-compile integration tests
+
+**Why:** S8b-8 (strophic songs and multi-verse vocal formats) only has synthetic inline-string tests today — `test_parse_strophic_multiverse_lyrics_and_refrain` and `test_parse_strophic_with_word_number_verse_prefixes` in `test_vocal.py` construct minimal hand-built BRF strings and assert on `staff.verses`/`staff.verse_prefixes` and substring checks against `to_lilypond()` output. Neither is a real hand-authored `.brf` run through the real `lilypond` binary and checked for a clean compile log (the `_compile_and_check_no_warnings` pattern already established in `test_lilypond_formatter.py`, `test_vocal.py`'s own `vocal_test.brf` tests, and `test_lead_sheet_integration.py`). `vocal_test.brf` (the existing S7b-9 fixture) is single-verse and doesn't exercise multiple verses, verse-number prefixes, or refrain replication at all. S8b-10's own ticket text excluded strophic/multi-verse from its fixture's scope pending S8b-8 landing (3146a03) — it's landed now, so it's time to fold it in with its own fixture, the same way S8b-9 did for lead sheets.
+
+**Fixture requirements** (developer-authored `.brf`, added to `tests/fixtures/` with an entry in `tests/fixtures/README.md` per the existing table format):
+1. At least 2 verses of lyrics on the same melody, each with a verse-number prefix. The parser accepts two prefix styles — bracketed (`⠶⠼⠁⠶`, per `test_parse_strophic_multiverse_lyrics_and_refrain`) and plain (`⠼⠁`, per `test_parse_strophic_with_word_number_verse_prefixes`). Pick one as the fixture's primary style (testing both in one fixture would be artificial) and note which in the README entry.
+2. A refrain: a system with an unprefixed lyric line following the verse systems, which must replicate across every verse's stanza (`staff.verses[n]` ends with the same refrain syllables for every verse) — the behavior already covered by the existing unit test, but not yet by a real fixture.
+3. At least one syllabic slur (the "flo --" hyphenation-continuation case already exercised in `vocal_test.brf`), so this fixture isn't narrower in coverage than the single-verse fixture it's meant to complement.
+4. An accompaniment part (e.g. piano, as in `vocal_test.brf`), so the fixture confirms verse/refrain stacking coexists correctly with a non-lyric staff, not just a solo vocal line.
+5. Developer provides (or confirms, if drafted first) the hand-authored ground-truth `.ly` output, same as `vocal_test.ly`.
+
+**Planned integration tests** (new file, e.g. `tests/test_strophic_integration.py`, or alongside the existing strophic unit tests in `test_vocal.py` — developer's call), to be written once the fixture text and ground truth are confirmed:
+- `test_strophic_fixture_parses_without_warnings` — parses the fixture end to end, asserts no beat-count/validation warnings are raised.
+- `test_strophic_fixture_verses_and_refrain_match_expected` — asserts `staff.verses`, `staff.verse_prefixes`, and refrain replication against the confirmed values (mirrors the assertions in `test_parse_strophic_multiverse_lyrics_and_refrain`, but against the real fixture instead of an inline string).
+- `test_strophic_fixture_matches_ground_truth_ly` — compares generated `to_lilypond()` output against the confirmed ground-truth `.ly`, including `\set stanza = "N. "` markup and one `\new Lyrics \lyricsto` block per verse.
+- `test_strophic_fixture_compiles_cleanly` — reuses the `shutil.which("lilypond")` skip-if guard and the `_compile_and_check_no_warnings` helper (or an equivalent local copy) to run the real `lilypond` binary and assert a clean log, not just exit code 0.
+
+**Definition of Done:**
+- [ ] Fixture `.brf` composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [ ] Ground-truth `.ly` output confirmed by the developer.
+- [ ] Integration tests written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
+
+---
+
+### [ ] S8b-12: Fix octave resolution for unmarked notes to follow BANA Sec. 3.2.2's melodic-interval rule (found via S8b-10)
+
+**Why:** While composing the S8b-10 fixture, an unmarked chord base note (`⠺`/B, following a `⠹`/C base note with no intervening octave mark) resolved to the wrong octave — B4 instead of B3 — producing a wrong pitch and, in one case, an "unterminated tie" warning on real `lilypond` compile. Tracing this in `braille_parser.py` shows the parser's octave handling for unmarked notes is a simple sticky counter: `_current_octave` is set only by explicit octave-mark cells (`_handle_octave_mark`) and otherwise reused as-is for whatever note letter comes next (see `test_octave_persists_without_mark`, which names and asserts exactly this behavior: `⠐⠹⠱` → C4, D4, "octave persists"). That happens to be correct for ascending/small stepwise motion within an octave, but it is not the actual BANA rule, and it silently produces wrong pitches whenever sticking to the same octave number would put the new note a fourth or more away from the previous one in the wrong direction — exactly the C4→B case here, where the intended reading (no mark needed) is the *nearest* B, a 2nd below (B3), not a major 7th above (B4).
+
+The real rule, confirmed against the manual (`Music_Braille_Code_2015.pdf`, **Sec. 3.2.2, "Need Determined by Melodic Interval"**):
+> (a) the octave is not marked for the second of two consecutive notes if the interval is less than a fourth, (b) the octave is always marked in a skip greater than a fifth, and (c) the octave is only marked in a skip of a fourth or fifth when the second note is in a different octave from the first.
+
+In other words: an omitted mark is itself information — it asserts the interval is less than a fourth, so the correct octave is whichever one satisfies that, not "whatever octave we were last sitting at." The same bug affects chord base notes identically (confirmed on a second, adjacent chord in the same fixture measure); it happened not to produce a compile warning there only because the chord's other tones still matched the next chord's tones, masking it — meaning the wrong pitch can pass silently with no warning at all, not just when it happens to break a tie.
+
+Sprint 9b's `BANAValidator` (S9b-3) independently flags the same category of issue as a warning for the composer to fix in their own `.brf` source (`Missing octave mark` / `Redundant octave mark` corrections). That is a complementary, not competing, mechanism: S9b-3 is aimed at helping a composer improve their *source* braille, while this ticket is about the parser producing the *correct pitch* even when the source is ambiguous or the composer hasn't gone back to add the mark yet. Since the parser now resolves unmarked notes correctly per the rule below, `BANAValidator._validate_octave_marks` no longer needs (or is able) to detect a "missing mark, interval of 6th+" or "missing mark, interval of 4th/5th crossing octaves" situation from the resolved pitches — those corrections are removed from `validator.py`; only "redundant explicit mark" corrections remain meaningful, since the parser always trusts an explicit mark at face value rather than second-guessing it.
+
+**Steps:**
+1. Implement a nearest-octave resolution for unmarked notes per Sec. 3.2.2(a): given the previous *sounding* note's absolute pitch and the new note's letter (no mark present), choose the candidate octave (current, current − 1, or current + 1) that puts the melodic interval below a fourth.
+2. Handle the boundary case in Sec. 3.2.2(b)/(c): a skip of a fourth or fifth is only valid without a mark if it stays within the *same* octave as the previous note. Since there are only 7 diatonic letters, the signed difference between the new and previous note's letters fully determines which of (a)/(b)/(c) applies — there is no leftover "can't resolve" case that needs a raise/warn fallback.
+3. Apply the fix at both call sites that currently read `_current_octave` directly for note construction (plain single notes and chord base notes) — confirm the "previous sounding note" used for the interval calculation is correct in both the piano-hand-switching case (`_octave_by_hand`) and the interval-doubling-carry case (`_interval_octave_override`), not just the simple single-voice case.
+4. In-accord voices need their own handling: BANA reads octave continuity from the primary (first-written) voice, not whichever voice was written last, so `_finalize_measure` must restore the primary voice's ending octave once an in-accord group closes (confirmed against `Children_s_Piece.ly`'s real, hand-verified octaves, cross-checked via `lilypond`'s own `\displayLilyMusic`/MIDI output). Additionally, the first note of a *new* in-accord voice (voice 2, 3, ...) is not "consecutive" with the previous voice's last note in Sec. 3.2.2's sense, so it must not go through the melodic-interval computation at all — it simply keeps whatever octave number was last set.
+5. Revisit `test_octave_persists_without_mark` — it will still pass under a correct implementation (C→D is under a fourth either way), but its name/comment currently reads as documentation of "always sticky," which is misleading; update the comment to reflect the real rule.
+6. Add unit tests for the case that surfaced this bug: an unmarked note whose letter, kept at the same octave, would be a fourth or more away in the wrong direction (descending C→B and the symmetric ascending B→C case), for both plain notes and chord base notes.
+7. Re-run the full suite to confirm no existing fixture/ground-truth `.ly` regresses — several existing fixtures likely have unmarked passages that happen to work under the old sticky logic and must still resolve to the same pitches under the corrected one. (`children_s_piece.brf`'s hand-authored ground truth, `instrumental_techniques_test.brf`, and the in-accord unit tests in `test_parser.py` all had genuinely wrong resolved octaves under the old sticky logic — confirmed correct under the fix by cross-checking `Children_s_Piece.ly` against real `lilypond` output, not just re-asserting whatever the parser happened to produce.)
+
+**Definition of Done:**
+- [ ] Unmarked notes resolve to the nearest octave per BANA Sec. 3.2.2, not a sticky persisted value, for both plain notes and chord base notes.
+- [ ] In-accord voices resolve octave continuity from the primary (first-written) voice, not whichever voice was written last.
+- [ ] New unit tests cover the descending- and ascending-across-an-octave-boundary cases that motivated this ticket.
+- [ ] Full existing test suite still passes; `test_octave_persists_without_mark`'s comment updated to describe the real rule rather than "always sticky."
+
+---
+
 # Sprint 9: Reverse Direction — LilyPond to BRF
 
 Estimated time: 1.5–2 weeks.

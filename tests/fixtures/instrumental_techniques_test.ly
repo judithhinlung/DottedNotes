@@ -17,7 +17,7 @@
 fluteMusic = \relative c'' {
     \time 8/4
     e4\p d4 c4 d4 e4 f4 g4 f4 |
-    f4\stopped g4 a4 b4 c,4\open b'4 a4 g4 |
+    f4\stopped g4 a4 b4 c4\open b4 a4 g4 |
     f4 e4 d4 g4 f4 e4 d4 c4 |
     c\breve |
 }
@@ -32,9 +32,9 @@ violinMusic = \relative c' {
 
 pianoRightHandMusic = \relative c' {
     \time 8/4
-    <c e g>4~\p <c e g>4 <b' d f>4~ <b d f f>4 c,4 d4 e4 d4 |
+    <c e g>4~\p <c e g>4 <b d f>4~ <b d f f>4 c4 d4 e4 d4 |
     R\breve |
-    <d g b>4~ <c e g>4~ <c e g>4~ <b e g>4 <d, g b>4 <c e g>4 <b' d f>4~ <a d f>4 |
+    <d g b>4~ <c e g>4~ <c e g>4~ <b e g>4 <d g b>4 <c e g>4 <b d f>4~ <a d f>4 |
     c\breve |
 }
 

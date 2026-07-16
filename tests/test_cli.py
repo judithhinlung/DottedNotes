@@ -354,8 +354,12 @@ def test_e2e_conversion(monkeypatch, tmp_path):
 
 
 def test_cli_report_option(monkeypatch, tmp_path, capsys):
+    # First note of the piece has no octave mark at all -- a BANA reset
+    # point (S9b-3), always required regardless of melodic interval, so
+    # unaffected by BrailleParser._resolve_unmarked_octave's interval-based
+    # resolution (see test_validation_octave_marks_first_note).
     brf_file = tmp_path / "test_report.brf"
-    brf_file.write_text("⠐⠹⠞", encoding="utf-8")
+    brf_file.write_text("⠹", encoding="utf-8")
     _run_main(monkeypatch, ["convert", str(brf_file), "--report"])
     captured = capsys.readouterr()
     assert "Line 1: Measure 1: Missing octave mark" in captured.err

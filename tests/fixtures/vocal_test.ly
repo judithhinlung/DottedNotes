@@ -21,8 +21,8 @@ sopranoMusic = \relative c' {
     f16 f16 g8 a4 a4 a4 |
     b8( a8) g4 r2 |
     b8\p( a8) g4 r2 |
-    a8\<( b8) c,4 c4 c4 |
-    f8\>( g8) a4 a4 a4 |
+    a8\<( b8) c4 c4 c4 |
+    f,8\>( g8) a4 a4 a4 |
     a8\p b8 g4 r2 |
     g4 f4~ f2 |
 }
@@ -50,7 +50,7 @@ pianoLefthandMusic = \relative c {
     r4 f,,8\< r8 f8 r8 f8 r8 |
     r4 f8\> r8 f8 r8 f8 r8 |
     r4 r8 c'8\p e8 g8 c4 |
-    c4 f,8 f8 a8 c,8 f'4 |
+    c4 f,8 f8 a8 c8 f4 |
 }
 
 

@@ -75,12 +75,39 @@ def test_octave_mark_octave4():
 
 
 def test_octave_persists_without_mark():
-    # ⠐ = octave 4, ⠹ = C quarter, ⠱ = D quarter (no new octave mark)
+    # ⠐ = octave 4, ⠹ = C quarter, ⠱ = D quarter (no new octave mark).
+    # C4 -> D is a 2nd (BANA Sec. 3.2.2(a)), so the unmarked note resolves
+    # to the same octave as the previous one -- not because unmarked notes
+    # are always "sticky" to whatever octave was last set (they aren't; see
+    # test_octave_leap_without_mark_resolves_nearest below), but because a
+    # 2nd/3rd interval's nearest reading always happens to land there.
     notes = _parse('⠐⠹⠱')
     assert notes[0].note_name == 'C'
     assert notes[0].octave == 4
     assert notes[1].note_name == 'D'
-    assert notes[1].octave == 4  # octave persists
+    assert notes[1].octave == 4
+
+
+def test_octave_leap_without_mark_resolves_nearest_descending():
+    # ⠐ = octave 4, ⠹ = C quarter, ⠺ = B quarter (no mark). A same-octave
+    # reading would put B a 7th above C -- BANA Sec. 3.2.2 instead resolves
+    # to the nearest B, a 2nd below (B3), not B4 (the S8b-10 motivating bug).
+    notes = _parse('⠐⠹⠺')
+    assert notes[0].note_name == 'C'
+    assert notes[0].octave == 4
+    assert notes[1].note_name == 'B'
+    assert notes[1].octave == 3
+
+
+def test_octave_leap_without_mark_resolves_nearest_ascending():
+    # ⠘ = octave 2, ⠺ = B quarter, ⠹ = C quarter (no mark). A same-octave
+    # reading would put C a 7th below B -- BANA Sec. 3.2.2 instead resolves
+    # to the nearest C, a 2nd above (octave 3), the symmetric ascending case.
+    notes = _parse('⠘⠺⠹')
+    assert notes[0].note_name == 'B'
+    assert notes[0].octave == 2
+    assert notes[1].note_name == 'C'
+    assert notes[1].octave == 3
 
 
 def test_octave_mark_changes_midstream():
@@ -3870,8 +3897,11 @@ def test_parser_full_measure_in_accord_parses_correctly():
     assert [(n.note_name, n.octave) for n in ia.parts[0]] == [
         ('C', 4), ('D', 4), ('E', 4), ('F', 4)
     ]
+    # Voice 2's last note (C, unmarked after B4) resolves to C5, not C4:
+    # BANA Sec. 3.2.2 -- an unmarked note a 7th away in the same octave is
+    # always the 2nd-away complement in the adjacent octave instead.
     assert [(n.note_name, n.octave) for n in ia.parts[1]] == [
-        ('G', 4), ('A', 4), ('B', 4), ('C', 4)
+        ('G', 4), ('A', 4), ('B', 4), ('C', 5)
     ]
 
 
@@ -4009,7 +4039,7 @@ def test_in_accord_renders_inside_measure_to_lilypond():
     assert '>>' in ly_out
 
 
-# Voice 1: C4 D4 E4 F4, voice 2: G4 A4 B4 C4, voice 3: E4 F4 G4 A4 (all quarter notes)
+# Voice 1: C4 D4 E4 F4, voice 2: G4 A4 B4 C5, voice 3: E4 F4 G4 A4 (all quarter notes)
 _THREE_VOICE_ACCORD = '⠐⠹⠱⠫⠻⠣⠜⠐⠳⠪⠺⠹⠣⠜⠐⠫⠻⠳⠪⠀'
 
 
@@ -4022,8 +4052,10 @@ def test_three_voice_in_accord_parses_correctly():
     assert [(n.note_name, n.octave) for n in ia.parts[0]] == [
         ('C', 4), ('D', 4), ('E', 4), ('F', 4)
     ]
+    # Voice 2's last note (C, unmarked after B4) resolves to C5 -- see
+    # test_parser_full_measure_in_accord_parses_correctly for why.
     assert [(n.note_name, n.octave) for n in ia.parts[1]] == [
-        ('G', 4), ('A', 4), ('B', 4), ('C', 4)
+        ('G', 4), ('A', 4), ('B', 4), ('C', 5)
     ]
     assert [(n.note_name, n.octave) for n in ia.parts[2]] == [
         ('E', 4), ('F', 4), ('G', 4), ('A', 4)
@@ -4250,10 +4282,13 @@ def test_children_s_piece_renders_piano_staff_lilypond():
     assert r'\new PianoStaff <<' in ly
     assert ly.count(r'\new Staff {') == 2
     # Each staff's \relative anchor matches its register (S6 follow-up):
-    # the upper/treble staff opens on c'' and the lower/bass staff on plain
-    # c, exactly as Children_s_Piece.ly (hand-authored ground truth) does --
-    # not a uniform \relative c' for both.
-    assert "\\relative c'' {" in ly
+    # the upper/treble staff opens on c' (its first bare, non-chord/in-accord
+    # note is the B in measure 4, which BANA Sec. 3.2.2 resolves to octave 4 --
+    # confirmed against Children_s_Piece.ly, the hand-authored ground truth,
+    # by decoding its absolute pitches via real lilypond) and the lower/bass
+    # staff opens on plain c -- not a uniform \relative c' for both.
+    assert "\\relative c' {" in ly
+    assert "\\relative c'' {" not in ly
     assert "\\relative c {" in ly
 
 
