@@ -37,8 +37,8 @@ pianoMusic = \relative c' {
       \set Staff.instrumentName = "Soprano"
       \sopranoMusic
     }
-    \new Lyrics \lyricsto "vocals_soprano" { \set stanza = "1. " \set stanza = "1. " Ho -- ly A -- men }
-    \new Lyrics \lyricsto "vocals_soprano" { \set stanza = "2. " \set stanza = "2. " Glo -- ry A -- men }
+    \new Lyrics \lyricsto "vocals_soprano" { \set stanza = "1. " Ho -- ly A -- men }
+    \new Lyrics \lyricsto "vocals_soprano" { \set stanza = "2. " Glo -- ry A -- men }
   >>
   \new Staff \with {
     instrumentName = "Piano"

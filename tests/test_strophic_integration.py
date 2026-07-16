@@ -54,13 +54,12 @@ def test_strophic_fixture_verses_and_refrain_match_expected():
     # Verse 1's "Ho --" and verse 2's "Glo --" each carry a syllabic slur
     # across the melody's first two notes (a melisma: one syllable held
     # over two notes), and both verses share the same "A -- men" refrain,
-    # replicated from the second (unprefixed) system.
-    assert soprano_staff.verses[0] == [
-        '\\set stanza = "1. " Ho --', 'ly', 'A --', 'men',
-    ]
-    assert soprano_staff.verses[1] == [
-        '\\set stanza = "2. " Glo --', 'ry', 'A --', 'men',
-    ]
+    # replicated from the second (unprefixed) system. The verse-number
+    # prefix lives only in verse_prefixes, not baked into the first
+    # syllable -- rendering adds the `\set stanza` directive exactly once
+    # (S8b-13).
+    assert soprano_staff.verses[0] == ['Ho --', 'ly', 'A --', 'men']
+    assert soprano_staff.verses[1] == ['Glo --', 'ry', 'A --', 'men']
 
 
 def test_strophic_fixture_matches_ground_truth_ly():
@@ -70,6 +69,12 @@ def test_strophic_fixture_matches_ground_truth_ly():
     ly_output = score.to_lilypond()
     ground_truth = (FIXTURES / "strophic_song_test.ly").read_text(encoding="utf-8")
     assert ly_output == ground_truth
+    # S8b-13 regression check: each verse's stanza directive must appear
+    # exactly once -- a full-string equality check above would already
+    # catch a doubled directive, but an explicit count makes the intent
+    # unambiguous rather than relying on incidental ground-truth wording.
+    assert ly_output.count('\\set stanza = "1. "') == 1
+    assert ly_output.count('\\set stanza = "2. "') == 1
 
 
 def test_strophic_fixture_compiles_cleanly(tmp_path: Path):

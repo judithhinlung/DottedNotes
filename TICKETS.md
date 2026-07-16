@@ -5788,7 +5788,7 @@ authorization to publish.
 
 ---
 
-### [ ] S8-6: Add `--measure-numbers` CLI option to emit measure-number comments in LilyPond output
+### [x] S8-6: Add `--measure-numbers` CLI option to emit measure-number comments in LilyPond output
 
 **Why:** Generated `.ly` files can run to hundreds of lines with no landmarks, which makes them slow to navigate with a screen reader once something needs fixing by hand (e.g. cross-referencing a `_validate_measure_beat_count` warning like "Measure 31: expected 4 beats but counted 3" back to the actual line in the output). A `% <number>` comment before each measure's line turns that into a direct search target. Developer-requested, in the spirit of S8-1's screen-reader-friendliness audit.
 
@@ -5802,10 +5802,10 @@ authorization to publish.
 7. Write a CLI integration test converting an existing fixture with `--measure-numbers` and asserting the expected `% N` comments appear at the right lines.
 
 **Definition of Done:**
-- [ ] `--measure-numbers` CLI option added to the `convert` command and documented in `--help`.
-- [ ] Default behavior (flag omitted) is byte-identical to current output — no existing ground-truth fixture test needs updating.
-- [ ] With the flag on, each measure line is preceded by a `% N` comment using the real parsed margin number, and consolidated rest-run lines show a range.
-- [ ] Unit and CLI integration tests pass.
+- [x] `--measure-numbers` CLI option added to the `convert` command and documented in `--help`.
+- [x] Default behavior (flag omitted) is byte-identical to current output — no existing ground-truth fixture test needs updating.
+- [x] With the flag on, each measure line is preceded by a `% N` comment using the real parsed margin number, and consolidated rest-run lines show a range.
+- [x] Unit and CLI integration tests pass.
 
 ---
 
@@ -6065,6 +6065,36 @@ Sprint 9b's `BANAValidator` (S9b-3) independently flags the same category of iss
 - [ ] In-accord voices resolve octave continuity from the primary (first-written) voice, not whichever voice was written last.
 - [ ] New unit tests cover the descending- and ascending-across-an-octave-boundary cases that motivated this ticket.
 - [ ] Full existing test suite still passes; `test_octave_persists_without_mark`'s comment updated to describe the real rule rather than "always sticky."
+
+---
+
+### [ ] S8b-13: Fix duplicated `\set stanza` directive in strophic/multi-verse lyrics output (found via S8b-11)
+
+**Why:** While composing the S8b-11 strophic fixture, `strophic_song_test.ly`'s rendered `\new Lyrics` blocks came out as
+`\new Lyrics \lyricsto "vocals_soprano" { \set stanza = "1. " \set stanza = "1. " Ho -- ly A -- men }` —
+the `\set stanza = "1. "` directive is emitted **twice**. This isn't cosmetic: LilyPond accepts the duplicate silently (the second `\set` just re-applies the same value), so it doesn't break compilation, but it's dead/wrong markup that would confuse anyone hand-editing the `.ly` output, and it means the existing test suite has a real coverage gap around this exact case.
+
+Root cause: the stanza prefix gets added to the lyrics **twice**, in two different places, that don't know about each other:
+1. `EnsembleParser`'s stanza-prefix handling (`ensemble_parser.py`, around `extract_stanza_prefix` / the `remaining_syllables[0] = (f"\\set stanza = \"{prefix_val} \" {first_syl}", has_hyphen)` line) bakes the `\set stanza = "N. "` text directly into the *first syllable string* of `staff.verses[v_idx][0]` at parse time. This is confirmed intentional and covered by existing tests — `test_parse_strophic_multiverse_lyrics_and_refrain` and `test_parse_strophic_with_word_number_verse_prefixes` in `test_vocal.py` both assert `staff.verses[0] == ['\\set stanza = "1. " Ho --', ...]` directly.
+2. `Score.to_lilypond()` (three call sites: the single-staff lyrics branch, the single-instrument-family-run branch, and the multi-staff-group branch) and `OrchestraScore.to_lilypond()` (one call site) **each independently** recompute `prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "` from `staff.verse_prefixes` and prepend it again when joining `lyrics_content = prefix_str + " ".join(v)`.
+
+Since `staff.verse_prefixes` is only ever populated by `EnsembleParser` at the same time as the syllable-level bake-in (both set together, right before `staff.verses = mapped_verses`), the render-time `prefix_str` addition is *always* redundant whenever it fires — there's no case where verse_prefixes is set but the first syllable *doesn't* already carry the `\set stanza` text.
+
+This also explains why no existing test caught it: `test_vocal.py`'s `to_lilypond()` assertions (lines testing `test_parse_strophic_multiverse_lyrics_and_refrain` / `test_parse_strophic_with_word_number_verse_prefixes`) use loose `'\\set stanza = "1. " Ho -- ly ...' in ly_output` substring checks, which still pass even when that exact substring is preceded by a second, duplicate `\set stanza = "1. "` — a substring check can't detect an extra copy before it.
+
+**Steps:**
+1. Remove the redundant render-time `prefix_str` computation/prepending in all four call sites (`score.py`'s three, `orchestra_score.py`'s one), relying solely on the syllable text `EnsembleParser` already produced in `staff.verses`/`staff.lyrics`.
+2. Double check the `verses = staff.verses if staff.verses else [staff.lyrics]` fallback path (a staff with plain, non-strophic lyrics and no `verse_prefixes`): confirm it still renders with no `\set stanza` at all (unaffected, since `verse_prefixes` is empty there and the guard already skips `prefix_str`) — should not need any change, but verify with a test.
+3. Confirm `staff.verse_prefixes` isn't relied on anywhere else for something other than this now-removed render-time computation (e.g. reverse-direction `to_braille()` in Sprint 9 or the BRF writer) before deleting any of its call sites — if it's still needed elsewhere, only remove the four redundant `prefix_str` blocks, not the field itself.
+4. Update `test_vocal.py`'s loose substring assertions (`'\\set stanza = "1. " Ho -- ly \\set stanza = "Refrain. " A -- men' in ly_output` and similar) to assert the directive appears **exactly once** per verse — e.g. `ly_output.count('\\set stanza = "1. "') == 1` — so this exact regression can't silently reappear.
+5. Update `tests/test_strophic_integration.py::test_strophic_fixture_matches_ground_truth_ly`'s ground truth (`strophic_song_test.ly`) to drop the duplicate, and re-verify the fixture still compiles cleanly with the real `lilypond` binary.
+6. Re-run the full suite to confirm no other `.ly` ground-truth fixture with verse/stanza lyrics (there aren't others as of this writing besides `strophic_song_test.ly` and the inline `test_vocal.py` cases) regresses.
+
+**Definition of Done:**
+- [ ] `\set stanza = "N. "` (and `"Refrain. "`) appears exactly once per verse in rendered LilyPond output, never doubled.
+- [ ] `test_vocal.py`'s strophic assertions catch a doubled directive (not just loose substring containment).
+- [ ] `strophic_song_test.ly` ground truth updated and re-verified against a real `lilypond` compile.
+- [ ] Full existing test suite still passes.
 
 ---
 

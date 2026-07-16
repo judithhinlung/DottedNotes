@@ -916,11 +916,25 @@ class EnsembleParser:
                                         syllables = parse_lyrics(chunk)
                                         prefix_val, remaining_syllables = extract_stanza_prefix(syllables)
                                         if prefix_val is not None:
-                                            if verses_prefixes[v_idx] is None:
-                                                verses_prefixes[v_idx] = prefix_val
-                                            if remaining_syllables:
+                                            if not verse_syllables_list[v_idx]:
+                                                # This verse's very first contribution: its prefix is
+                                                # the overall stanza label for the whole verse, which
+                                                # rendering (Score.to_lilypond() / OrchestraScore.to_
+                                                # lilypond()) already adds once from
+                                                # staff.verse_prefixes -- baking it into the syllable
+                                                # text here too used to double it up (S8b-13).
+                                                if verses_prefixes[v_idx] is None:
+                                                    verses_prefixes[v_idx] = prefix_val
+                                            elif remaining_syllables:
+                                                # A later system (e.g. a refrain) introducing a new
+                                                # stanza label partway through this verse's lyrics.
+                                                # Rendering only emits one `\set stanza` at the very
+                                                # start of the line, so a mid-stream label change has
+                                                # nowhere else to go -- bake it into the syllable text.
                                                 first_syl, has_hyphen = remaining_syllables[0]
-                                                remaining_syllables[0] = (f"\\set stanza = \"{prefix_val} \" {first_syl}", has_hyphen)
+                                                remaining_syllables[0] = (
+                                                    f"\\set stanza = \"{prefix_val} \" {first_syl}", has_hyphen
+                                                )
                                         verse_syllables_list[v_idx].extend(remaining_syllables)
                                 break
 
