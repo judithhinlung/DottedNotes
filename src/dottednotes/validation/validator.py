@@ -73,11 +73,17 @@ RULE_REGISTRY: dict[str, Rule] = {
         description="Suggest using the measure repeat sign when two or more consecutive measures are musically identical.",
         citation="MBC 2015 Part I, Section 18.1"
     ),
+    "S11c-2": Rule(
+        rule_id="S11c-2",
+        name="Page Layout Validation",
+        description="Verify centering of title, formatting of running heads, indentation of signature lines, heading spacing and parallel blank lines.",
+        citation="MBC 2015 Part IV, Sections 32 & 33; Part I, Section 1"
+    ),
 }
 
 VALIDATION_PROFILES: dict[str, list[str]] = {
-    "standard": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching"],
-    "strict": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S9c-redundant-accidental", "S9c-measure-repeat"],
+    "standard": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S11c-2"],
+    "strict": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S9c-redundant-accidental", "S9c-measure-repeat", "S11c-2"],
 }
 
 
@@ -167,6 +173,9 @@ class BANAValidator:
                     corrections.extend(self._validate_slur_matching(voice))
                 if "S9c-redundant-accidental" in self.enabled_rules:
                     corrections.extend(self._validate_redundant_accidentals(voice, staff))
+
+        if "S11c-2" in self.enabled_rules and raw_brl_text:
+            corrections.extend(self._validate_page_layout(score, raw_brl_text))
 
         # Deduplicate corrections based on unique attributes
         seen = set()
@@ -638,4 +647,164 @@ class BANAValidator:
                             rule_id="S9c-redundant-accidental"
                         ))
                     active_accidentals[(note_name, octave)] = acc_type
+        return corrections
+
+    def _validate_page_layout(self, score: Score, raw_brl_text: str) -> list[Correction]:
+        from dottednotes.renderers.braille_renderer import encode_literary_braille
+        corrections = []
+        pages = raw_brl_text.split('\f')
+
+        is_piano = len(score.staves) == 2 and any(
+            "piano" in s.name.lower() or "harp" in s.name.lower() for s in score.staves
+        )
+        from dottednotes.models.orchestra_score import OrchestraScore
+        is_ensemble = not is_piano and (isinstance(score, OrchestraScore) or len(score.staves) > 2)
+        is_solo = not is_piano and not is_ensemble
+
+        page1_lines = pages[0].splitlines()
+        title_line_idx = -1
+        title_brl = None
+        if score.title:
+            title_brl = encode_literary_braille(score.title)
+            for idx, line in enumerate(page1_lines):
+                if title_brl.strip() in line:
+                    title_line_idx = idx
+                    break
+
+        if title_line_idx != -1 and title_brl:
+            title_line = page1_lines[title_line_idx]
+            l_spaces = len(title_line) - len(title_line.lstrip(' '))
+            r_spaces = len(title_line) - len(title_line.rstrip(' '))
+            is_centered = (abs(l_spaces - r_spaces) <= 1)
+            has_margins = (l_spaces >= 3 and r_spaces >= 3)
+            if not is_centered or not has_margins:
+                corrections.append(Correction(
+                    line_number=title_line_idx + 1,
+                    measure_number=0,
+                    message="BANA Title Centering Violation: Title is not centered with at least 3 blank cells on each side.",
+                    severity="warning",
+                    rule_id="S11c-2",
+                    proposed_fix="Center the title with at least 3 blank cells on each side."
+                ))
+
+        sig_line_idx = -1
+        expected_sig_parts = []
+        if score.staves:
+            staff = score.staves[0]
+            if staff.tempo:
+                expected_sig_parts.append(staff.tempo.to_braille())
+            if staff.clef and is_solo:
+                expected_sig_parts.append(staff.clef.to_braille())
+            if staff.key_signature:
+                expected_sig_parts.append(staff.key_signature.to_braille())
+            if staff.time_signature:
+                expected_sig_parts.append(staff.time_signature.to_braille())
+
+        expected_sig_str = "".join(expected_sig_parts)
+        if expected_sig_str:
+            for idx, line in enumerate(page1_lines):
+                if expected_sig_str in line:
+                    sig_line_idx = idx
+                    break
+
+        if sig_line_idx != -1:
+            sig_line = page1_lines[sig_line_idx]
+            l_spaces = len(sig_line) - len(sig_line.lstrip(' '))
+            if is_solo or is_piano:
+                if l_spaces != 8:
+                    corrections.append(Correction(
+                        line_number=sig_line_idx + 1,
+                        measure_number=0,
+                        message="BANA Signature Line Indentation Violation: Signature line should be indented by 8 spaces (starting in cell 9) for solo/piano formats.",
+                        severity="warning",
+                        rule_id="S11c-2",
+                        proposed_fix="Indent signature line by 8 spaces."
+                    ))
+            elif is_ensemble:
+                if l_spaces != 7:
+                    corrections.append(Correction(
+                        line_number=sig_line_idx + 1,
+                        measure_number=0,
+                        message="BANA Signature Line Indentation Violation: Signature line should be indented by 7 spaces (starting in cell 8) for ensemble formats.",
+                        severity="warning",
+                        rule_id="S11c-2",
+                        proposed_fix="Indent signature line by 7 spaces."
+                    ))
+
+        target_idx = sig_line_idx if sig_line_idx != -1 else title_line_idx
+        if target_idx != -1 and target_idx + 1 < len(page1_lines):
+            next_line = page1_lines[target_idx + 1]
+            if next_line.strip() == "":
+                corrections.append(Correction(
+                    line_number=target_idx + 2,
+                    measure_number=0,
+                    message="BANA Heading Spacing Violation: No blank line is allowed between the music heading/signature and the first line of music.",
+                    severity="warning",
+                    rule_id="S11c-2",
+                    proposed_fix="Remove blank line after heading."
+                ))
+
+        if title_brl:
+            title_rh = title_brl.rstrip('⠲')
+            global_line_offset = len(page1_lines) + 1
+            for p_idx, page in enumerate(pages[1:]):
+                p_lines = page.splitlines()
+                if not p_lines:
+                    continue
+                first_line = p_lines[0]
+                if title_rh in first_line:
+                    start_pos = first_line.find(title_rh)
+                    end_pos = start_pos + len(title_rh)
+                    stripped_right = first_line[end_pos:].rstrip()
+                    expected_start = (self.column_limit - len(title_rh)) // 2
+                    if abs(start_pos - expected_start) > 2 or start_pos < 3:
+                        corrections.append(Correction(
+                            line_number=global_line_offset,
+                            measure_number=0,
+                            message=f"BANA Running Head Violation: Page {p_idx + 2} running head is not centered on line 1.",
+                            severity="warning",
+                            rule_id="S11c-2",
+                            proposed_fix="Center running head on line 1."
+                        ))
+                global_line_offset += len(p_lines) + 1
+
+        global_line_offset = 1
+        for p_idx, page in enumerate(pages):
+            p_lines = page.splitlines()
+            if is_piano:
+                lh_indices = [idx for idx, line in enumerate(p_lines) if '⠸⠜' in line]
+                rh_indices = [idx for idx, line in enumerate(p_lines) if '⠨⠜' in line]
+                for k in range(min(len(lh_indices), len(rh_indices) - 1)):
+                    lh_idx = lh_indices[k]
+                    rh_idx = rh_indices[k+1]
+                    actual_blanks = sum(1 for line_idx in range(lh_idx + 1, rh_idx) if p_lines[line_idx].strip() == "")
+                    if actual_blanks != 2:
+                        corrections.append(Correction(
+                            line_number=global_line_offset + lh_idx + 1,
+                            measure_number=0,
+                            message=f"BANA Parallel Spacing Violation: Keyboard parallels must be separated by exactly 2 blank lines (found {actual_blanks}).",
+                            severity="warning",
+                            rule_id="S11c-2",
+                            proposed_fix="Ensure 2 blank lines between parallels."
+                        ))
+            elif is_ensemble:
+                from dottednotes.parser.ensemble_parser import extract_measure_number
+                heading_indices = []
+                for idx, line in enumerate(p_lines):
+                    m_num, _ = extract_measure_number(line)
+                    if m_num is not None:
+                        heading_indices.append(idx)
+                for k in range(1, len(heading_indices)):
+                    h_idx = heading_indices[k]
+                    if h_idx > 0 and p_lines[h_idx - 1].strip() != "":
+                        corrections.append(Correction(
+                            line_number=global_line_offset + h_idx,
+                            measure_number=0,
+                            message="BANA Parallel Spacing Violation: Ensemble parallels must be preceded by exactly 1 blank line.",
+                            severity="warning",
+                            rule_id="S11c-2",
+                            proposed_fix="Insert 1 blank line before parallel."
+                        ))
+            global_line_offset += len(p_lines) + 1
+
         return corrections

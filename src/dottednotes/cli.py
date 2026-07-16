@@ -13,24 +13,29 @@ from .exceptions import DottedNotesError, LilyPondCompileError
 from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, has_ensemble_header
 from .parser.lead_sheet_parser import parse_lead_sheet
+from .parser.strophic_song_parser import parse_strophic_song
 from .parser.tokenizer import BrailleTokenizer
 from .parser.input_pipeline import BRLInputPipeline
 
 
 def _parse_score(text: str, category_override: str | None = None):
     """Parse normalized Unicode braille text into a Score, choosing the
-    lead-sheet, ensemble, or solo parser.
+    lead-sheet, strophic-song, ensemble, or solo parser.
 
     An explicit `category_override == "Lead Sheet"` always wins and routes
     to `parse_lead_sheet()` (BANA Sec. 27's two-line melody/chord-symbol
-    parallel) -- there's no unambiguous structural marker to auto-detect a
-    lead sheet the way an instrument-list header marks an ensemble score,
-    so the caller must ask for it explicitly. Otherwise, choose the
-    ensemble or solo parser based on whether an instrument-list header
-    (BANA §33.2) is present.
+    parallel); `category_override == "Strophic Song"` routes to
+    `parse_strophic_song()` (BANA Secs. 35/36's solo vocal lyric/chord/
+    melody format) -- there's no unambiguous structural marker to
+    auto-detect either format the way an instrument-list header marks an
+    ensemble score, so the caller must ask for them explicitly. Otherwise,
+    choose the ensemble or solo parser based on whether an instrument-list
+    header (BANA §33.2) is present.
     """
     if category_override == "Lead Sheet":
         return parse_lead_sheet(text)
+    if category_override == "Strophic Song":
+        return parse_strophic_song(text)
     if has_ensemble_header(text):
         return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)
@@ -122,7 +127,7 @@ def _run_convert(args: argparse.Namespace) -> None:
     is_musicxml_input = input_path.suffix.lower() in (".musicxml", ".xml", ".mxl")
 
     category_override = args.category
-    valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet"}
+    valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet", "Strophic Song"}
     if category_override is not None and category_override not in valid_categories:
         raise DottedNotesError(
             f"Invalid category: '{category_override}'. Must be one of {sorted(list(valid_categories))}"
@@ -183,7 +188,8 @@ def _run_convert(args: argparse.Namespace) -> None:
         else:
             rendered = score.to_lilypond(
                 category_override=category_override,
-                format_overrides=format_overrides
+                format_overrides=format_overrides,
+                measure_numbers=args.measure_numbers,
             )
 
         if args.compile and output_path is None:
@@ -239,8 +245,10 @@ def main() -> None:
     convert_parser.add_argument(
         "--category",
         help="Override the layout category (e.g. Solo Piano, Art Song, Chamber, "
-             "Orchestral, Lead Sheet). \"Lead Sheet\" also switches the parser "
-             "itself to BANA Sec. 27's two-line melody/chord-symbol format.",
+             "Orchestral, Lead Sheet, Strophic Song). \"Lead Sheet\" and "
+             "\"Strophic Song\" also switch the parser itself: \"Lead Sheet\" to "
+             "BANA Sec. 27's two-line melody/chord-symbol format, \"Strophic "
+             "Song\" to BANA Secs. 35/36's solo vocal lyric/chord/melody format.",
     )
     convert_parser.add_argument(
         "--format",
@@ -250,6 +258,14 @@ def main() -> None:
         "--report",
         action="store_true",
         help="Print BANA correction/validation report to stderr",
+    )
+    convert_parser.add_argument(
+        "--measure-numbers",
+        action="store_true",
+        help="Prefix each measure's line in LilyPond output with a '%% N' "
+             "comment giving its real BANA margin number, for faster "
+             "screen-reader navigation back from a validation warning to "
+             "the line it refers to. Has no effect on .brf/.brl output.",
     )
     convert_parser.add_argument(
         "--compression",

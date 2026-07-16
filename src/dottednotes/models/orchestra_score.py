@@ -61,6 +61,7 @@ class OrchestraScore(Score):
         paper_size: Optional[str] = None,
         category_override: Optional[str] = None,
         format_overrides: Optional[dict] = None,
+        measure_numbers: bool = False,
     ) -> str:
         from ..renderers.lilypond_formatter import LilyPondFormatter
         formatter = LilyPondFormatter()
@@ -122,7 +123,9 @@ class OrchestraScore(Score):
             # \clef is emitted separately in the \score block's \with body
             # (see _staff_with_block), not inside the music variable.
             anchor, start_midi = staff.relative_anchor()
-            staff_content = staff.to_lilypond(start_midi=start_midi, include_clef=False)
+            staff_content = staff.to_lilypond(
+                start_midi=start_midi, include_clef=False, measure_numbers=measure_numbers
+            )
             relative_block = [f"\\relative {anchor} {{", staff_content, '}']
             wrapped = self._wrap_transpose(staff, relative_block, '', concert_pitch)
             variable_defs.append(f'{var_name} = ' + wrapped[0])

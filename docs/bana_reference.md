@@ -262,3 +262,37 @@ DottedNotes enforces standard BANA formatting rules via its validation library (
 * **Citation**: MBC 2015 Part I, Section 18.1.
 * **Example**: If measure 2 is identical to measure 1, a warning suggests using the measure repeat sign `⠶`.
 
+---
+
+### BANA Page Layout & Formatting Rules
+
+The following page layout and formatting rules govern the overall design and structure of transcribed braille music sheets:
+
+#### 1. Title Centering
+* **Description**: The title of the composition is centered as a literary heading on the first page of music. It must have at least 3 blank cells on each side.
+* **Citation**: *Music Braille Code (2015)*, Part IV, Section 31.1 & Section 32.1.
+* **Example**: A centered title within a 40-cell line limit.
+
+#### 2. Key and Time Signature Placement (Music Headings)
+* **Description**: The key and time signatures are combined as a single unit (no space in between) and centered. In solo instrumental layouts, they are placed on their own line indented by 8 spaces (starting in cell 9). If centered, they must have at least 3 blank cells on each side.
+* **Citation**: *Music Braille Code (2015)*, Part I, Section 21 & Part IV, Section 31.5.
+* **Example**: Key and time signatures grouped together (`⠣⠩⠼⠉⠙`) on a line starting with 8 spaces.
+
+#### 3. Spacing Around Headings
+* **Description**: A blank line must precede the initial music heading of a composition or movement (unless it starts at the top of a page immediately following a running head). No blank line is inserted between the heading/signatures line and the first line of music.
+* **Citation**: *Music Braille Code (2015)*, Part IV, Section 32.2 & Section 32.2.1.
+
+#### 4. Running Heads and Pagination
+* **Description**: On all braille pages following page 1, a running head (abbreviated title) is centered on line 1, flanked by print page numbers on the left and braille page numbers on the right, separated by at least 3 blank cells.
+* **Citation**: *Music Braille Code (2015)*, Part IV, Section 32.1.
+
+#### 5. Parallel Separation Spacing
+* **Description**: Consecutive parallels (systems of music) must be separated by at least 1 blank line for solo music, and 2 blank lines for keyboard/organ music.
+* **Citation**: *Music Braille Code (2015)*, Part IV, Section 32.3.
+
+#### 6. Layout-Specific Line Indentation
+* **Description**: Line indents and run-overs must conform to the specific layout format:
+  * **Solo/Keyboard**: Main music line starts in cell 1; run-over (turnover) lines are indented to cell 3.
+  * **Vocal (Line-by-line)**: Lyrics start in cell 1; music is indented to cell 3; run-overs of both are indented to cell 5.
+* **Citation**: *Music Braille Code (2015)*, Part I, Section 1.3 & Part II, Section 26.1 & Part III, Section 29.1.
+

@@ -5788,6 +5788,27 @@ authorization to publish.
 
 ---
 
+### [x] S8-6: Add `--measure-numbers` CLI option to emit measure-number comments in LilyPond output
+
+**Why:** Generated `.ly` files can run to hundreds of lines with no landmarks, which makes them slow to navigate with a screen reader once something needs fixing by hand (e.g. cross-referencing a `_validate_measure_beat_count` warning like "Measure 31: expected 4 beats but counted 3" back to the actual line in the output). A `% <number>` comment before each measure's line turns that into a direct search target. Developer-requested, in the spirit of S8-1's screen-reader-friendliness audit.
+
+**Steps:**
+1. Add a `--measure-numbers` boolean flag (`store_true`, alongside the existing `--compile`/`--verbose` flags) to the `convert` subcommand in `cli.py`, documented in `--help`.
+2. Thread a `measure_numbers: bool = False` parameter through `Score.to_lilypond()`, `OrchestraScore.to_lilypond()`, and `Staff.to_lilypond()`, defaulting to off everywhere so every existing `assert ly_output == ground_truth` fixture test (`fengyang_flower_drum.ly`, `vocal_test.ly`, `lead_sheet_test.ly`, etc.) is unaffected unless the flag is explicitly passed.
+3. In `Staff.to_lilypond()`'s `measure_lines` assembly loop, when the flag is on, prefix each emitted line with `% N` using the real `Measure.number` already tracked from parsing (`measure.number`, set via `_handle_measure_number`/`_next_measure_number_for` in `braille_parser.py`) — not a freshly-enumerated count — so the comment matches the actual BANA margin number from the source, including non-sequential cases like a `0`-numbered pickup measure.
+4. Handle the rest-run consolidation case: consecutive whole-measure rests are already merged onto a single line (the `run`/lookahead loop earlier in `Staff.to_lilypond()`), so a consolidated line spanning measures 12–15 needs a comment reflecting that range (e.g. `% 12-15`), not just the first measure's number.
+5. Decide (with the developer) whether lead-sheet `ChordNames` output (`chord_names.py`) also gets measure comments, since it renders on a separate track from the melody staff it's aligned to — out of scope if it turns out not to align cleanly.
+6. Write unit tests covering: a simple multi-measure staff with the flag on/off, a consolidated rest-run line producing a range comment, and a pickup/non-sequential-numbered fixture (e.g. reusing `lead_sheet_test.brf`'s measure-0 pickup) to confirm the real margin number is used, not a synthetic recount.
+7. Write a CLI integration test converting an existing fixture with `--measure-numbers` and asserting the expected `% N` comments appear at the right lines.
+
+**Definition of Done:**
+- [x] `--measure-numbers` CLI option added to the `convert` command and documented in `--help`.
+- [x] Default behavior (flag omitted) is byte-identical to current output — no existing ground-truth fixture test needs updating.
+- [x] With the flag on, each measure line is preceded by a `% N` comment using the real parsed margin number, and consolidated rest-run lines show a range.
+- [x] Unit and CLI integration tests pass.
+
+---
+
 # Sprint 8b: Advanced Braille Parsing Features
 
 Estimated time: 1.5–2 weeks.
@@ -5928,7 +5949,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-8: Support strophic songs and multi-verse vocal formats
+### [x] S8b-8: Support strophic songs and multi-verse vocal formats
 
 **Why:** Vocal music (hymns, folk songs) frequently features multiple verses of lyrics under the same melody, or strophic structures. Currently, the lyric parser does not align multiple verses or handle refrain markings.
 
@@ -5940,9 +5961,9 @@ Estimated time: 1.5–2 weeks.
 5. Write integration tests for multi-verse vocal scores.
 
 **Definition of Done:**
-- [ ] Multiple verses of lyrics are parsed and aligned to a single melody.
-- [ ] LilyPond output renders multiple verse lines cleanly under the music.
-- [ ] Integration tests pass.
+- [x] Multiple verses of lyrics are parsed and aligned to a single melody.
+- [x] LilyPond output renders multiple verse lines cleanly under the music.
+- [x] Integration tests pass.
 
 ---
 
@@ -5969,7 +5990,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-10: Compose a combined test fixture for breve/bowing/pedal/chord-tie/glissando/mute + real-compile integration tests
+### [x] S8b-10: Compose a combined test fixture for breve/bowing/pedal/chord-tie/glissando/mute + real-compile integration tests
 
 **Why:** S8b-1 through S8b-4 and S8b-6 (breve, bowing, sustain pedal, chord ties, glissando/mute) each have unit- and parser-level tests only — string-equality checks on `to_lilypond()` output. None of them are exercised together in one real, hand-authored `.brf` the way `fengyang_flower_drum.brf` anchors earlier sprints, and none are run through the real `lilypond` binary and checked for a clean compile log (the `_compile_and_check_no_warnings` pattern already established in `test_lilypond_formatter.py` and `test_vocal.py`). A feature can pass every existing test and still emit LilyPond that's syntactically wrong in combination with another feature (e.g. a glissando spanning a pedal marking, or a chord tie on a bowed chord) — nothing today would catch that. Lead-sheet chord symbols (S8b-5) are covered by their own fixture instead (S8b-9) since that format can't host these staff-based features. S8b-8 (strophic/multi-verse) is also excluded from this fixture's scope since it's still in progress as of this writing; fold it in (or add a further fixture) once it lands.
 
@@ -5989,9 +6010,91 @@ Estimated time: 1.5–2 weeks.
 - `test_sprint8b_fixture_renders_expected_markup` — asserts the compiled `.ly` text contains each feature's expected LilyPond token at least once (`\breve`, `\downbow`/`\upbow`, `\sustainOn`/`\sustainOff`, chord tie `~` inside `<...>`, `\glissando`, `\stopped`/`\open`) so a future regression that silently drops one feature while the others still compile is caught.
 
 **Definition of Done:**
-- [ ] Fixture `.brf` file(s) composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
-- [ ] Ground-truth `.ly` output confirmed by the developer.
-- [ ] `tests/test_sprint8b_integration.py` written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
+- [x] Fixture `.brf` file(s) composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [x] Ground-truth `.ly` output confirmed by the developer.
+- [x] `tests/test_sprint8b_integration.py` written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
+
+---
+
+### [x] S8b-11: Compose a strophic/multi-verse vocal test fixture + real-compile integration tests
+
+**Why:** S8b-8 (strophic songs and multi-verse vocal formats) only has synthetic inline-string tests today — `test_parse_strophic_multiverse_lyrics_and_refrain` and `test_parse_strophic_with_word_number_verse_prefixes` in `test_vocal.py` construct minimal hand-built BRF strings and assert on `staff.verses`/`staff.verse_prefixes` and substring checks against `to_lilypond()` output. Neither is a real hand-authored `.brf` run through the real `lilypond` binary and checked for a clean compile log (the `_compile_and_check_no_warnings` pattern already established in `test_lilypond_formatter.py`, `test_vocal.py`'s own `vocal_test.brf` tests, and `test_lead_sheet_integration.py`). `vocal_test.brf` (the existing S7b-9 fixture) is single-verse and doesn't exercise multiple verses, verse-number prefixes, or refrain replication at all. S8b-10's own ticket text excluded strophic/multi-verse from its fixture's scope pending S8b-8 landing (3146a03) — it's landed now, so it's time to fold it in with its own fixture, the same way S8b-9 did for lead sheets.
+
+**Fixture requirements** (developer-authored `.brf`, added to `tests/fixtures/` with an entry in `tests/fixtures/README.md` per the existing table format):
+1. At least 2 verses of lyrics on the same melody, each with a verse-number prefix. The parser accepts two prefix styles — bracketed (`⠶⠼⠁⠶`, per `test_parse_strophic_multiverse_lyrics_and_refrain`) and plain (`⠼⠁`, per `test_parse_strophic_with_word_number_verse_prefixes`). Pick one as the fixture's primary style (testing both in one fixture would be artificial) and note which in the README entry.
+2. A refrain: a system with an unprefixed lyric line following the verse systems, which must replicate across every verse's stanza (`staff.verses[n]` ends with the same refrain syllables for every verse) — the behavior already covered by the existing unit test, but not yet by a real fixture.
+3. At least one syllabic slur (the "flo --" hyphenation-continuation case already exercised in `vocal_test.brf`), so this fixture isn't narrower in coverage than the single-verse fixture it's meant to complement.
+4. An accompaniment part (e.g. piano, as in `vocal_test.brf`), so the fixture confirms verse/refrain stacking coexists correctly with a non-lyric staff, not just a solo vocal line.
+5. Developer provides (or confirms, if drafted first) the hand-authored ground-truth `.ly` output, same as `vocal_test.ly`.
+
+**Planned integration tests** (new file, e.g. `tests/test_strophic_integration.py`, or alongside the existing strophic unit tests in `test_vocal.py` — developer's call), to be written once the fixture text and ground truth are confirmed:
+- `test_strophic_fixture_parses_without_warnings` — parses the fixture end to end, asserts no beat-count/validation warnings are raised.
+- `test_strophic_fixture_verses_and_refrain_match_expected` — asserts `staff.verses`, `staff.verse_prefixes`, and refrain replication against the confirmed values (mirrors the assertions in `test_parse_strophic_multiverse_lyrics_and_refrain`, but against the real fixture instead of an inline string).
+- `test_strophic_fixture_matches_ground_truth_ly` — compares generated `to_lilypond()` output against the confirmed ground-truth `.ly`, including `\set stanza = "N. "` markup and one `\new Lyrics \lyricsto` block per verse.
+- `test_strophic_fixture_compiles_cleanly` — reuses the `shutil.which("lilypond")` skip-if guard and the `_compile_and_check_no_warnings` helper (or an equivalent local copy) to run the real `lilypond` binary and assert a clean log, not just exit code 0.
+
+**Definition of Done:**
+- [x] Fixture `.brf` composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [x] Ground-truth `.ly` output confirmed by the developer.
+- [x] Integration tests written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
+
+---
+
+### [x] S8b-12: Fix octave resolution for unmarked notes to follow BANA Sec. 3.2.2's melodic-interval rule (found via S8b-10)
+
+**Why:** While composing the S8b-10 fixture, an unmarked chord base note (`⠺`/B, following a `⠹`/C base note with no intervening octave mark) resolved to the wrong octave — B4 instead of B3 — producing a wrong pitch and, in one case, an "unterminated tie" warning on real `lilypond` compile. Tracing this in `braille_parser.py` shows the parser's octave handling for unmarked notes is a simple sticky counter: `_current_octave` is set only by explicit octave-mark cells (`_handle_octave_mark`) and otherwise reused as-is for whatever note letter comes next (see `test_octave_persists_without_mark`, which names and asserts exactly this behavior: `⠐⠹⠱` → C4, D4, "octave persists"). That happens to be correct for ascending/small stepwise motion within an octave, but it is not the actual BANA rule, and it silently produces wrong pitches whenever sticking to the same octave number would put the new note a fourth or more away from the previous one in the wrong direction — exactly the C4→B case here, where the intended reading (no mark needed) is the *nearest* B, a 2nd below (B3), not a major 7th above (B4).
+
+The real rule, confirmed against the manual (`Music_Braille_Code_2015.pdf`, **Sec. 3.2.2, "Need Determined by Melodic Interval"**):
+> (a) the octave is not marked for the second of two consecutive notes if the interval is less than a fourth, (b) the octave is always marked in a skip greater than a fifth, and (c) the octave is only marked in a skip of a fourth or fifth when the second note is in a different octave from the first.
+
+In other words: an omitted mark is itself information — it asserts the interval is less than a fourth, so the correct octave is whichever one satisfies that, not "whatever octave we were last sitting at." The same bug affects chord base notes identically (confirmed on a second, adjacent chord in the same fixture measure); it happened not to produce a compile warning there only because the chord's other tones still matched the next chord's tones, masking it — meaning the wrong pitch can pass silently with no warning at all, not just when it happens to break a tie.
+
+Sprint 9b's `BANAValidator` (S9b-3) independently flags the same category of issue as a warning for the composer to fix in their own `.brf` source (`Missing octave mark` / `Redundant octave mark` corrections). That is a complementary, not competing, mechanism: S9b-3 is aimed at helping a composer improve their *source* braille, while this ticket is about the parser producing the *correct pitch* even when the source is ambiguous or the composer hasn't gone back to add the mark yet. Since the parser now resolves unmarked notes correctly per the rule below, `BANAValidator._validate_octave_marks` no longer needs (or is able) to detect a "missing mark, interval of 6th+" or "missing mark, interval of 4th/5th crossing octaves" situation from the resolved pitches — those corrections are removed from `validator.py`; only "redundant explicit mark" corrections remain meaningful, since the parser always trusts an explicit mark at face value rather than second-guessing it.
+
+**Steps:**
+1. Implement a nearest-octave resolution for unmarked notes per Sec. 3.2.2(a): given the previous *sounding* note's absolute pitch and the new note's letter (no mark present), choose the candidate octave (current, current − 1, or current + 1) that puts the melodic interval below a fourth.
+2. Handle the boundary case in Sec. 3.2.2(b)/(c): a skip of a fourth or fifth is only valid without a mark if it stays within the *same* octave as the previous note. Since there are only 7 diatonic letters, the signed difference between the new and previous note's letters fully determines which of (a)/(b)/(c) applies — there is no leftover "can't resolve" case that needs a raise/warn fallback.
+3. Apply the fix at both call sites that currently read `_current_octave` directly for note construction (plain single notes and chord base notes) — confirm the "previous sounding note" used for the interval calculation is correct in both the piano-hand-switching case (`_octave_by_hand`) and the interval-doubling-carry case (`_interval_octave_override`), not just the simple single-voice case.
+4. In-accord voices need their own handling: BANA reads octave continuity from the primary (first-written) voice, not whichever voice was written last, so `_finalize_measure` must restore the primary voice's ending octave once an in-accord group closes (confirmed against `Children_s_Piece.ly`'s real, hand-verified octaves, cross-checked via `lilypond`'s own `\displayLilyMusic`/MIDI output). Additionally, the first note of a *new* in-accord voice (voice 2, 3, ...) is not "consecutive" with the previous voice's last note in Sec. 3.2.2's sense, so it must not go through the melodic-interval computation at all — it simply keeps whatever octave number was last set.
+5. Revisit `test_octave_persists_without_mark` — it will still pass under a correct implementation (C→D is under a fourth either way), but its name/comment currently reads as documentation of "always sticky," which is misleading; update the comment to reflect the real rule.
+6. Add unit tests for the case that surfaced this bug: an unmarked note whose letter, kept at the same octave, would be a fourth or more away in the wrong direction (descending C→B and the symmetric ascending B→C case), for both plain notes and chord base notes.
+7. Re-run the full suite to confirm no existing fixture/ground-truth `.ly` regresses — several existing fixtures likely have unmarked passages that happen to work under the old sticky logic and must still resolve to the same pitches under the corrected one. (`children_s_piece.brf`'s hand-authored ground truth, `instrumental_techniques_test.brf`, and the in-accord unit tests in `test_parser.py` all had genuinely wrong resolved octaves under the old sticky logic — confirmed correct under the fix by cross-checking `Children_s_Piece.ly` against real `lilypond` output, not just re-asserting whatever the parser happened to produce.)
+
+**Definition of Done:**
+- [x] Unmarked notes resolve to the nearest octave per BANA Sec. 3.2.2, not a sticky persisted value, for both plain notes and chord base notes.
+- [x] In-accord voices resolve octave continuity from the primary (first-written) voice, not whichever voice was written last.
+- [x] New unit tests cover the descending- and ascending-across-an-octave-boundary cases that motivated this ticket.
+- [x] Full existing test suite still passes; `test_octave_persists_without_mark`'s comment updated to describe the real rule rather than "always sticky."
+
+---
+
+### [ ] S8b-13: Fix duplicated `\set stanza` directive in strophic/multi-verse lyrics output (found via S8b-11)
+
+**Why:** While composing the S8b-11 strophic fixture, `strophic_song_test.ly`'s rendered `\new Lyrics` blocks came out as
+`\new Lyrics \lyricsto "vocals_soprano" { \set stanza = "1. " \set stanza = "1. " Ho -- ly A -- men }` —
+the `\set stanza = "1. "` directive is emitted **twice**. This isn't cosmetic: LilyPond accepts the duplicate silently (the second `\set` just re-applies the same value), so it doesn't break compilation, but it's dead/wrong markup that would confuse anyone hand-editing the `.ly` output, and it means the existing test suite has a real coverage gap around this exact case.
+
+Root cause: the stanza prefix gets added to the lyrics **twice**, in two different places, that don't know about each other:
+1. `EnsembleParser`'s stanza-prefix handling (`ensemble_parser.py`, around `extract_stanza_prefix` / the `remaining_syllables[0] = (f"\\set stanza = \"{prefix_val} \" {first_syl}", has_hyphen)` line) bakes the `\set stanza = "N. "` text directly into the *first syllable string* of `staff.verses[v_idx][0]` at parse time. This is confirmed intentional and covered by existing tests — `test_parse_strophic_multiverse_lyrics_and_refrain` and `test_parse_strophic_with_word_number_verse_prefixes` in `test_vocal.py` both assert `staff.verses[0] == ['\\set stanza = "1. " Ho --', ...]` directly.
+2. `Score.to_lilypond()` (three call sites: the single-staff lyrics branch, the single-instrument-family-run branch, and the multi-staff-group branch) and `OrchestraScore.to_lilypond()` (one call site) **each independently** recompute `prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "` from `staff.verse_prefixes` and prepend it again when joining `lyrics_content = prefix_str + " ".join(v)`.
+
+Since `staff.verse_prefixes` is only ever populated by `EnsembleParser` at the same time as the syllable-level bake-in (both set together, right before `staff.verses = mapped_verses`), the render-time `prefix_str` addition is *always* redundant whenever it fires — there's no case where verse_prefixes is set but the first syllable *doesn't* already carry the `\set stanza` text.
+
+This also explains why no existing test caught it: `test_vocal.py`'s `to_lilypond()` assertions (lines testing `test_parse_strophic_multiverse_lyrics_and_refrain` / `test_parse_strophic_with_word_number_verse_prefixes`) use loose `'\\set stanza = "1. " Ho -- ly ...' in ly_output` substring checks, which still pass even when that exact substring is preceded by a second, duplicate `\set stanza = "1. "` — a substring check can't detect an extra copy before it.
+
+**Steps:**
+1. Remove the redundant render-time `prefix_str` computation/prepending in all four call sites (`score.py`'s three, `orchestra_score.py`'s one), relying solely on the syllable text `EnsembleParser` already produced in `staff.verses`/`staff.lyrics`.
+2. Double check the `verses = staff.verses if staff.verses else [staff.lyrics]` fallback path (a staff with plain, non-strophic lyrics and no `verse_prefixes`): confirm it still renders with no `\set stanza` at all (unaffected, since `verse_prefixes` is empty there and the guard already skips `prefix_str`) — should not need any change, but verify with a test.
+3. Confirm `staff.verse_prefixes` isn't relied on anywhere else for something other than this now-removed render-time computation (e.g. reverse-direction `to_braille()` in Sprint 9 or the BRF writer) before deleting any of its call sites — if it's still needed elsewhere, only remove the four redundant `prefix_str` blocks, not the field itself.
+4. Update `test_vocal.py`'s loose substring assertions (`'\\set stanza = "1. " Ho -- ly \\set stanza = "Refrain. " A -- men' in ly_output` and similar) to assert the directive appears **exactly once** per verse — e.g. `ly_output.count('\\set stanza = "1. "') == 1` — so this exact regression can't silently reappear.
+5. Update `tests/test_strophic_integration.py::test_strophic_fixture_matches_ground_truth_ly`'s ground truth (`strophic_song_test.ly`) to drop the duplicate, and re-verify the fixture still compiles cleanly with the real `lilypond` binary.
+6. Re-run the full suite to confirm no other `.ly` ground-truth fixture with verse/stanza lyrics (there aren't others as of this writing besides `strophic_song_test.ly` and the inline `test_vocal.py` cases) regresses.
+
+**Definition of Done:**
+- [ ] `\set stanza = "N. "` (and `"Refrain. "`) appears exactly once per verse in rendered LilyPond output, never doubled.
+- [ ] `test_vocal.py`'s strophic assertions catch a doubled directive (not just loose substring containment).
+- [ ] `strophic_song_test.ly` ground truth updated and re-verified against a real `lilypond` compile.
+- [ ] Full existing test suite still passes.
 
 ---
 
@@ -6575,4 +6678,40 @@ Estimated time: 1–1.5 weeks.
 
 **Sprint 11c: BRF Reformatting & Malformed Input Robustness (future sprint)**
 - [ ] S11c-1: Add test cases and validator rules for malformed .brf music files, such as having measure numbers or notes in the left margins when the score is an ensemble score.
+- [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
+
+---
+
+### [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
+
+**Why:** To ensure that exported braille scores are fully compliant with standard BANA page layout and formatting guidelines, making them easy and natural for blind musicians to read using physical embossers or refreshable braille displays.
+
+**BANA Page Layout and Formatting Rules Compilation & Citations:**
+1. **Title Centering (MBC 2015, Part IV, Section 31.1 / Section 32.1)**
+   - The composition title must be centered as a literary heading on the first page of music. It must be centered within the page line width (default 40 cells) and have at least 3 blank cells on each side.
+2. **Key and Time Signature Placement (MBC 2015, Part I, Section 21 & Part IV, Section 31.5)**
+   - Key and time signatures must be written as a combined unit without any intervening spaces.
+   - In solo instrument formatting, the signature unit should be placed on a separate line indented by 8 spaces (starting in cell 9) directly below the title. If the signatures and initial tempo/expression markings are centered, they must have at least 3 blank cells on each side.
+3. **No Intervening Blank Lines (MBC 2015, Part IV, Section 32.2.1)**
+   - There must be no blank lines between the title/signature header line and the first line of the music.
+4. **Running Heads on Subsequent Pages (MBC 2015, Part IV, Section 32.1)**
+   - Centered running heads (abbreviated titles) are required on the first line of all braille pages following the first page of music.
+   - The running head must be centered and have at least 3 blank cells of separation from the print page numbers on the left and braille page numbers on the right.
+5. **Blank Line Preceding Headings (MBC 2015, Part IV, Section 32.2)**
+   - A blank line must precede the initial music heading of a composition, movement, or part, unless it starts at the top of a page immediately following a running head.
+6. **Spacing Between Parallels (MBC 2015, Part IV, Section 32.3)**
+   - Consecutive parallels must be separated by at least 1 blank line (for solo music) or 2 blank lines (for keyboard/organ music parallels).
+7. **Line Indentation and Run-overs (MBC 2015, Part I, Section 1.3 & Part II, Section 26.1 & Part III, Section 29.1)**
+   - In solo/bar-over-bar formats, main music lines start in cell 1, and run-over lines must be indented to cell 3.
+   - In vocal formats (line-by-line), lyrics lines start in cell 1, music lines are indented to cell 3 (indented by 2 spaces), and run-over lines of both are indented to cell 5 (indented by 4 spaces).
+
+**Definition of Done:**
+- [x] Braille export format strictly centers titles with at least 3 blank cells on each side.
+- [x] Key and time signatures are combined as a single unit without spaces.
+- [x] For solo formatting, signature lines are indented by 8 spaces (starting in cell 9) on the line below the title.
+- [x] No blank line is present between the signature/header line and the first music line.
+- [x] Multi-page exports include centered running heads on line 1 of page 2 onwards, padded by at least 3 blank cells from page numbers.
+- [x] Consecutive parallels are separated by exactly 1 blank line for solo scores and 2 blank lines for keyboard scores.
+- [x] Run-over lines are properly indented (to cell 3 for solo/keyboard, cell 5 for vocal).
+- [x] All unit and integration tests pass.
 

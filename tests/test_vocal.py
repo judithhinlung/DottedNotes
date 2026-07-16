@@ -207,16 +207,28 @@ def test_parse_strophic_multiverse_lyrics_and_refrain():
     # Verse 1: "Ho --", "ly", "A --", "men"
     # Verse 2: "Glo --", "ry", "A --", "men"
     # (Since system 2 is a single refrain line, it is replicated across all verses)
-    assert staff.verses[0] == ['\\set stanza = "1. " Ho --', 'ly', '\\set stanza = "Refrain. " A --', 'men']
-    assert staff.verses[1] == ['\\set stanza = "2. " Glo --', 'ry', '\\set stanza = "Refrain. " A --', 'men']
-    
+    # The leading "1."/"2." verse-number prefix is NOT baked into the first
+    # syllable -- it lives only in staff.verse_prefixes, and rendering adds
+    # the `\set stanza = "..."` directive from there exactly once (S8b-13).
+    # The refrain's "Refrain." label, however, is a *mid-stream* stanza
+    # change partway through the verse's lyrics, which rendering has no
+    # other way to express -- so that one is still baked into the syllable.
+    assert staff.verses[0] == ['Ho --', 'ly', '\\set stanza = "Refrain. " A --', 'men']
+    assert staff.verses[1] == ['Glo --', 'ry', '\\set stanza = "Refrain. " A --', 'men']
+
     assert staff.verse_prefixes == ["1.", "2."]
-    
+
     ly_output = score.to_lilypond()
-    
-    # Verify that the stanzas and stacked lyrics are output correctly
+
+    # Verify that the stanzas and stacked lyrics are output correctly, with
+    # each verse's leading stanza directive appearing exactly once (S8b-13
+    # regression check -- a loose substring check can't detect a doubled
+    # directive sitting in front of the very text it's checking for).
     assert '\\set stanza = "1. " Ho -- ly \\set stanza = "Refrain. " A -- men' in ly_output
     assert '\\set stanza = "2. " Glo -- ry \\set stanza = "Refrain. " A -- men' in ly_output
+    assert ly_output.count('\\set stanza = "1. "') == 1
+    assert ly_output.count('\\set stanza = "2. "') == 1
+    assert ly_output.count('\\set stanza = "Refrain. "') == 2
     assert '\\new Lyrics \\lyricsto "vocals_soprano"' in ly_output
     assert ly_output.count('\\new Lyrics \\lyricsto') == 2
 
@@ -237,9 +249,13 @@ def test_parse_strophic_with_word_number_verse_prefixes():
     staff = score.staves[0]
     
     assert staff.verse_prefixes == ["1.", "2."]
-    assert staff.verses[0] == ['\\set stanza = "1. " Ho --', 'ly']
-    assert staff.verses[1] == ['\\set stanza = "2. " Glo --', 'ry']
-    
+    # The verse-number prefix lives only in staff.verse_prefixes, not baked
+    # into the first syllable -- rendering adds it exactly once (S8b-13).
+    assert staff.verses[0] == ['Ho --', 'ly']
+    assert staff.verses[1] == ['Glo --', 'ry']
+
     ly_output = score.to_lilypond()
     assert '\\set stanza = "1. " Ho -- ly' in ly_output
     assert '\\set stanza = "2. " Glo -- ry' in ly_output
+    assert ly_output.count('\\set stanza = "1. "') == 1
+    assert ly_output.count('\\set stanza = "2. "') == 1

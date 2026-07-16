@@ -119,6 +119,7 @@ class Score:
         paper_size: Optional[str] = None,
         category_override: Optional[str] = None,
         format_overrides: Optional[dict] = None,
+        measure_numbers: bool = False,
     ) -> str:
         """Return a complete LilyPond document string for this score.
 
@@ -134,6 +135,11 @@ class Score:
         parsed *written* pitch into concert (sounding) pitch. Pass
         concert_pitch=False to emit written pitch as-is (e.g. for
         generating an individual player's part).
+
+        measure_numbers=True (S8-6) threads through to every staff's
+        Staff.to_lilypond(), prefixing each measure's line with a '% N'
+        comment giving its real BANA margin number. Defaults to off so
+        every existing ground-truth fixture test is unaffected.
         """
         from ..renderers.lilypond_formatter import LilyPondFormatter
         formatter = LilyPondFormatter()
@@ -180,13 +186,35 @@ class Score:
         if len(self.staves) == 1:
             staff = self.staves[0]
             anchor, start_midi = staff.relative_anchor()
-            staff_content = staff.to_lilypond(start_midi=start_midi)
+            staff_content = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
             if staff.lyrics and self.chord_names is not None:
-                raise NotImplementedError(
-                    "Chord symbols alongside lyrics (BANA Sec. 36) are not supported; "
-                    "Sec. 27 lead sheets are melody-only."
-                )
-            if staff.lyrics:
+                # BANA Sec. 36: a strophic song with lyrics, chords, and
+                # melody together (see strophic_song_parser.py) -- combines
+                # the chord-names-only and lyrics-only renderings below into
+                # one ChordNames + Voice + Lyrics stack.
+                relative_block = [f"    \\relative {anchor} {{", staff_content, '    }']
+                transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
+                voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
+                lyrics_lines = []
+                verses = staff.verses if staff.verses else [staff.lyrics]
+                for v_idx, v in enumerate(verses):
+                    prefix_str = ""
+                    if staff.verse_prefixes and v_idx < len(staff.verse_prefixes) and staff.verse_prefixes[v_idx]:
+                        prefix_str = f"\\set stanza = \"{staff.verse_prefixes[v_idx]} \" "
+                    lyrics_content = prefix_str + " ".join(v)
+                    lyrics_lines.append(f"    \\new Lyrics \\lyricsto \"{voice_name}\" {{ {lyrics_content} }}")
+                body = [
+                    "<<",
+                    "  " + self.chord_names.to_lilypond().replace('\n', '\n  '),
+                    "  \\new Staff <<",
+                    f"    \\new Voice = \"{voice_name}\" {{",
+                    *transposed,
+                    "    }",
+                    *lyrics_lines,
+                    "  >>",
+                    ">>",
+                ]
+            elif staff.lyrics:
                 relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
                 transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
                 voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
@@ -242,7 +270,7 @@ class Score:
                 if staff.lyrics:
                     relative_block = [
                         f"    \\relative {anchor} {{",
-                        staff.to_lilypond(start_midi=start_midi),
+                        staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers),
                         "    }",
                     ]
                     transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
@@ -266,7 +294,7 @@ class Score:
                 else:
                     relative_block = [
                         f"  \\relative {anchor} {{",
-                        staff.to_lilypond(start_midi=start_midi),
+                        staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers),
                         "  }",
                     ]
                     block_lines = [
@@ -282,7 +310,7 @@ class Score:
                     anchor, start_midi = staff.relative_anchor()
                     if staff.lyrics:
                         relative_block = [f"      \\relative {anchor} {{"]
-                        staff_ly = staff.to_lilypond(start_midi=start_midi)
+                        staff_ly = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
                         for line in staff_ly.splitlines():
                             relative_block.append("        " + line.strip())
                         relative_block.append("      }")
@@ -303,7 +331,7 @@ class Score:
                     else:
                         block_lines.append("  \\new Staff {")
                         relative_block = [f"    \\relative {anchor} {{"]
-                        staff_ly = staff.to_lilypond(start_midi=start_midi)
+                        staff_ly = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
                         for line in staff_ly.splitlines():
                             relative_block.append("      " + line.strip())
                         relative_block.append("    }")

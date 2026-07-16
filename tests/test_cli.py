@@ -39,6 +39,25 @@ def test_convert_writes_to_output_file(monkeypatch, tmp_path, capsys):
     assert captured.out == ""
 
 
+def test_convert_measure_numbers_option_omitted_matches_default(monkeypatch, tmp_path):
+    # Two full 4/4 measures, no flag: default output has no '%' comments.
+    brf_file = tmp_path / "two_measures.brf"
+    brf_file.write_text('⠐⠹⠹⠹⠹⠀⠱⠱⠱⠱⠀', encoding="utf-8")
+    out = tmp_path / "two_measures.ly"
+    _run_main(monkeypatch, ["convert", str(brf_file), str(out)])
+    assert '%' not in out.read_text(encoding="utf-8")
+
+
+def test_convert_measure_numbers_option_adds_comments(monkeypatch, tmp_path):
+    brf_file = tmp_path / "two_measures.brf"
+    brf_file.write_text('⠐⠹⠹⠹⠹⠀⠱⠱⠱⠱⠀', encoding="utf-8")
+    out = tmp_path / "two_measures.ly"
+    _run_main(monkeypatch, ["convert", str(brf_file), str(out), "--measure-numbers"])
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert '      % 1' in lines
+    assert '      % 2' in lines
+
+
 def test_convert_prints_to_stdout_when_no_output_given(monkeypatch, tmp_path, capsys):
     brf = _write_simple_brf(tmp_path)
     _run_main(monkeypatch, ["convert", str(brf)])
@@ -354,8 +373,12 @@ def test_e2e_conversion(monkeypatch, tmp_path):
 
 
 def test_cli_report_option(monkeypatch, tmp_path, capsys):
+    # First note of the piece has no octave mark at all -- a BANA reset
+    # point (S9b-3), always required regardless of melodic interval, so
+    # unaffected by BrailleParser._resolve_unmarked_octave's interval-based
+    # resolution (see test_validation_octave_marks_first_note).
     brf_file = tmp_path / "test_report.brf"
-    brf_file.write_text("⠐⠹⠞", encoding="utf-8")
+    brf_file.write_text("⠹", encoding="utf-8")
     _run_main(monkeypatch, ["convert", str(brf_file), "--report"])
     captured = capsys.readouterr()
     assert "Line 1: Measure 1: Missing octave mark" in captured.err

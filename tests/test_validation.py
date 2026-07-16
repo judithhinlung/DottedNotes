@@ -41,16 +41,19 @@ def test_validation_octave_marks_redundant_step():
 
 
 def test_validation_octave_marks_missing_leap():
-    # C4 then A4 (leap of 6th) without octave mark (⠐⠹ ⠞)
-    # C4 diatonic val = 4 * 7 + 0 = 28
-    # A4 diatonic val = 4 * 7 + 5 = 33
-    # Diff = 5 (6th), so mark is required.
+    # C4 then B, unmarked (⠐⠹ ⠞). A literal same-octave reading would be a
+    # 7th above (B4, diff=6) -- but BrailleParser._resolve_unmarked_octave
+    # (BANA Sec. 3.2.2) resolves this to the nearest reading instead: B3, a
+    # 2nd below C4 (diff=-1). Since the parser itself now guarantees an
+    # unmarked note is never actually a 6th+ away, there's nothing left for
+    # the validator to flag here -- see validator.py's _validate_octave_marks.
     brf = "⠐⠹⠞"
     score = parse_brf(brf)
+    assert score.staves[0].measures[0].notes[1].octave == 3
     validator = BANAValidator()
     result = validator.validate(score)
-    missing = [c for c in result.corrections if "Missing octave mark" in c.message and "interval of 6th" in c.message]
-    assert len(missing) == 1
+    missing = [c for c in result.corrections if "Missing octave mark" in c.message]
+    assert len(missing) == 0
 
 
 def test_validation_octave_marks_reset_points():
