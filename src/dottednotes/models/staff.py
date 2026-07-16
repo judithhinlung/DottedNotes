@@ -77,7 +77,12 @@ class Staff:
         start_midi = 12 * (octave + 1)  # MIDI pitch of C in that octave (C4 = 60)
         return f'c{marks}', start_midi
 
-    def to_lilypond(self, start_midi: int = 60, include_clef: bool = True) -> str:
+    def to_lilypond(
+        self,
+        start_midi: int = 60,
+        include_clef: bool = True,
+        measure_numbers: bool = False,
+    ) -> str:
         """Return indented LilyPond lines for all measures in relative mode,
         preceded by \\key / \\time / \\clef directives.
 
@@ -93,6 +98,14 @@ class Staff:
         OrchestraScore.to_lilypond() places \\clef in the \\score block's
         per-staff body instead of inside the named music variable -- see
         resolve_clef() for getting the same directive separately).
+
+        measure_numbers=True (S8-6) prefixes each measure's line with a
+        '% N' comment using the real parsed BANA margin number
+        (`Measure.number`), not a freshly-enumerated count, so it stays
+        correct for non-sequential cases like a 0-numbered pickup measure.
+        A consolidated run of whole-measure rests gets a '% N-M' range
+        comment instead of just the first measure's number. Defaults to
+        off so every existing ground-truth fixture test is unaffected.
         """
         header: list[str] = []
         if self.tempo is not None:
@@ -159,11 +172,17 @@ class Staff:
                     ly_str += f" {bar_ly}"
                 else:
                     ly_str += " |"
+                if measure_numbers:
+                    first_num, last_num = run[0].number, run[-1].number
+                    comment = f"% {first_num}" if first_num == last_num else f"% {first_num}-{last_num}"
+                    measure_lines.append(f'    {comment}')
                 measure_lines.append('    ' + ly_str)
                 i = j
             else:
                 m = self.measures[i]
                 ly_str, prev_midi = m.to_lilypond(prev_midi=prev_midi)
+                if measure_numbers:
+                    measure_lines.append(f'    % {m.number}')
                 measure_lines.append('    ' + ly_str)
                 i += 1
 

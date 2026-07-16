@@ -376,6 +376,78 @@ def test_staff_add_measure():
     assert len(staff.measures) == 1
 
 
+def _make_full_measure_rest():
+    return Rest(
+        dots=frozenset(),
+        category=SymbolCategory.REST,
+        raw_brl='⠀',
+        duration=Duration(value=1),
+        is_full_measure=True,
+    )
+
+
+def test_staff_to_lilypond_measure_numbers_off_by_default():
+    staff = Staff(name="right hand")
+    for n in (1, 2):
+        m = Measure(number=n)
+        m.add_note(_make_note('C', 4, 4))
+        staff.add_measure(m)
+    ly = staff.to_lilypond()
+    assert '%' not in ly
+
+
+def test_staff_to_lilypond_measure_numbers_on():
+    staff = Staff(name="right hand")
+    for n in (1, 2):
+        m = Measure(number=n)
+        m.add_note(_make_note('C', 4, 4))
+        staff.add_measure(m)
+    ly = staff.to_lilypond(measure_numbers=True)
+    lines = ly.splitlines()
+    assert '    % 1' in lines
+    assert '    % 2' in lines
+    # The comment must be its own line, never sharing a line with the
+    # measure's notes -- LilyPond's `%` comments out the rest of the line,
+    # so "% 1 c4 c4 |" on one line would silently drop the music.
+    assert not any(line.strip().startswith('%') and 'c4' in line for line in lines)
+
+
+def test_staff_to_lilypond_measure_numbers_pickup_uses_real_margin_number():
+    # A 0-numbered pickup measure (BANA convention) must show "% 0", not a
+    # freshly-enumerated "% 1".
+    staff = Staff(name="right hand")
+    pickup = Measure(number=0)
+    pickup.add_note(_make_note('C', 4, 4))
+    staff.add_measure(pickup)
+    m1 = Measure(number=1)
+    m1.add_note(_make_note('D', 4, 4))
+    staff.add_measure(m1)
+    ly = staff.to_lilypond(measure_numbers=True)
+    lines = ly.splitlines()
+    assert '    % 0' in lines
+    assert '    % 1' in lines
+
+
+def test_staff_to_lilypond_measure_numbers_rest_run_shows_range():
+    staff = Staff(name="right hand")
+    m1 = Measure(number=1)
+    m1.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m1)
+    for n in (2, 3, 4, 5):
+        m = Measure(number=n)
+        m.add_note(_make_full_measure_rest())
+        staff.add_measure(m)
+    m6 = Measure(number=6)
+    m6.add_note(_make_note('D', 4, 4))
+    staff.add_measure(m6)
+    ly = staff.to_lilypond(measure_numbers=True)
+    lines = ly.splitlines()
+    assert '    % 1' in lines
+    assert '    % 2-5' in lines
+    assert '    % 6' in lines
+    assert not any(line.strip() == '% 2' for line in lines)
+
+
 def test_score_add_staff():
     score = Score(title="Ode to Joy", composer="Beethoven")
     score.add_staff(Staff(name="right hand"))

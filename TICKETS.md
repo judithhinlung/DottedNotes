@@ -5788,6 +5788,27 @@ authorization to publish.
 
 ---
 
+### [ ] S8-6: Add `--measure-numbers` CLI option to emit measure-number comments in LilyPond output
+
+**Why:** Generated `.ly` files can run to hundreds of lines with no landmarks, which makes them slow to navigate with a screen reader once something needs fixing by hand (e.g. cross-referencing a `_validate_measure_beat_count` warning like "Measure 31: expected 4 beats but counted 3" back to the actual line in the output). A `% <number>` comment before each measure's line turns that into a direct search target. Developer-requested, in the spirit of S8-1's screen-reader-friendliness audit.
+
+**Steps:**
+1. Add a `--measure-numbers` boolean flag (`store_true`, alongside the existing `--compile`/`--verbose` flags) to the `convert` subcommand in `cli.py`, documented in `--help`.
+2. Thread a `measure_numbers: bool = False` parameter through `Score.to_lilypond()`, `OrchestraScore.to_lilypond()`, and `Staff.to_lilypond()`, defaulting to off everywhere so every existing `assert ly_output == ground_truth` fixture test (`fengyang_flower_drum.ly`, `vocal_test.ly`, `lead_sheet_test.ly`, etc.) is unaffected unless the flag is explicitly passed.
+3. In `Staff.to_lilypond()`'s `measure_lines` assembly loop, when the flag is on, prefix each emitted line with `% N` using the real `Measure.number` already tracked from parsing (`measure.number`, set via `_handle_measure_number`/`_next_measure_number_for` in `braille_parser.py`) — not a freshly-enumerated count — so the comment matches the actual BANA margin number from the source, including non-sequential cases like a `0`-numbered pickup measure.
+4. Handle the rest-run consolidation case: consecutive whole-measure rests are already merged onto a single line (the `run`/lookahead loop earlier in `Staff.to_lilypond()`), so a consolidated line spanning measures 12–15 needs a comment reflecting that range (e.g. `% 12-15`), not just the first measure's number.
+5. Decide (with the developer) whether lead-sheet `ChordNames` output (`chord_names.py`) also gets measure comments, since it renders on a separate track from the melody staff it's aligned to — out of scope if it turns out not to align cleanly.
+6. Write unit tests covering: a simple multi-measure staff with the flag on/off, a consolidated rest-run line producing a range comment, and a pickup/non-sequential-numbered fixture (e.g. reusing `lead_sheet_test.brf`'s measure-0 pickup) to confirm the real margin number is used, not a synthetic recount.
+7. Write a CLI integration test converting an existing fixture with `--measure-numbers` and asserting the expected `% N` comments appear at the right lines.
+
+**Definition of Done:**
+- [ ] `--measure-numbers` CLI option added to the `convert` command and documented in `--help`.
+- [ ] Default behavior (flag omitted) is byte-identical to current output — no existing ground-truth fixture test needs updating.
+- [ ] With the flag on, each measure line is preceded by a `% N` comment using the real parsed margin number, and consolidated rest-run lines show a range.
+- [ ] Unit and CLI integration tests pass.
+
+---
+
 # Sprint 8b: Advanced Braille Parsing Features
 
 Estimated time: 1.5–2 weeks.

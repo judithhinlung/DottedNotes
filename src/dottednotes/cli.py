@@ -183,7 +183,8 @@ def _run_convert(args: argparse.Namespace) -> None:
         else:
             rendered = score.to_lilypond(
                 category_override=category_override,
-                format_overrides=format_overrides
+                format_overrides=format_overrides,
+                measure_numbers=args.measure_numbers,
             )
 
         if args.compile and output_path is None:
@@ -250,6 +251,14 @@ def main() -> None:
         "--report",
         action="store_true",
         help="Print BANA correction/validation report to stderr",
+    )
+    convert_parser.add_argument(
+        "--measure-numbers",
+        action="store_true",
+        help="Prefix each measure's line in LilyPond output with a '%% N' "
+             "comment giving its real BANA margin number, for faster "
+             "screen-reader navigation back from a validation warning to "
+             "the line it refers to. Has no effect on .brf/.brl output.",
     )
     convert_parser.add_argument(
         "--compression",
