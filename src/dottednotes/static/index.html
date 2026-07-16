@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DottedNotes - Braille Music Translator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="glass-bg"></div>
+    <div class="app-container">
+        <header>
+            <h1>DottedNotes</h1>
+            <p class="subtitle">Bidirectional Braille Music Translator & Reformatting Engine</p>
+        </header>
+
+        <main>
+            <section class="card" aria-labelledby="form-heading">
+                <h2 id="form-heading" class="sr-only">Translation Settings</h2>
+                <form id="convert-form">
+                    <!-- File Upload Zone -->
+                    <div class="upload-zone" id="upload-zone">
+                        <label for="music-file" class="upload-label">
+                            <span class="upload-icon" aria-hidden="true">📤</span>
+                            <span class="upload-text">Choose a file or drag it here</span>
+                            <span class="upload-subtext">Supports .brf, .brl, .ly, .musicxml, .xml, .mxl</span>
+                        </label>
+                        <input type="file" id="music-file" name="file" required class="sr-only" aria-describedby="file-instructions">
+                        <p id="file-instructions" class="sr-only">Upload a braille music score (.brf/.brl), LilyPond score (.ly), or MusicXML file (.musicxml/.mxl).</p>
+                        <div id="file-name-display" class="file-name-display" aria-live="polite">No file selected</div>
+                    </div>
+
+                    <!-- Config Settings Grid -->
+                    <div class="settings-grid">
+                        <div class="form-group">
+                            <label for="target_format">Target Format</label>
+                            <select id="target_format" name="target_format">
+                                <option value="lilypond" selected>LilyPond (.ly, .pdf, .midi)</option>
+                                <option value="braille">Braille (.brf)</option>
+                                <option value="musicxml">MusicXML (.musicxml)</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="group-category">
+                            <label for="category">Layout Category</label>
+                            <select id="category" name="category">
+                                <option value="" selected>Default (Auto-detect / Standard)</option>
+                                <option value="Solo Piano">Solo Piano</option>
+                                <option value="Art Song">Art Song</option>
+                                <option value="Chamber">Chamber</option>
+                                <option value="Orchestral">Orchestral</option>
+                                <option value="Lead Sheet">Lead Sheet</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="group-compression">
+                            <label for="compression">Braille Compression</label>
+                            <select id="compression" name="compression">
+                                <option value="full" selected>Full Compression (BANA standard)</option>
+                                <option value="minimal">Minimal Compression</option>
+                                <option value="none">No Compression</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="profile">BANA Validation Profile</label>
+                            <select id="profile" name="profile">
+                                <option value="standard" selected>Standard Profile</option>
+                                <option value="strict">Strict Profile (Extra Checks)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Toggle & Overrides -->
+                    <details class="advanced-settings">
+                        <summary>Advanced Formatting Overrides</summary>
+                        <div class="form-group" style="margin-top: 1rem;">
+                            <label for="format_overrides">Overrides String</label>
+                            <input type="text" id="format_overrides" name="format_overrides" placeholder="e.g., paper_size=a4,margin_mm=12" aria-describedby="overrides-help">
+                            <p id="overrides-help" class="help-text">Comma-separated key=value pairs (paper_size, margin_mm, staff_size).</p>
+                        </div>
+                    </details>
+
+                    <button type="submit" class="btn-submit" id="submit-btn">
+                        <span>Translate Score</span>
+                        <div class="spinner sr-only" id="btn-spinner" aria-hidden="true"></div>
+                    </button>
+                </form>
+            </section>
+
+            <!-- ARIA Live Region for accessibility status announcements -->
+            <div id="status-announcement" class="sr-only" role="status" aria-live="polite"></div>
+
+            <!-- Result Section -->
+            <section class="card result-card hidden" id="result-section" aria-labelledby="result-heading">
+                <h2 id="result-heading">Translation Results</h2>
+                
+                <div class="result-status-bar" id="result-status-bar">
+                    <p>Status: <span id="status-badge" class="badge">Success</span></p>
+                </div>
+
+                <div class="download-container">
+                    <h3>Generated Downloads</h3>
+                    <div class="download-links" id="download-links">
+                        <!-- Populated by JavaScript -->
+                    </div>
+                </div>
+
+                <!-- LilyPond Compile Log -->
+                <div class="compile-log-container hidden" id="compile-log-container">
+                    <h3>LilyPond Compilation Report</h3>
+                    <pre class="compile-log" id="compile-log"></pre>
+                </div>
+            </section>
+
+            <!-- BANA Validation Section -->
+            <section class="card validation-card hidden" id="validation-section" aria-labelledby="validation-heading">
+                <h2 id="validation-heading">BANA Formatting Rule Report</h2>
+                <p class="validation-summary" id="validation-summary">No warnings or errors flagged.</p>
+                <div class="table-responsive">
+                    <table class="validation-table" id="validation-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Ref</th>
+                                <th scope="col">Rule ID</th>
+                                <th scope="col">Severity</th>
+                                <th scope="col">Message</th>
+                                <th scope="col">Suggestions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="validation-tbody">
+                            <!-- Populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>DottedNotes Web Service &copy; 2026. Made with care for accessible sheet music.</p>
+        </footer>
+    </div>
+</body>
+</html>
