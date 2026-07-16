@@ -4,8 +4,8 @@ import warnings
 from pathlib import Path
 
 import pytest
-from dottednotes.parser.ensemble_parser import EnsembleParser
 from dottednotes.parser.input_pipeline import BRLInputPipeline
+from dottednotes.parser.strophic_song_parser import parse_strophic_song
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -41,40 +41,65 @@ def test_strophic_fixture_parses_without_warnings():
     text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        EnsembleParser().parse(text)
+        parse_strophic_song(text)
     assert not caught, [str(w.message) for w in caught]
 
 
 def test_strophic_fixture_verses_and_refrain_match_expected():
     text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf")
-    score = EnsembleParser().parse(text)
+    score = parse_strophic_song(text)
 
-    soprano_staff = next(s for s in score.staves if s.name == "Soprano")
-    assert soprano_staff.verse_prefixes == ["1.", "2."]
-    # Verse 1's "Ho --" and verse 2's "Glo --" each carry a syllabic slur
-    # across the melody's first two notes (a melisma: one syllable held
-    # over two notes), and both verses share the same "A -- men" refrain,
-    # replicated from the second (unprefixed) system. The verse-number
-    # prefix lives only in verse_prefixes, not baked into the first
-    # syllable -- rendering adds the `\set stanza` directive exactly once
-    # (S8b-13).
-    assert soprano_staff.verses[0] == ['Ho --', 'ly', 'A --', 'men']
-    assert soprano_staff.verses[1] == ['Glo --', 'ry', 'A --', 'men']
+    staff = score.staves[0]
+    # Verse 1 has no prefix (BANA 35.7: "The numeral 1 is not shown in the
+    # braille even if it has been included in the print"); verse 2 (the
+    # "<#b">" overflow block) is prefixed "2.".
+    assert staff.verse_prefixes == [None, "2."]
+    # Verse 1's own text ("Fly away oh my friend, Please go quickly.") is
+    # followed by the refrain ("Go far away, please go far away."),
+    # replicated onto verse 2's own text ("Everyone has gone to sleep,
+    # Tarry no more.") via the bare trailing "REFRAIN" marker (BANA 35.7.2)
+    # -- reusing the already-parsed refrain syllables, not re-parsing them.
+    assert staff.verses[0] == [
+        "Fly", "away", "oh", "my", "friend,",
+        "Ple --", "ase", "go", "quickly.",
+        "Go", "far", "away,", "please", "go", "far", "away.",
+    ]
+    assert staff.verses[1] == [
+        "Everyone", "has", "gone", "to", "sleep,",
+        "Tar --", "ry", "no", "more.",
+        "Go", "far", "away,", "please", "go", "far", "away.",
+    ]
+
+
+def test_strophic_fixture_chords_match_expected():
+    # Verse 1's two chord lines (Bb over "Fly away oh my friend," and
+    # Bb/F7/Bb over "Please go quickly.") and the refrain's chord line
+    # (Eb/Bb/Bb over "Go far away, please go far away.") -- BANA 36.1
+    # aligns each chord's column to the syllable it's placed under, and
+    # that syllable's position pairs 1:1 (BANA 35.1) with a melody note.
+    text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf")
+    score = parse_strophic_song(text)
+
+    chords = [
+        (c.root, c.accidental, c.extensions) if c is not None else None
+        for _, c in score.chord_names.entries
+    ]
+    assert chords == [
+        ("B", "flat", []), ("B", "flat", []), None, None, None, None,
+        ("F", None, [(7, None)]), None, None,
+        ("B", "flat", []), None,
+        ("E", "flat", []), ("B", "flat", []), ("B", "flat", []),
+        None, None, None, None, None, None,
+    ]
 
 
 def test_strophic_fixture_matches_ground_truth_ly():
     text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf")
-    score = EnsembleParser().parse(text)
+    score = parse_strophic_song(text)
 
-    ly_output = score.to_lilypond()
+    ly_output = score.to_lilypond(category_override="Strophic Song")
     ground_truth = (FIXTURES / "strophic_song_test.ly").read_text(encoding="utf-8")
     assert ly_output == ground_truth
-    # S8b-13 regression check: each verse's stanza directive must appear
-    # exactly once -- a full-string equality check above would already
-    # catch a doubled directive, but an explicit count makes the intent
-    # unambiguous rather than relying on incidental ground-truth wording.
-    assert ly_output.count('\\set stanza = "1. "') == 1
-    assert ly_output.count('\\set stanza = "2. "') == 1
 
 
 def test_strophic_fixture_compiles_cleanly(tmp_path: Path):
@@ -82,10 +107,10 @@ def test_strophic_fixture_compiles_cleanly(tmp_path: Path):
         pytest.skip("lilypond binary not found; skipping compile test")
 
     text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf")
-    score = EnsembleParser().parse(text)
+    score = parse_strophic_song(text)
 
-    ly_output = score.to_lilypond()
-    assert '\\new Voice = "vocals_soprano"' in ly_output
-    assert '\\new Lyrics \\lyricsto "vocals_soprano"' in ly_output
+    ly_output = score.to_lilypond(category_override="Strophic Song")
+    assert '\\new ChordNames' in ly_output
+    assert '\\new Lyrics \\lyricsto' in ly_output
 
     _compile_and_check_no_warnings(ly_output, tmp_path, "strophic_song_test")

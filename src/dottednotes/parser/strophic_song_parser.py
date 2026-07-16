@@ -387,9 +387,16 @@ def parse_strophic_song(text: str) -> Score:
             # This group's first word is the "REFRAIN"/"CHORUS" label
             # itself (BANA 35.7.2), not a sung syllable -- it isn't paired
             # with a note-group at all, so exclude it from column matching.
+            # The chord line has no such label prefix of its own (chord
+            # lines never carry structural labels), so its column 0 lines
+            # up with the *label-free* lyric content's start, not with the
+            # lyric line's raw column 0 -- shift the remaining word columns
+            # down by the label's width so both lines share a zero-based
+            # frame.
             label, _ = _refrain_label(parse_lyrics(group.lyric_text))
-            if label is not None and word_columns:
-                word_columns = word_columns[1:]
+            if label is not None and len(word_columns) > 1:
+                label_width = word_columns[1]
+                word_columns = [wc - label_width for wc in word_columns[1:]]
         stripped_chord_line = group.chord_line.lstrip('⠀')
         col_shift = len(group.chord_line) - len(stripped_chord_line)
         for col, chord in parse_chord_symbol_line(stripped_chord_line):
