@@ -10,7 +10,7 @@ readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.9"
 dependencies = [
-    "music21>=9.1.0",
+    "music21>=8.3.0",
 ]
 
 [project.scripts]
