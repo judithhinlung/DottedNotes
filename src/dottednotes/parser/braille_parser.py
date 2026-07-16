@@ -1284,8 +1284,8 @@ class BrailleParser:
         # Pending types take priority; carried types fill in what isn't already present.
         pending_types = {a.type for a in self._pending_articulations}
         articulations = list(self._pending_articulations)
-        for art_type in self._active_articulations:
-            if art_type not in pending_types:
+        for art_type in ArticulationType:
+            if art_type in self._active_articulations and art_type not in pending_types:
                 # Carried articulations are not explicitly written in the source document
                 articulations.append(Articulation(type=art_type, explicit=False))
 
