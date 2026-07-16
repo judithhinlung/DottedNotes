@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .duration import TICKS_PER_QUARTER, ticks_to_lilypond_duration
 from .measure import Measure
 from .text_marking import TextMarking
 
@@ -77,6 +78,9 @@ class Staff:
             header.append('    ' + self.key_signature.to_lilypond())
         if self.time_signature is not None:
             header.append('    ' + self.time_signature.to_lilypond())
+            partial_ly = self._resolve_partial()
+            if partial_ly is not None:
+                header.append('    ' + partial_ly)
 
         if include_clef:
             clef_ly = self._resolve_clef()
@@ -148,6 +152,30 @@ class Staff:
         (e.g. OrchestraScore.to_lilypond(), which places \\clef in the
         \\score block rather than inside the named music variable)."""
         return self._resolve_clef()
+
+    def _resolve_partial(self) -> str | None:
+        """Return a `\\partial <duration>` directive if the first measure is
+        a pickup/anacrusis (shorter than a full measure per `time_signature`)
+        -- otherwise None. Without this, LilyPond's own bar-check flags every
+        downstream `|` as misplaced, since it assumes every measure is full
+        length unless told otherwise (Notation Reference, "Upbeats").
+
+        Silently omitted (no `\\partial`, keeping today's behavior) when the
+        first measure's length doesn't correspond to a single plain
+        (undotted/1-2-dot) note duration -- e.g. a pickup built from several
+        notes/rests whose sum isn't itself one note value -- rather than
+        emitting an approximate or guessed duration.
+        """
+        if self.time_signature is None or not self.measures:
+            return None
+        first_ticks = self.measures[0].total_ticks()
+        full_ticks = round(self.time_signature.beats_per_measure() * TICKS_PER_QUARTER)
+        if first_ticks <= 0 or first_ticks >= full_ticks:
+            return None
+        partial_ly = ticks_to_lilypond_duration(first_ticks)
+        if partial_ly is None:
+            return None
+        return f'\\partial {partial_ly}'
 
     def _resolve_clef(self) -> str | None:
         """Return the LilyPond clef directive string, or None if there are no notes."""

@@ -1941,46 +1941,18 @@ class BrailleParser:
 
         return resolved
 
-    def _item_ticks(self, item) -> int:
-        """Duration, in ticks, of a single measure item -- Note/Rest/Chord
-        read `.duration` directly; a Tuplet sums its own items recursively.
-
-        An AlternatingTremolo (S6-6) occupies only the FIRST item's written
-        duration -- BANA's printed duration describes the whole alternating
-        pair, which together take up one written note's worth of time, not
-        two (see models/tremolo.py's _repeat_count for the same reasoning)."""
-        if isinstance(item, Tuplet):
-            return sum(self._item_ticks(sub) for sub in item.items)
-        if isinstance(item, AlternatingTremolo):
-            return item.items[0].duration.duration_in_ticks()
-        return item.duration.duration_in_ticks()
-
     def _validate_measure_beat_count(self, measure: Measure) -> None:
         """Warn (plain text) if resolved beat count doesn't match the time signature.
 
         Compares in integer ticks (S5-8, TICKS_PER_QUARTER) for an exact
         match — no float-tolerance needed — but the warning message still
         shows beat-equivalent numbers (ticks / TICKS_PER_QUARTER) since
-        that's the unit performers and the developer think in.
+        that's the unit performers and the developer think in. Tick
+        accounting itself lives on `Measure.total_ticks()`, shared with
+        `Staff.to_lilypond()`'s `\\partial` emission for a pickup measure.
         """
         expected_ticks = round(self._time_signature.beats_per_measure() * TICKS_PER_QUARTER)
-        actual_ticks = 0
-        for item in measure.notes:
-            if isinstance(item, InAccord):
-                # An in-accord's voices all cover the same span (BANA 11.1/11.1.2
-                # require equal note value per side); use the longest voice so a
-                # malformed voice mismatch doesn't silently understate the count.
-                # A voice's own items can themselves be a Tuplet (found in
-                # Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl, S5b-9),
-                # hence the recursive _item_ticks rather than reading
-                # `.duration` straight off each part item.
-                if item.parts:
-                    actual_ticks += max(
-                        sum(self._item_ticks(n) for n in part)
-                        for part in item.parts
-                    )
-            else:
-                actual_ticks += self._item_ticks(item)
+        actual_ticks = measure.total_ticks()
         if actual_ticks != expected_ticks:
             warnings.warn(
                 f"Measure {measure.number}: expected "

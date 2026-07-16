@@ -5946,7 +5946,7 @@ Estimated time: 1.5–2 weeks.
 
 ---
 
-### [ ] S8b-9: Compose a lead-sheet test fixture + real-compile integration tests
+### [x] S8b-9: Compose a lead-sheet test fixture + real-compile integration tests
 
 **Why:** S8b-5 (lead-sheet chord symbols) only has unit- and parser-level tests today — string-equality checks in `test_chord_symbols.py` on isolated chord-symbol lines, never a full hand-authored `.brf` run through the real `lilypond` binary. This can't be folded into a combined fixture with the other S8b features (see S8b-10): a lead sheet is structurally just a melody line paired with a chord-symbol line (BANA Sec. 27's two-line parallel, `parse_lead_sheet()`), invoked via its own explicit code path (`--category "Lead Sheet"`, not the ensemble/solo parser) — there's no staff to hang bowing, pedal, breve, or glissando/mute off of in that format, so it needs its own fixture rather than a section of a larger one.
 
@@ -5963,8 +5963,8 @@ Estimated time: 1.5–2 weeks.
 - `test_cli_convert_lead_sheet_fixture_end_to_end` — drives the fixture through the actual CLI entry point (`dottednotes convert fixture.brf --category "Lead Sheet"`), complementing the existing inline-string CLI test (`test_cli.py::test_cli_convert_lead_sheet_category_routes_to_lead_sheet_parser`) with a real file and ground truth.
 
 **Definition of Done:**
-- [ ] Fixture `.brf` composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
-- [ ] Ground-truth `.ly` output confirmed by the developer.
+- [x] Fixture `.brf` composed and added to `tests/fixtures/`, with a `tests/fixtures/README.md` entry.
+- [x] Ground-truth `.ly` output confirmed by the developer.
 - [ ] `tests/test_lead_sheet_integration.py` written with the four tests above, all passing (compile test skips gracefully if `lilypond` isn't installed, per existing convention).
 
 ---

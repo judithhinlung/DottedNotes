@@ -20,7 +20,11 @@ class ChordNamesTrack:
     assumed to be in effect until it is cancelled by a new symbol") --
     to_lilypond() carries the last seen chord forward for those, and sets
     `\\set chordChanges = ##t` so LilyPond only prints the chord name where
-    it actually changes.
+    it actually changes. An entry with `chord=None` and no prior chord yet
+    (e.g. a pickup/anacrusis note before the lead sheet's first chord
+    symbol) renders as a spacer rest (`s<duration>`) instead -- LilyPond's
+    spacer rest is valid in chord mode as well as note mode, so this keeps
+    the entry's rhythmic slot without sounding a chord.
     """
     entries: list[tuple[Duration, ChordSymbol | None]] = field(default_factory=list)
 
@@ -30,9 +34,8 @@ class ChordNamesTrack:
         for duration, chord in self.entries:
             current = chord if chord is not None else last_chord
             if current is None:
-                raise ValueError(
-                    "ChordNamesTrack entry has no chord and no prior chord to hold over."
-                )
+                chords.append('s' + duration.to_lilypond())
+                continue
             last_chord = current
             chords.append(current.to_lilypond(duration=duration.to_lilypond()))
         body = ' '.join(chords)

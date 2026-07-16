@@ -110,7 +110,12 @@ class BrailleTokenizer:
     _NUMBER_SIGN: str = '⠼'       # U+283C  dots 3,4,5,6
     _SHARP_CELL: str = '⠩'        # U+2829  dots 1,4,6
 
-    def tokenize(self, text: str, at_line_start: bool = True) -> list[BrailleToken]:
+    def tokenize(
+        self,
+        text: str,
+        at_line_start: bool = True,
+        margin_numbers_use_number_sign: bool = False,
+    ) -> list[BrailleToken]:
         tokens: list[BrailleToken] = []
         line = 1
         i = 0
@@ -179,6 +184,28 @@ class BrailleTokenizer:
                     at_line_start = False
                     continue
                 # No digits found — fall through and process normally.
+            elif at_line_start and margin_numbers_use_number_sign and char == self._NUMBER_SIGN:
+                # Lead-sheet margin measure numbers (BANA Sec. 27) are written
+                # WITH the number-sign prefix, unlike plain-score margins
+                # above -- confirmed by the developer. Opt-in only
+                # (`margin_numbers_use_number_sign`) so solo/ensemble parsing
+                # keeps reading a line-start NUMBER_SIGN+digits run as a BANA
+                # Sec. 19 numeral repeat (the generic ⠼ handling below).
+                j = i + 1
+                digit_values = []
+                while j < len(text) and text[j] in LITERARY_DIGITS:
+                    digit_values.append(LITERARY_DIGITS[text[j]])
+                    j += 1
+                next_char = text[j] if j < len(text) else ''
+                if digit_values and next_char in (' ', '⠀', '\n', '\r', '\t', ''):
+                    number = int(''.join(str(d) for d in digit_values))
+                    tokens.append(BrailleToken(str(number), SymbolCategory.MEASURE_NUMBER, i, line))
+                    i = j
+                    while i < len(text) and text[i] == '⠀':
+                        i += 1
+                    at_line_start = False
+                    continue
+                # Not a margin number after all — fall through and process normally.
             at_line_start = False
 
             # --- word sign ⠜: clef (3–4 cells), dynamic, or literary text ---

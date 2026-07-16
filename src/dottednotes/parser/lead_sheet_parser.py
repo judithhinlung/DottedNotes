@@ -4,9 +4,11 @@ alternating per segment -- BANA 27.1: "a two-line parallel is used, and the
 chord symbols are brailled in a line below the music line...Every two-line
 parallel must begin a new segment."
 
-Scope: this module assumes strict alternation starting at physical line 0
-(melody, chords, melody, chords, ...) with no header lines above the first
-melody line, and a single (non-ensemble, non-chorded) melody staff --
+Scope: this module assumes an optional leading header line (key signature
+and/or time signature, no notes -- BANA's usual instrumental-header
+convention, matching the plain-solo-score header handled by
+`BrailleParser`), followed by strict alternation (melody, chords, melody,
+chords, ...) of a single (non-ensemble, non-chorded) melody staff --
 `BrailleParseError` is raised for anything else rather than guessing. There
 is no unambiguous structural marker (unlike the ensemble format's §33.2
 instrument-list header) to detect a lead sheet from raw content alone, so
@@ -28,22 +30,51 @@ from .chord_symbol_parser import parse_chord_symbol_line
 from .tokenizer import BrailleTokenizer
 
 
+_HEADER_ONLY_CATEGORIES = frozenset({
+    SymbolCategory.KEY_SIGNATURE,
+    SymbolCategory.TIME_SIGNATURE,
+    SymbolCategory.CLEF,
+})
+
+
+def _is_header_line(line: str) -> bool:
+    """True if `line` is a BANA instrumental header: key/time signature
+    (and/or clef) cells only, no notes -- so it precedes the melody/chord
+    alternation rather than being the first melody line."""
+    if not line.strip():
+        return False
+    tokens = BrailleTokenizer().tokenize(line)
+    # Leading/trailing blank cells tokenize as BAR_LINE (they're spacing, not
+    # a real bar line -- see bana_symbols.py's comment on '⠀'); ignore those
+    # when checking whether the rest of the line is header-only content.
+    content_tokens = [tok for tok in tokens if tok.character != '⠀']
+    return bool(content_tokens) and all(
+        tok.category in _HEADER_ONLY_CATEGORIES for tok in content_tokens
+    )
+
+
 def parse_lead_sheet(text: str) -> Score:
     """Parse a BANA Sec. 27 lead sheet into a Score with `chord_names` set."""
     lines = text.split('\n')
     while lines and lines[-1] == '':
         lines.pop()
+
+    header_lines: list[str] = []
+    while lines and _is_header_line(lines[0]):
+        header_lines.append(lines.pop(0))
+
     if len(lines) % 2 != 0 or not lines:
         raise BrailleParseError(
-            "Lead sheet input must be pairs of (melody line, chord-symbol "
-            f"line) per BANA Sec. 27.1; got {len(lines)} non-trailing-blank line(s)."
+            "Lead sheet input must be an optional header line followed by "
+            "pairs of (melody line, chord-symbol line) per BANA Sec. 27.1; "
+            f"got {len(lines)} non-trailing-blank line(s) after the header."
         )
 
     music_lines = lines[0::2]
     chord_lines = lines[1::2]
 
-    music_text = '\n'.join(music_lines)
-    tokens = BrailleTokenizer().tokenize(music_text)
+    music_text = '\n'.join(header_lines + music_lines)
+    tokens = BrailleTokenizer().tokenize(music_text, margin_numbers_use_number_sign=True)
     score = BrailleParser(tokens=tokens).parse()
 
     if len(score.staves) != 1:
@@ -55,17 +86,32 @@ def parse_lead_sheet(text: str) -> Score:
 
     # within-line column offsets, since BrailleToken.position is an absolute
     # index into the whole (multi-line) music_text, not a per-line column.
+    # tok.line counts physical lines of music_text (header lines included),
+    # so note_positions' line numbers are shifted back down to the logical
+    # (header-excluded) melody-line index used by `chord_lines` below.
+    header_count = len(header_lines)
     line_start: dict[int, int] = {}
-    offset = 0
+    offset = sum(len(h) + 1 for h in header_lines)  # +1 per '\n' joiner
     for idx, music_line in enumerate(music_lines, start=1):
-        line_start[idx] = offset
-        offset += len(music_line) + 1  # +1 for the '\n' joiner
+        line_start[header_count + idx] = offset
+        offset += len(music_line) + 1
 
-    note_positions: list[tuple[int, int]] = [
-        (tok.line, tok.position - line_start[tok.line])
-        for tok in tokens
-        if tok.category in (SymbolCategory.NOTE, SymbolCategory.REST)
-    ]
+    # A note's "first cell" (BANA 27.1's alignment point for the chord
+    # symbol below it) is its own cell, or -- when present -- the earliest
+    # of any octave-mark/accidental cells immediately preceding it on the
+    # same line, since those are part of the note's compound braille symbol,
+    # not separate content a chord could be aligned to.
+    _PREFIX_CATEGORIES = (SymbolCategory.OCTAVE_MARK, SymbolCategory.ACCIDENTAL)
+    note_positions: list[tuple[int, int]] = []
+    for idx, tok in enumerate(tokens):
+        if tok.category not in (SymbolCategory.NOTE, SymbolCategory.REST):
+            continue
+        first_cell = tok.position
+        j = idx - 1
+        while j >= 0 and tokens[j].line == tok.line and tokens[j].category in _PREFIX_CATEGORIES:
+            first_cell = tokens[j].position
+            j -= 1
+        note_positions.append((tok.line - header_count, first_cell - line_start[tok.line]))
 
     flat_notes: list[Note | Rest] = []
     for measure in staff.measures:
@@ -100,11 +146,14 @@ def parse_lead_sheet(text: str) -> Score:
                 )
             chord_for_note_index[max(candidates)] = chord
 
-    if flat_notes and 0 not in chord_for_note_index:
+    if flat_notes and not chord_for_note_index:
         raise BrailleParseError(
-            "Lead sheet's first note/rest has no coincident chord symbol "
-            "(BANA 27.1 requires a symbol at or before the first note)."
+            "Lead sheet has notes/rests but no chord symbols at all "
+            "(BANA 27.1 requires at least one)."
         )
+    # Note 0 itself may have no coincident chord -- e.g. a pickup/anacrusis
+    # note before the lead sheet's first chord symbol -- in which case
+    # ChordNamesTrack.to_lilypond() renders it as a spacer rest.
 
     entries: list[tuple[Duration, ChordSymbol | None]] = [
         (note.duration, chord_for_note_index.get(gi))

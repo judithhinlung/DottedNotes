@@ -165,13 +165,14 @@ def test_chord_names_track_holds_over_repeated_chord():
     assert '\\set chordChanges = ##t' in ly
 
 
-def test_chord_names_track_raises_without_any_chord():
+def test_chord_names_track_renders_spacer_rest_without_any_chord():
+    # A pickup/anacrusis note before the lead sheet's first chord symbol
+    # (BANA 27.1) has nothing to hold over -- rendered as a spacer rest
+    # ('s', valid in LilyPond chord mode as well as note mode) rather than
+    # raising, so the ChordNames context stays rhythmically aligned with
+    # the melody staff above it.
     track = ChordNamesTrack(entries=[(Duration(value=4), None)])
-    try:
-        track.to_lilypond()
-        assert False, "expected ValueError"
-    except ValueError:
-        pass
+    assert track.to_lilypond().count('s4') == 1
 
 
 # --- Full lead-sheet pipeline (S8b-5 DoD: "verify correct alignment") ---
@@ -217,15 +218,31 @@ def test_lead_sheet_requires_even_number_of_lines():
         pass
 
 
-def test_lead_sheet_requires_chord_symbol_under_first_note():
+def test_lead_sheet_pickup_note_without_chord_renders_as_spacer():
     blank = u(' ')
     # Two segments (music/chords line pairs): the first segment's chord
-    # line is entirely blank (no chord symbol at all for its note), so the
-    # very first melody note ends up with nothing to hold over.
+    # line is entirely blank (no chord symbol at all for its note) -- a
+    # pickup/anacrusis note with no coincident or preceding chord symbol,
+    # same shape as tests/fixtures/lead_sheet_test.brf's opening pickup.
     music_line_1 = '⠽'
     chords_line_1 = blank
     music_line_2 = '⠵' + '⠣⠅'
     chords_line_2 = u(',DM')
+    text = '\n'.join([music_line_1, chords_line_1, music_line_2, chords_line_2]) + '\n'
+    score = parse_lead_sheet(text)
+    assert score.chord_names.entries[0][1] is None
+    ly = score.chord_names.to_lilypond()
+    assert '\\chordmode { s1 d1:m }' in ly
+
+
+def test_lead_sheet_requires_at_least_one_chord_symbol():
+    blank = u(' ')
+    # Every chord line is blank -- no chord symbol anywhere in the piece,
+    # unlike the pickup-only case above.
+    music_line_1 = '⠽'
+    chords_line_1 = blank
+    music_line_2 = '⠵' + '⠣⠅'
+    chords_line_2 = blank
     text = '\n'.join([music_line_1, chords_line_1, music_line_2, chords_line_2]) + '\n'
     try:
         parse_lead_sheet(text)

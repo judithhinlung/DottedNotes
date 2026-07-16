@@ -22,6 +22,21 @@ _BAR_LINE_TO_LY: dict[str, str] = {
 }
 
 
+def _item_ticks(item: MeasureItem) -> int:
+    """Duration, in ticks, of a single measure item -- Note/Rest/Chord read
+    `.duration` directly; a Tuplet sums its own items recursively.
+
+    An AlternatingTremolo (S6-6) occupies only the FIRST item's written
+    duration -- BANA's printed duration describes the whole alternating
+    pair, which together take up one written note's worth of time, not two
+    (see models/tremolo.py's _repeat_count for the same reasoning)."""
+    if isinstance(item, Tuplet):
+        return sum(_item_ticks(sub) for sub in item.items)
+    if isinstance(item, AlternatingTremolo):
+        return item.items[0].duration.duration_in_ticks()
+    return item.duration.duration_in_ticks()
+
+
 @dataclass
 class Measure:
     number: int
@@ -40,6 +55,28 @@ class Measure:
 
     def add_note(self, note: MeasureItem) -> None:
         self.notes.append(note)
+
+    def total_ticks(self) -> int:
+        """Sum this measure's resolved duration, in ticks (quarter = TICKS_PER_QUARTER).
+
+        Shared by `BrailleParser._validate_measure_beat_count` (S5-8) and
+        `Staff.to_lilypond()`'s `\\partial` emission for a pickup/anacrusis
+        first measure, so both use one tick-accounting rule.
+        """
+        total = 0
+        for item in self.notes:
+            if isinstance(item, InAccord):
+                # An in-accord's voices all cover the same span (BANA 11.1/
+                # 11.1.2 require equal note value per side); use the longest
+                # voice so a malformed voice mismatch doesn't silently
+                # understate the count.
+                if item.parts:
+                    total += max(
+                        sum(_item_ticks(n) for n in part) for part in item.parts
+                    )
+            else:
+                total += _item_ticks(item)
+        return total
 
     def to_lilypond(self, prev_midi: int = 60) -> tuple[str, int]:
         """Return (lilypond_str, last_midi) for this measure in relative mode.

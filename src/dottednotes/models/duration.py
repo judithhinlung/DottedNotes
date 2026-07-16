@@ -52,3 +52,17 @@ class Duration:
         if self.is_triplet:
             ticks = ticks * 2 // 3
         return ticks
+
+
+def ticks_to_lilypond_duration(ticks: int) -> str | None:
+    """Inverse of `Duration.duration_in_ticks()`: the plain (non-triplet)
+    LilyPond duration string for an exact tick count, e.g. `\\partial`'s
+    argument for a pickup measure (`Staff.to_lilypond()`). Returns None if
+    no single plain duration (0-2 dots) matches exactly, rather than
+    guessing a tied/compound approximation.
+    """
+    for value in (1, 2, 4, 8, 16, 32, 64):
+        for dots in (0, 1, 2):
+            if Duration(value=value, dots=dots).duration_in_ticks() == ticks:
+                return Duration(value=value, dots=dots).to_lilypond()
+    return None
