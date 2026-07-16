@@ -1,6 +1,10 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .note import Note
+    from .time_signature import TimeSignature
+    from .key_signature import KeySignature
 
 
 @dataclass
@@ -19,6 +23,28 @@ class InAccord:
 
     parts: list[list] = field(default_factory=list)
     in_accord_type: str = 'full_measure'
+
+    def to_braille(
+        self,
+        prev_note: Optional["Note"] = None,
+        is_measure_start: bool = False,
+        time_signature: Optional["TimeSignature"] = None,
+        key_signature: Optional["KeySignature"] = None,
+        compression_level: str = "full",
+    ) -> str:
+        sep = {
+            'full_measure': '⠣⠜',
+            'part_measure': '⠐⠂',
+            'measure_division': '⠨⠅',
+        }.get(self.in_accord_type, '⠣⠜')
+
+        from .measure import _render_note_list_to_braille
+        part_strs = []
+        for idx, part in enumerate(self.parts):
+            curr_prev = prev_note if idx == 0 else None
+            curr_measure_start = is_measure_start if idx == 0 else True
+            part_strs.append(_render_note_list_to_braille(part, curr_prev, curr_measure_start, time_signature, key_signature, compression_level))
+        return sep.join(part_strs)
 
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Render as LilyPond simultaneous voices.

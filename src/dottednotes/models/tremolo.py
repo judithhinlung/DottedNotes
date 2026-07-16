@@ -22,6 +22,14 @@ class RepeatedTremolo:
         return f':{self.subdivision}'
 
 
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .note import Note
+    from .time_signature import TimeSignature
+    from .key_signature import KeySignature
+
+
 @dataclass
 class AlternatingTremolo:
     """Alternating-note tremolo (BANA 14.3): alternation between two notes
@@ -63,3 +71,36 @@ class AlternatingTremolo:
             parts.append(s)
         inner = ' '.join(parts)
         return f'\\repeat tremolo {count} {{ {inner} }}', cur_midi
+
+    def to_braille(
+        self,
+        prev_note: Optional["Note"] = None,
+        is_measure_start: bool = False,
+        time_signature: Optional["TimeSignature"] = None,
+        key_signature: Optional["KeySignature"] = None,
+    ) -> str:
+        from dottednotes.bana_symbols import TREMOLO_ALTERNATING_VALUE_CELLS
+        _ALT_TREM_TO_BRL = {v: k for k, v in TREMOLO_ALTERNATING_VALUE_CELLS.items()}
+
+        alt_sign = '⠨' + _ALT_TREM_TO_BRL[self.subdivision]
+
+        first_kwargs = {
+            'prev_note': prev_note,
+            'is_measure_start': is_measure_start,
+            'time_signature': time_signature,
+            'key_signature': key_signature,
+            'tremolo_str': alt_sign,
+        }
+        first_brl = self.items[0].to_braille(**first_kwargs)
+
+        ref_note = self.items[0].notes[0] if hasattr(self.items[0], 'notes') and self.items[0].notes else self.items[0]
+
+        second_kwargs = {
+            'prev_note': ref_note,
+            'is_measure_start': False,
+            'time_signature': time_signature,
+            'key_signature': key_signature,
+        }
+        second_brl = self.items[1].to_braille(**second_kwargs)
+
+        return first_brl + second_brl

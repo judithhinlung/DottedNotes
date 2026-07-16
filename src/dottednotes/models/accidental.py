@@ -30,3 +30,16 @@ class Accidental(BrailleSymbol):
     def to_lilypond(self) -> str:
         """Return LilyPond accidental suffix e.g. 'is', 'es', 'isis'"""
         return ACCIDENTAL_TO_LILYPOND_SUFFIX[self.type]
+
+    def to_braille(self) -> str:
+        if self.type == AccidentalType.SHARP:
+            return '⠩'
+        elif self.type == AccidentalType.FLAT:
+            return '⠣'
+        elif self.type == AccidentalType.NATURAL:
+            return '⠡'
+        elif self.type == AccidentalType.DOUBLE_SHARP:
+            return '⠩⠩'
+        elif self.type == AccidentalType.DOUBLE_FLAT:
+            return '⠣⠣'
+        return ''

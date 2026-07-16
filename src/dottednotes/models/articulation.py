@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -35,9 +35,33 @@ _ARTICULATION_TO_LILYPOND = {
 }
 
 
+_ARTICULATION_TO_BRL = {
+    ArticulationType.STACCATO: '⠦',
+    ArticulationType.STACCATISSIMO: '⠠⠦',
+    ArticulationType.MEZZO_STACCATO: '⠐⠦',
+    ArticulationType.TENUTO: '⠸⠦',
+    ArticulationType.ACCENT: '⠨⠦',
+    ArticulationType.EXPRESSIVE_ACCENT: '⠘⠦',
+    ArticulationType.SWELL: '⠤⠄',
+    ArticulationType.DOWN_BOW: '⠣⠃',
+    ArticulationType.STOPPED: '⠣⠃',
+    ArticulationType.UP_BOW: '⠣⠄',
+    ArticulationType.OPEN: '⠅',
+}
+
+
 @dataclass
 class Articulation:
     type: ArticulationType
+    # Whether the source BRF wrote this articulation explicitly vs. it being
+    # carried forward from parser state. Presentation-only bookkeeping, not a
+    # musical attribute -- excluded from equality so Note.musical_equals()
+    # (used for measure-repeat compression) isn't tripped up by two otherwise
+    # identical notes differing only in how their articulation got there.
+    explicit: bool = field(default=True, compare=False)
 
     def to_lilypond(self) -> str:
         return _ARTICULATION_TO_LILYPOND[self.type]
+
+    def to_braille(self) -> str:
+        return _ARTICULATION_TO_BRL[self.type]

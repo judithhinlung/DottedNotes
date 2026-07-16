@@ -10,6 +10,7 @@ This directory holds `.brf` braille music files used as test inputs.
 | Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf | String Quartet No. 1 in F, Movement 1 | Ludwig van Beethoven | String quartet | MusicXML from braillemuse.net, transcribed via their system |
 | Faure_Gabriel_Morceau_de_Concours.brf | Morceau de Concours | Gabriel Fauré | Flute and piano | IMSLP (PDF → MusicXML via PlayScore2, transcribed via braillemuse.net) |
 | lead_sheet_test.brf | (untitled exercise) | Judith Lung | Melody + chord symbols (BANA Sec. 27 lead sheet) | Developer-authored, S8b-9 |
+| dichterliebe01.musicxml | Dichterliebe, Op. 48, No. 1 (Im wunderschönen Monat Mai) | Robert Schumann | Voice and piano | [MusicXML Example Set](https://www.musicxml.com/music-in-musicxml/example-set/) |
 
 ## Notes
 
@@ -31,3 +32,4 @@ This directory holds `.brf` braille music files used as test inputs.
   the first cell of the melody note it accompanies. Paired with
   `lead_sheet_test.ly` as its confirmed ground truth
   (tests/test_lead_sheet_integration.py).
+- `dichterliebe01.musicxml` is a MusicXML file containing the first song of Schumann's *Dichterliebe*, sourced from the MusicXML example set and used for testing MusicXML import/parsing integration.

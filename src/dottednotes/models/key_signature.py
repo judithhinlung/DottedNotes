@@ -25,6 +25,24 @@ KEY_TO_LILYPOND: dict[int, tuple[str, str]] = {
 }
 
 
+_KEY_TO_BRL = {
+    1: '⠩',
+    2: '⠩⠩',
+    3: '⠩⠩⠩',
+    4: '⠼⠙⠩',
+    5: '⠼⠑⠩',
+    6: '⠼⠋⠩',
+    7: '⠼⠛⠩',
+    -1: '⠣',
+    -2: '⠣⠣',
+    -3: '⠣⠣⠣',
+    -4: '⠼⠙⠣',
+    -5: '⠼⠑⠣',
+    -6: '⠼⠋⠣',
+    -7: '⠼⠛⠣',
+}
+
+
 @dataclass
 class KeySignature(BrailleSymbol):
     """A key signature.
@@ -49,3 +67,6 @@ class KeySignature(BrailleSymbol):
         """Return a LilyPond key directive, e.g. '\\key g \\major'."""
         note, mode = KEY_TO_LILYPOND[self.sharps_or_flats]
         return f'\\key {note} \\{mode}'
+
+    def to_braille(self) -> str:
+        return _KEY_TO_BRL.get(self.sharps_or_flats, '')

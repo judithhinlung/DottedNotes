@@ -37,6 +37,17 @@ class TimeSignature(BrailleSymbol):
     def to_lilypond(self) -> str:
         return f'\\time {self.numerator}/{self.denominator}'
 
+    def to_braille(self) -> str:
+        _INT_TO_UPPER_DIGIT = {
+            1: '⠁', 2: '⠃', 3: '⠉', 4: '⠙', 5: '⠑', 6: '⠋', 7: '⠛', 8: '⠓', 9: '⠊', 0: '⠚'
+        }
+        _INT_TO_LOWER_DIGIT = {
+            1: '⠂', 2: '⠆', 3: '⠒', 4: '⠲', 5: '⠢', 6: '⠖', 7: '⠶', 8: '⠦', 9: '⠔', 0: '⠴'
+        }
+        num_str = "".join(_INT_TO_UPPER_DIGIT[int(d)] for d in str(self.numerator))
+        den_str = "".join(_INT_TO_LOWER_DIGIT[int(d)] for d in str(self.denominator))
+        return '⠼' + num_str + den_str
+
     def as_tuple(self) -> tuple[int, int]:
         """Return (numerator, denominator) for legacy-code compatibility."""
         return (self.numerator, self.denominator)

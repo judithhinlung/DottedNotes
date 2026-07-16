@@ -1,6 +1,9 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
+from typing import Optional, TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .time_signature import TimeSignature
+    from .key_signature import KeySignature
 
 from .duration import Duration
 from .note import Note
@@ -22,9 +25,90 @@ class Chord:
 
     notes: list[Note] = field(default_factory=list)
 
+    def musical_equals(self, other: Any) -> bool:
+        if not isinstance(other, Chord):
+            return False
+        if len(self.notes) != len(other.notes):
+            return False
+        return all(n1.musical_equals(n2) for n1, n2 in zip(self.notes, other.notes))
+
     @property
     def duration(self) -> Duration:
         return self.notes[0].duration
+
+    def to_braille(
+        self,
+        prev_note: Optional[Note] = None,
+        is_measure_start: bool = False,
+        time_signature: Optional["TimeSignature"] = None,
+        key_signature: Optional["KeySignature"] = None,
+        is_16th_run_continuation: bool = False,
+        tremolo_format: str = "single",
+        tremolo_str: str = "",
+    ) -> str:
+        written = self.notes[0]
+        written._is_chord_written_note = True
+
+        # Calculate intervals
+        descending = False
+        if len(self.notes) > 1:
+            descending = self.notes[1]._midi_pitch() < self.notes[0]._midi_pitch()
+
+        from dottednotes.bana_symbols import INTERVAL_CELLS
+
+        PITCH_CLASS_TO_DIATONIC = {'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6}
+        _DIATONIC_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+        _INTERVAL_TO_BRL = {v: k for k, v in INTERVAL_CELLS.items()}
+        _OCTAVE_TO_BRL = {1: '⠈', 2: '⠘', 3: '⠸', 4: '⠐', 5: '⠨', 6: '⠰', 7: '⠠'}
+
+        written_diatonic = written.octave * 7 + PITCH_CLASS_TO_DIATONIC[written.note_name]
+
+        interval_strs = []
+        for n in self.notes[1:]:
+            curr_diatonic = n.octave * 7 + PITCH_CLASS_TO_DIATONIC[n.note_name]
+            steps = abs(curr_diatonic - written_diatonic)
+
+            # Accidental
+            acc_brl = ""
+            sharps_or_flats = key_signature.sharps_or_flats if key_signature else 0
+            from dottednotes.parser.braille_parser import _key_sig_accidental
+            default_acc_type = _key_sig_accidental(n.note_name, sharps_or_flats)
+
+            actual_acc_type = n.accidental.type if n.accidental else None
+            if actual_acc_type != default_acc_type:
+                acc_brl = n.accidental.to_braille() if n.accidental else '⠡'
+
+            # Octave mark override
+            written_index = _DIATONIC_NOTES.index(written.note_name)
+            raw = written_index - steps if descending else written_index + steps
+            calc_octave = written.octave + (raw // 7)
+
+            oct_brl = ""
+            if n.octave != calc_octave:
+                oct_brl = _OCTAVE_TO_BRL.get(n.octave, '')
+
+            # Interval cell. Note: steps == 0 (a unison) falls through to the
+            # octave-interval cell here; no distinct BANA unison sign was found
+            # in bana_symbols.py or docs/bana_reference.md, so this is a known
+            # limitation pending BANA manual lookup rather than a guessed fix.
+            int_cell = _INTERVAL_TO_BRL[((steps - 1) % 7) + 2]
+
+            # Fingering
+            f_brl = "".join(f.to_braille() for f in n.fingerings)
+
+            interval_strs.append(acc_brl + oct_brl + int_cell + f_brl)
+
+        # Render written note, passing the interval string
+        written_brl = written.to_braille(
+            prev_note=prev_note,
+            is_measure_start=is_measure_start,
+            time_signature=time_signature,
+            is_16th_run_continuation=is_16th_run_continuation,
+            tremolo_format=tremolo_format,
+            intervals_str="".join(interval_strs),
+            tremolo_str=tremolo_str,
+        )
+        return written_brl
 
     def to_lilypond(self) -> str:
         """Return LilyPond chord string in absolute mode, e.g. '<c ees>4'."""

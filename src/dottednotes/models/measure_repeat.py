@@ -4,6 +4,8 @@ import copy
 import warnings
 from dataclasses import dataclass
 
+from dottednotes.bana_symbols import MEASURE_REPEAT_CELL
+
 
 @dataclass
 class MeasureRepeat:
@@ -20,6 +22,9 @@ class MeasureRepeat:
     """
     count: int
     line: int
+
+    def to_braille(self) -> str:
+        return MEASURE_REPEAT_CELL * self.count
 
     def expand(self, source: list, source_line: int | None = None) -> list:
         """Return `count` deep copies of `source`, concatenated.

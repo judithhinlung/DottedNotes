@@ -9,7 +9,9 @@ description = "Braille music to LilyPond converter"
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.9"
-dependencies = []
+dependencies = [
+    "music21>=8.3.0",
+]
 
 [project.scripts]
 dottednotes = "dottednotes.cli:main"

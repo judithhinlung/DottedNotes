@@ -118,7 +118,8 @@ def _parse_format(format_str: str) -> dict:
 
 
 def _run_convert(args: argparse.Namespace) -> None:
-    text = BRLInputPipeline().load(args.input)
+    input_path = Path(args.input)
+    is_musicxml_input = input_path.suffix.lower() in (".musicxml", ".xml", ".mxl")
 
     category_override = args.category
     valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet"}
@@ -131,33 +132,71 @@ def _run_convert(args: argparse.Namespace) -> None:
     if args.format is not None:
         format_overrides = _parse_format(args.format)
 
-    if args.verbose:
-        _print_verbose_trace(args.input, text)
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            score = _parse_score(text, category_override=category_override)
-        for w in caught:
-            print(f"Warning: {w.message}", file=sys.stderr)
+    if is_musicxml_input:
+        from dottednotes.parser.musicxml_parser import load_musicxml
+        score = load_musicxml(args.input)
+        text = ""
     else:
-        score = _parse_score(text, category_override=category_override)
+        text = BRLInputPipeline().load(args.input)
+        if args.verbose:
+            _print_verbose_trace(args.input, text)
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                score = _parse_score(text, category_override=category_override)
+            for w in caught:
+                print(f"Warning: {w.message}", file=sys.stderr)
+        else:
+            score = _parse_score(text, category_override=category_override)
 
-    rendered = score.to_lilypond(
-        category_override=category_override,
-        format_overrides=format_overrides
-    )
+    if getattr(args, 'report', False):
+        from dottednotes.validation.validator import BANAValidator
+        validator = BANAValidator(profile=args.profile)
+        result = validator.validate(score, raw_brl_text=text)
+        for c in result.corrections:
+            msg = ""
+            if c.line_number > 0:
+                msg += f"Line {c.line_number}: "
+            if c.measure_number > 0:
+                msg += f"Measure {c.measure_number}: "
+            msg += c.message
+            print(msg, file=sys.stderr)
 
     output_path = args.output
-    if args.compile and output_path is None:
-        # lilypond compiles a file, not stdin -- an output path is required
-        # to compile even when the caller didn't ask to keep the .ly file.
-        tmp_dir = Path(tempfile.mkdtemp(prefix="dottednotes-"))
-        output_path = str(tmp_dir / (Path(args.input).stem + ".ly"))
+    is_musicxml_output = output_path is not None and Path(output_path).suffix.lower() in (".musicxml", ".mxl", ".xml")
+    is_braille_output = output_path is not None and Path(output_path).suffix.lower() in (".brf", ".brl")
 
-    if output_path:
-        Path(output_path).write_text(rendered, encoding="utf-8")
+    if is_musicxml_output:
+        if args.compile:
+            raise DottedNotesError(
+                "--compile requires LilyPond (.ly) output, not a .musicxml/.mxl output path."
+            )
+        from dottednotes.renderers.musicxml_renderer import export_musicxml
+        export_musicxml(score, output_path)
         print(f"Written to {output_path}", file=sys.stderr)
     else:
-        print(rendered)
+        if is_braille_output:
+            if args.compile:
+                raise DottedNotesError(
+                    "--compile requires LilyPond (.ly) output, not a .brf/.brl output path."
+                )
+            rendered = score.to_braille(compression_level=args.compression)
+        else:
+            rendered = score.to_lilypond(
+                category_override=category_override,
+                format_overrides=format_overrides
+            )
+
+        if args.compile and output_path is None:
+            # lilypond compiles a file, not stdin -- an output path is required
+            # to compile even when the caller didn't ask to keep the .ly file.
+            tmp_dir = Path(tempfile.mkdtemp(prefix="dottednotes-"))
+            output_path = str(tmp_dir / (Path(args.input).stem + ".ly"))
+
+        if output_path:
+            Path(output_path).write_text(rendered, encoding="utf-8")
+            print(f"Written to {output_path}", file=sys.stderr)
+        else:
+            print(rendered)
 
     if args.compile:
         _compile_with_lilypond(Path(output_path))
@@ -181,7 +220,10 @@ def main() -> None:
     )
     convert_parser.add_argument("input", help="Path to a .brf or .brl braille music file")
     convert_parser.add_argument(
-        "output", nargs="?", help="Output .ly file path (default: stdout)"
+        "output", nargs="?",
+        help="Output file path (default: stdout, as LilyPond). A .ly path (or "
+             "no path) produces LilyPond; a .brf/.brl path produces compressed "
+             "braille instead (see --compression).",
     )
     convert_parser.add_argument(
         "--compile",
@@ -203,6 +245,24 @@ def main() -> None:
     convert_parser.add_argument(
         "--format",
         help="Comma-separated formatting overrides (e.g. paper_size=a4,margin_mm=12)",
+    )
+    convert_parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Print BANA correction/validation report to stderr",
+    )
+    convert_parser.add_argument(
+        "--compression",
+        choices=["none", "minimal", "full"],
+        default="full",
+        help="Set repeat and shorthand compression level (none, minimal, full) "
+             "for .brf/.brl output; has no effect on .ly output",
+    )
+    convert_parser.add_argument(
+        "--profile",
+        choices=["standard", "strict"],
+        default="standard",
+        help="Set the validation profile (standard, strict) for formatting checks",
     )
     convert_parser.set_defaults(func=_run_convert)
 

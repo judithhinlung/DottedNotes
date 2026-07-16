@@ -352,3 +352,67 @@ def test_e2e_conversion(monkeypatch, tmp_path):
     assert output_midi.exists()
     assert output_midi.stat().st_size > 0
 
+
+def test_cli_report_option(monkeypatch, tmp_path, capsys):
+    brf_file = tmp_path / "test_report.brf"
+    brf_file.write_text("⠐⠹⠞", encoding="utf-8")
+    _run_main(monkeypatch, ["convert", str(brf_file), "--report"])
+    captured = capsys.readouterr()
+    assert "Line 1: Measure 1: Missing octave mark" in captured.err
+
+
+def test_cli_report_line_length_correction_has_no_measure_number(monkeypatch, tmp_path, capsys):
+    # Line-length corrections (S9b-4) aren't tied to a specific measure, so the
+    # report must not print a meaningless "Measure 0:" segment for them.
+    brf_file = tmp_path / "test_report_long_line.brf"
+    brf_file.write_text("⠐⠹" * 25, encoding="utf-8")  # 50 cells, over the 40-cell limit
+    _run_main(monkeypatch, ["convert", str(brf_file), "--report"])
+    captured = capsys.readouterr()
+    assert "exceeds BANA column limit" in captured.err
+    assert "Measure 0" not in captured.err
+
+
+def test_cli_compression_option_writes_braille_output(monkeypatch, tmp_path, capsys):
+    # A .brf/.brl output path switches `convert` to braille output; --compression
+    # controls that render (it has no effect on the default .ly output).
+    brf_file = tmp_path / "test_comp.brf"
+    brf_file.write_text("⠐⠹", encoding="utf-8")
+    out = tmp_path / "test_comp_out.brf"
+    _run_main(monkeypatch, ["convert", str(brf_file), str(out), "--compression", "none"])
+    captured = capsys.readouterr()
+    assert "Error:" not in captured.err
+
+    assert out.exists()
+    content = out.read_text(encoding="utf-8")
+    assert "⠹" in content
+    assert r"\version" not in content
+    assert r"\relative" not in content
+
+
+def test_cli_compile_with_braille_output_errors(monkeypatch, tmp_path, capsys):
+    brf_file = tmp_path / "test_comp.brf"
+    brf_file.write_text("⠐⠹", encoding="utf-8")
+    out = tmp_path / "test_comp_out.brf"
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf_file), str(out), "--compile"])
+    assert exc_info.value.code != 0
+
+    captured = capsys.readouterr()
+    assert "Error: --compile requires LilyPond (.ly) output" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_profile_option(monkeypatch, tmp_path, capsys):
+    brf_file = tmp_path / "test_cli_profile.brf"
+    brf_file.write_text("⠐⠹⠀⠐⠹", encoding="utf-8")
+
+    _run_main(monkeypatch, ["convert", str(brf_file), "--report", "--profile", "standard"])
+    captured_std = capsys.readouterr()
+    assert "identical to measure" not in captured_std.err
+
+    _run_main(monkeypatch, ["convert", str(brf_file), "--report", "--profile", "strict"])
+    captured_strict = capsys.readouterr()
+    assert "identical to measure" in captured_strict.err
+
+

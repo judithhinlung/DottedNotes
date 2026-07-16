@@ -10,5 +10,6 @@ htmlcov/
 .venv/
 venv/
 *.bak
+-.midi
 -.pdf
 .mutopia_cache/

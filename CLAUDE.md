@@ -55,8 +55,13 @@ BRF/BRL ──→ Internal Model ──→ LilyPond (.ly) ──→ PDF + MIDI (
                   ↕
              MusicXML (via music21, Sprint 10)
                   ↕
-             BRF/BRL reverse (Sprint 9)
+             BRF/BRL reverse (Sprint 9 — `Score.to_braille()` / `BrailleRenderer`,
+             reachable from the CLI via a `.brf`/`.brl` output path, see CLI Design)
 ```
+
+Sprint 9b layers a `BANAValidator` (`validation/validator.py`) and a
+`compression_level` parameter on `BrailleRenderer` on top of the reverse
+path above — see the Project structure entries below for both.
 
 ### Project structure
 ```
@@ -66,7 +71,8 @@ DottedNotes/
 │       ├── __init__.py
 │       ├── bana_symbols.py      # Authoritative BANA dot-pattern tables (all SymbolCategory cells)
 │       ├── exceptions.py        # DottedNotesError, BrailleParseError, LilyPondCompileError
-│       ├── cli.py               # CLI: `convert` subcommand, --compile/--verbose/--version
+│       ├── cli.py               # CLI: `convert` subcommand, --compile/--verbose/--version/
+│       │                         # --report/--compression (Sprint 9b)
 │       ├── models/
 │       │   ├── __init__.py      # Re-exports every model class below
 │       │   ├── base.py          # BrailleSymbol base class
@@ -96,15 +102,39 @@ DottedNotes/
 │       ├── parser/
 │       │   ├── __init__.py
 │       │   ├── input_pipeline.py   # BRLInputPipeline: ASCII/Unicode braille detection + normalization
-│       │   ├── tokenizer.py        # BrailleTokenizer, BrailleToken
+│       │   ├── tokenizer.py        # BrailleTokenizer, BrailleToken (line/position-tagged; each
+│       │   │                       # parsed Note now keeps its own `parsed_tokens` slice, consumed
+│       │   │                       # by the validator's sign-order rule, S9b — see Note below)
 │       │   ├── braille_parser.py   # BrailleParser (main solo-score parser)
 │       │   ├── chord_symbol_parser.py # parse_chord_symbol_line (BANA §23/Table 23)
 │       │   ├── lead_sheet_parser.py   # parse_lead_sheet (BANA §27 two-line lead-sheet parallel)
 │       │   ├── ensemble_parser.py  # EnsembleParser (BANA §33 instrument-list header + parallel systems)
 │       │   └── instrument_list.py  # parse_instrument_list, resolve_abbreviation (Table 29)
-│       └── renderers/
+│       ├── renderers/
+│       │   ├── __init__.py
+│       │   ├── lilypond_formatter.py  # LilyPondFormatter: per-category \paper{}/staff-size settings
+│       │   └── braille_renderer.py    # BrailleRenderer (Sprint 9): Score -> BRF text, solo/piano/
+│       │                               # ensemble layout + line packing. `compression_level` param
+│       │                               # ("full"/"minimal"/"none", Sprint 9b) runs an articulation-
+│       │                               # carry-shorthand pass and a measure-repeat-sign pass before
+│       │                               # layout. Carry runs always terminate on a plain, unprefixed
+│       │                               # sign (matching tremolo/triplet carry elsewhere in this
+│       │                               # file), never a special termination cell -- reachable from
+│       │                               # the CLI via a `.brf`/`.brl` output path (see CLI Design).
+│       └── validation/
 │           ├── __init__.py
-│           └── lilypond_formatter.py  # LilyPondFormatter: per-category \paper{}/staff-size settings
+│           └── validator.py   # BANAValidator (Sprint 9b): rule-based checker run against the
+│                               # internal Score model (+ raw BRF text for line-length). Rules
+│                               # implemented: octave-mark register tracking (S9b-3, resets at
+│                               # first-note-of-voice, every measure start, every new source line,
+│                               # and after a numeric indicator -- matching Note.to_braille()'s
+│                               # real is_measure_start-based reset), missing articulation shorthand
+│                               # (S9b-2), BANA sign ordering around a note, and line-length overflow
+│                               # (S9b-4). Returns a `ValidationResult` of `Correction` dataclasses
+│                               # (line/measure, message, severity, rule_id, optional proposed_fix);
+│                               # `ValidationResult.to_json()` serializes for the future web-UI
+│                               # validation step (S9b-7). Wired into the CLI via
+│                               # `dottednotes convert --report` (see CLI Design).
 ├── tests/
 │   ├── __init__.py
 │   ├── test_models.py
@@ -118,6 +148,8 @@ DottedNotes/
 │   ├── test_lilypond_formatter.py
 │   ├── test_exceptions.py
 │   ├── test_cli.py
+│   ├── test_validation.py    # BANAValidator rules (Sprint 9b)
+│   ├── test_compression.py   # musical_equals() + BrailleRenderer compression_level (Sprint 9b)
 │   └── fixtures/                # .brf/.brl inputs, each paired with a hand-authored
 │                                 # .ly ground truth where one exists (see fixtures/README.md)
 ├── docs/
@@ -148,7 +180,7 @@ DottedNotes/
 4. **Concert pitch:** Default to concert pitch output; transposing instrument
    support added in Sprint 5b (`models/transposition.py`).
 5. **Restricted LilyPond parser:** The LilyPond → BRF reverse direction (Sprint 9,
-   not yet started) only needs to parse LilyPond that DottedNotes itself
+   implemented) only needs to parse LilyPond that DottedNotes itself
    generated, not arbitrary LilyPond written by humans. This keeps the reverse
    parser tractable.
 6. **No external APIs at runtime:** `dottednotes convert` has no network
@@ -172,6 +204,20 @@ DottedNotes/
    documented placeholder instead — see `docs/lilypond_conventions.md`.
    Category is auto-detected from staff count/family but can be
    overridden (`to_lilypond(category_override=...)`).
+9. **Compression is a rendering-time pass, not a parser concept:** `BrailleRenderer`
+   (`renderers/braille_renderer.py`) never mutates the `Score` it's given — `render()`
+   deep-copies it first, then (when `compression_level != "none"`) runs an
+   articulation-carry pass and a measure-repeat pass over the copy before laying
+   out lines. `Note.musical_equals()` / `Chord.musical_equals()` / `Rest.musical_equals()`
+   / `Measure.musical_equals()` (Sprint 9b, S9b-15) back the measure-repeat pass;
+   `Articulation.explicit` (written-vs-carried bookkeeping) is a `compare=False`
+   dataclass field precisely so it can't leak into that equality check.
+10. **`.brf`/`.brl` output path switches `convert` to braille output:** `cli.py`'s
+    `_run_convert()` checks the output path's suffix — `.brf`/`.brl` renders via
+    `Score.to_braille(compression_level=args.compression)` instead of
+    `to_lilypond()`. `--compile` is rejected with a plain-text error if combined
+    with a `.brf`/`.brl` output path (compiling needs a `.ly` file). No output
+    path (stdout) always defaults to LilyPond.
 
 ---
 
@@ -200,9 +246,27 @@ slur_end: bool = False
 slur_bracket_open: bool = False
 slur_bracket_close: bool = False
 fingerings: list[Fingering]
+has_octave_mark: bool = False        # Sprint 9b: did the source BRF write an octave mark
+                                      # on this note (vs. inferred by parser state)?
+articulation_format: str = "single"  # Sprint 9b: "single"/"start_carry"/"inside_carry"/
+                                      # "stop_carry", set by BrailleRenderer's compression pass
+parsed_tokens: list[BrailleToken]    # Sprint 9b: the BrailleTokens (with line/position) that
+                                      # produced this note, used by BANAValidator's sign-order
+                                      # and octave-mark rules — not populated for notes built
+                                      # by hand outside the parser
+after_numeric_indicator: bool = False # Sprint 9b: True if this is the first note after a
+                                       # measure number / multi-measure rest (BANA octave reset)
 def to_lilypond() -> str
-def to_braille() -> str    # Sprint 9 — not yet started, method does not exist yet
+def to_braille() -> str    # Sprint 9 — implemented
+def musical_equals(other) -> bool   # Sprint 9b (S9b-15): equivalence for measure-repeat
+                                     # detection, ignoring notation-only fields
 ```
+
+`Articulation` also gained an `explicit: bool = field(default=True, compare=False)`
+field in Sprint 9b, marking whether an articulation was written in the source BRF vs.
+carried forward from parser state. `compare=False` keeps it out of `Articulation`'s
+(and therefore `Note.musical_equals()`'s) equality check, since it's presentation-only
+bookkeeping, not a musical attribute.
 
 ### Duration
 ```python
@@ -273,6 +337,14 @@ dottednotes convert input.brf output.ly --compile
 # stdout still carries only the rendered .ly, so `... | lilypond -` stays safe.
 dottednotes convert input.brf output.ly --verbose
 
+# Print a BANA validation report (line/measure, message, rule ID) to stderr
+# alongside the normal .ly conversion (Sprint 9b)
+dottednotes convert input.brf output.ly --report
+
+# Render back to compressed braille instead of LilyPond: a .brf/.brl output
+# path switches `convert` to braille output (Sprint 9, CLI-wired in Sprint 9b)
+dottednotes convert input.brf output.brf --compression minimal
+
 # Show help
 dottednotes --help
 dottednotes convert --help
@@ -287,6 +359,13 @@ Malformed input or a failed `lilypond` compile prints one plain-text
 individual formatting settings (paper size, margins, staff size) from the
 command line is planned but not yet implemented (TICKETS.md S7b-10).
 
+`convert` also accepts `--compression {none,minimal,full}` (Sprint 9b, default
+`full`), controlling articulation-carry-shorthand and measure-repeat compression
+in BRF output. It only has an effect when the output path ends in `.brf`/`.brl`
+(see the extension-based dispatch in Key Design Decision 10 above) — it's a
+no-op on `.ly` output. `--compile` and a `.brf`/`.brl` output path can't be
+combined; combining them raises a plain-text `DottedNotesError`.
+
 ---
 
 ## Testing Strategy
@@ -298,7 +377,9 @@ command line is planned but not yet implemented (TICKETS.md S7b-10).
   files (`test_ensemble_parser.py`, `test_ensemble_integration.py`)
 - CLI tests drive `cli.py`'s `main()` directly via `sys.argv` + `capsys`
   (`test_cli.py`) — covers `convert`, `--compile`, `--verbose`, `--version`,
-  and both plain-text error paths (missing file, malformed input)
+  `--report`, `--compression` (including `.brf`/`.brl` output dispatch and the
+  `--compile` + braille-output conflict), and both plain-text error paths
+  (missing file, malformed input)
 - Formatting-pipeline tests (`test_lilypond_formatter.py`) include real
   `lilypond`-binary compile checks per template category, skipped via
   `shutil.which("lilypond")` when the binary isn't installed — and check the
@@ -306,8 +387,14 @@ command line is planned but not yet implemented (TICKETS.md S7b-10).
   not mean LilyPond was happy with the engraving)
 - Integration tests: parse a real `.brf` fixture end to end and compare
   against a hand-authored `.ly` ground truth where one exists
-- Round-trip tests (Sprint 9, not yet started): BRF → LilyPond → BRF, verify
-  output matches input
+- Round-trip tests (Sprint 9): BRF → Internal Model → BRF via
+  `Score.to_braille()` / `BrailleRenderer`
+- Validator tests (`test_validation.py`, Sprint 9b): each `BANAValidator` rule
+  (octave marks, articulation shorthand, sign order, line length) against
+  hand-built BRF snippets, plus `ValidationResult.to_json()`
+- Compression tests (`test_compression.py`, Sprint 9b): `musical_equals()` on
+  `Note`/`Rest`/`Chord`/`Measure`, and `BrailleRenderer(compression_level=...)`
+  output differences across `"none"`/`"minimal"`/`"full"`
 - Primary test fixture: `fengyang_flower_drum.brf` (developer's own
   composition, known correct output, per `tests/fixtures/README.md`) — other
   fixtures with a paired `.ly` ground truth include `children_s_piece.brf`,
@@ -324,18 +411,20 @@ command line is planned but not yet implemented (TICKETS.md S7b-10).
 
 See TICKETS.md for full ticket details and step-by-step instructions.
 
-- [ ] Sprint 0: Project Setup
-- [ ] Sprint 1: Core Symbol Layer
-- [ ] Sprint 2: Braille Parser — Notes and Rhythm
-- [ ] Sprint 3: Key Signatures, Time Signatures, Clefs
-- [ ] Sprint 4: Articulations, Dynamics, Ornaments, and Text
-- [ ] Sprint 5: Chords and Multiple Voices
-- [ ] Sprint 5b: Orchestral Score Support
-- [ ] Sprint 6: Fingering Notation
-- [ ] Sprint 7: Score Assembly and Full Pipeline
-- [ ] Sprint 7b: LilyPond Formatting Library
-- [ ] Sprint 8: Accessibility and Polish
-- [ ] Sprint 9: Reverse Direction — LilyPond to BRF
+- [x] Sprint 0: Project Setup
+- [x] Sprint 1: Core Symbol Layer
+- [x] Sprint 2: Braille Parser — Notes and Rhythm
+- [x] Sprint 3: Key Signatures, Time Signatures, Clefs
+- [x] Sprint 4: Articulations, Dynamics, Ornaments, and Text
+- [x] Sprint 5: Chords and Multiple Voices
+- [x] Sprint 5b: Orchestral Score Support
+- [x] Sprint 6: Fingering Notation
+- [x] Sprint 7: Score Assembly and Full Pipeline
+- [x] Sprint 7b: LilyPond Formatting Library
+- [x] Sprint 8: Accessibility and Polish
+- [x] Sprint 9: Reverse Direction — LilyPond to BRF
+- [x] Sprint 9b: BANA Validator
+- [x] Sprint 9c: BANA Formatting Rule Library
 - [ ] Sprint 10: MusicXML Bridge
 
 ---
