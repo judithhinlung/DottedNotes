@@ -6459,13 +6459,97 @@ Estimated time: 1–1.5 weeks.
 
 Estimated time: 1–1.5 weeks.
 
+---
+
 ### [ ] S10-1: Integrate music21 for MusicXML parsing
+
+**Why:** We need to parse MusicXML files using a reliable library without external binary dependencies. Integrating `music21` into our project will allow us to parse MusicXML files into an in-memory stream object structure that we can easily inspect and convert.
+
+**Steps:**
+1. Add `music21` to dependencies in `pyproject.toml` (e.g. `music21 = "^9.1.0"`).
+2. Implement a helper/wrapper function/class in `src/dottednotes/parser/musicxml_parser.py` to load a MusicXML file or string via `music21.converter.parse()`.
+3. Set up appropriate error handling to catch `music21` exceptions and translate them into a screen-reader friendly `DottedNotesError`.
+4. Write basic unit tests to ensure that `music21` can parse a sample MusicXML string and retrieve basic elements (such as parts and notes) in our environment.
+
+**Definition of Done:**
+- [ ] `music21` is successfully added to project dependencies.
+- [ ] MusicXML converter wrapper is implemented in `dottednotes/parser/musicxml_parser.py`.
+- [ ] Parser errors are wrapped in a clean, screen-reader friendly `DottedNotesError`.
+- [ ] Unit tests pass.
+
+---
+
 ### [ ] S10-2: Implement MusicXML to Internal Model translation
+
+**Why:** To import MusicXML, we need to convert the hierarchical object structure returned by `music21` (such as `Score`, `Part`, `Measure`, `Note`, `Chord`, `Rest`, `KeySignature`, `TimeSignature`, `Clef`, etc.) into our own internal domain model `Score`.
+
+**Steps:**
+1. Create a translator class/function in `src/dottednotes/parser/musicxml_parser.py` (e.g. `MusicXMLTranslator`).
+2. Map `music21.stream.Score` and `music21.stream.Part` to `dottednotes.models.Score` and `dottednotes.models.Staff`.
+3. Map `music21.stream.Measure` to `dottednotes.models.Measure`.
+4. Map individual `music21` note/chord/rest elements to `dottednotes` `Note`, `Chord`, and `Rest` models. This includes pitch mapping (accidentals, octaves), duration mapping (dots, triplet/tuplet ratios), expressive marks (articulations, dynamics, slurs, ties, ornaments), and fingering signs.
+5. Map structural markings: clef, key signature, time signature, and text markings (tempo/expression).
+6. Connect this translator to the CLI command `dottednotes convert` when the input file has a `.musicxml`, `.xml`, or `.mxl` extension.
+7. Write unit tests in `tests/test_musicxml_parser.py` validating correct model construction for pitches, rhythms, dynamics, articulations, and polyphony.
+
+**Definition of Done:**
+- [ ] `MusicXMLTranslator` successfully maps main musical elements from `music21` to the `DottedNotes` model.
+- [ ] CLI detects MusicXML file extensions and routes them to the MusicXML parser.
+- [ ] Unit tests cover various note types, accidentals, durations, tuplets, and expressions.
+- [ ] Unit tests pass.
+
+---
+
 ### [ ] S10-3: Implement Internal Model to MusicXML translation
+
+**Why:** To support exporting to MusicXML, we must convert our internal `Score` model back to a `music21.stream.Score` representation and write it out as a MusicXML file.
+
+**Steps:**
+1. Implement a translator in `src/dottednotes/renderers/musicxml_renderer.py` (e.g. `MusicXMLRenderer` or a `to_musicxml` method on `Score`) that maps `Score`, `Staff`, `Measure`, `Note`, `Chord`, `Rest`, and structural elements to their corresponding `music21` classes.
+2. Map accidentals, durations, tuplets, dynamic levels, articulations, ties, and slurs back to `music21` equivalents.
+3. Export the resulting `music21.stream.Score` to a MusicXML byte/string output using `score_stream.write('musicxml')`.
+4. Integrate the MusicXML exporter into `cli.py` such that if the output file path ends in `.musicxml` or `.mxl`, it renders and writes a MusicXML file.
+5. Write tests in `tests/test_musicxml_exporter.py` validating that internal models are correctly exported.
+
+**Definition of Done:**
+- [ ] Export translator maps the internal `Score` structure to a `music21` stream structure.
+- [ ] CLI supports exporting to `.musicxml` / `.mxl` files.
+- [ ] Unit tests verify basic note export, key/time signatures, and dynamics.
+- [ ] Unit tests pass.
+
+---
+
 ### [ ] S10-4: Integration test: import MuseScore MusicXML, export as BRF
+
+**Why:** We want to make sure that MusicXML files exported by common editors like MuseScore can be successfully imported by DottedNotes and exported as beautifully formatted, validated braille music files.
+
+**Steps:**
+1. Add a sample MusicXML file (generated from MuseScore, containing a mixture of melody, chords, tuplets, dynamics, and articulations) to `tests/fixtures/`.
+2. Implement an integration test in `tests/test_musicxml_integration.py` that reads this MusicXML file, runs it through the DottedNotes pipeline, exports the result as a `.brf` file, and validates the output.
+3. Ensure that BANA validation is run during the import-export process and reports any issues.
+
+**Definition of Done:**
+- [ ] A MuseScore-generated MusicXML fixture is added.
+- [ ] Integration test parses the fixture and exports correct BANA-compliant BRF.
+- [ ] Integration tests pass.
+
+---
+
 ### [ ] S10-5: Integration test: import BRF, export as MusicXML for MuseScore
 
-*Detailed steps to be written when Sprint 9 is complete.*
+**Why:** The reverse path (importing BRF and exporting as MusicXML) must be verified so that blind composers can share their braille music compositions with sighted musicians using standard notation software.
+
+**Steps:**
+1. In `tests/test_musicxml_integration.py`, add a test that reads a standard BRF fixture (e.g. `g_major_scale.brf` or `children_s_piece.brf`).
+2. Parse the BRF using the existing `BrailleParser`, convert the resulting model to MusicXML using `music21`, and write the file.
+3. Verify that the output XML file can be parsed by `music21` (or another validating parser) and has correct notes, pitches, measures, and layout details.
+
+**Definition of Done:**
+- [ ] Integration test converts BRF to MusicXML.
+- [ ] The generated MusicXML is validated to contain correct pitch, rhythm, and structure matching the source BRF.
+- [ ] Integration tests pass.
+
+---
 **Sprint 11: Web Interface (2–3 weeks after Sprint 7)**
 - [ ] S11-1: Add FastAPI to project dependencies and create `web.py`
 - [ ] S11-2: Implement file upload endpoint with DottedNotes conversion
