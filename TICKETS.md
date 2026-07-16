@@ -6572,3 +6572,7 @@ Estimated time: 1–1.5 weeks.
 - [ ] S11b-10: Session cleanup — delete temp files after download or timeout
 - [ ] S11b-11: Full VoiceOver testing of complete edit-hear-correct loop
 - [ ] S11b-12: Test with a real composition error (wrong octave) end to end
+
+**Sprint 11c: BRF Reformatting & Malformed Input Robustness (future sprint)**
+- [ ] S11c-1: Add test cases and validator rules for malformed .brf music files, such as having measure numbers or notes in the left margins when the score is an ensemble score.
+
