@@ -120,7 +120,7 @@ def _parse_line(line: str) -> InstrumentInfo | None:
         # just matched some other dot-3 cell with literary text running all
         # the way back to the start of the line (e.g. a literary apostrophe
         # near the start of a title, which shares END_WORD_SIGN's dot
-        # pattern) -- not a real instrument line. See Children_s_piece.brf's
+        # pattern) -- not a real instrument line. See children_s_piece.brf's
         # "Children's Piece" title.
         return None
     abbrev_cells = line[start:end]

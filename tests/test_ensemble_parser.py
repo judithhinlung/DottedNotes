@@ -362,7 +362,7 @@ def test_fingering_melody_not_routed_to_ensemble_parser():
 
 
 def test_children_s_piece_not_routed_to_ensemble_parser():
-    # Regression: Children_s_piece.brf is a real solo two-hand piano piece
+    # Regression: children_s_piece.brf is a real solo two-hand piano piece
     # whose title contains an apostrophe ("Children's Piece"). The
     # apostrophe is END_WORD_SIGN's own dot-3 cell, which used to fool
     # instrument_list._parse_line into treating the title line as a bogus
@@ -370,7 +370,7 @@ def test_children_s_piece_not_routed_to_ensemble_parser():
     # which rendered it as nothing but a run of unmarked r16 rests instead
     # of the real music (cli.py's dispatch mirrors this same heuristic).
     text = BRLInputPipeline().load(
-        Path(__file__).parent / "fixtures" / "Children_s_piece.brf"
+        Path(__file__).parent / "fixtures" / "children_s_piece.brf"
     )
     assert has_ensemble_header(text) is False
 

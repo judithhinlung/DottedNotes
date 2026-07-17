@@ -4546,7 +4546,7 @@ def test_parse_instrument_list_skips_title_with_apostrophe():
     # "Children's Piece" -- the apostrophe is END_WORD_SIGN's own dot-3
     # pattern, which previously fooled _parse_line into treating the whole
     # title line as a bogus one-instrument header (S11-bug: caused
-    # Children_s_piece.brf to route to EnsembleParser and render as nothing
+    # children_s_piece.brf to route to EnsembleParser and render as nothing
     # but a run of r16 rests). A genuine abbreviation always starts with a
     # real WORD_SIGN, which this title line never has.
     pipeline = BRLInputPipeline()

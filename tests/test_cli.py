@@ -222,7 +222,7 @@ def test_convert_children_s_piece_not_misrouted_to_ensemble_parser(
     # routed to EnsembleParser -- which rendered it as nothing but a run of
     # unmarked r16 rests instead of the real music. Must now go through the
     # solo parser and produce a real two-staff PianoStaff.
-    brf = FIXTURES / "Children_s_piece.brf"
+    brf = FIXTURES / "children_s_piece.brf"
     out = tmp_path / "children_s_piece.ly"
     _run_main(monkeypatch, ["convert", str(brf), str(out)])
 
