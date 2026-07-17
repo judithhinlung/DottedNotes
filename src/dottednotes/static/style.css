@@ -514,64 +514,6 @@ select:focus, input[type="text"]:focus {
     color: var(--success-color);
 }
 
-/* Checkbox Group */
-.checkbox-group {
-    display: flex;
-    align-items: center;
-    grid-column: span 2;
-    margin-top: 0.5rem;
-}
-
-.checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    cursor: pointer;
-    font-size: 0.95rem;
-    font-weight: 500;
-    color: var(--text-primary);
-    user-select: none;
-}
-
-.checkbox-label input[type="checkbox"] {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 20px;
-    height: 20px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background-color: #161b22;
-    cursor: pointer;
-    display: grid;
-    place-content: center;
-    outline: none;
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
-}
-
-.checkbox-label input[type="checkbox"]::before {
-    content: "";
-    width: 10px;
-    height: 10px;
-    transform: scale(0);
-    transition: transform 0.15s ease-in-out;
-    background-color: var(--accent-blue);
-    clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
-}
-
-.checkbox-label input[type="checkbox"]:checked {
-    border-color: var(--accent-blue);
-    background-color: rgba(88, 166, 255, 0.1);
-}
-
-.checkbox-label input[type="checkbox"]:checked::before {
-    transform: scale(1);
-}
-
-.checkbox-label input[type="checkbox"]:focus {
-    border-color: var(--focus-ring);
-    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.3);
-}
-
 /* Helpers */
 .hidden {
     display: none !important;
