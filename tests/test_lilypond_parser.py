@@ -1,5 +1,9 @@
+from pathlib import Path
+
 import pytest
 from dottednotes.parser.lilypond_parser import LilypondParser, tokenize_lilypond, _skip_balanced_block
+
+FIXTURES = Path(__file__).parent / "fixtures"
 from dottednotes.models.score import Score
 from dottednotes.models.orchestra_score import OrchestraScore
 from dottednotes.models.staff import Staff
@@ -232,3 +236,159 @@ def test_chord_sort_does_not_break_relative_pitch_chain():
     notes = score.staves[0].measures[0].notes
     following_note = notes[1]
     assert (following_note.note_name, following_note.octave) == ("A", 3)
+
+
+# --- Regression: LilypondParser input support and in-accord (<<{...}\\{...}>>)
+#     two-voice parsing. Both bugs were found via `dottednotes convert` on a
+#     real .ly file producing garbled/crashing output -- see test_e2e_cli.py
+#     for the CLI-level reproduction. ---
+
+
+def test_tokenizer_recognizes_voice_separator():
+    # The bare '\\' voice separator (distinct from '\\<'/'\\>'/'\\!'
+    # hairpin/dynamic tokens) was previously dropped entirely by the token
+    # regex, silently merging both voices of every in-accord group into one
+    # flat token stream.
+    tokens = tokenize_lilypond("<< { c4 } \\\\ { e,4 } >>")
+    assert tokens == ['<<', '{', 'c', '4', '}', '\\\\', '{', 'e,', '4', '}', '>>']
+
+
+def test_dynamic_marking_does_not_crash():
+    # Dynamic(dots=..., category=..., raw_brl=..., level=...) used to raise
+    # TypeError: Dynamic.__init__() got an unexpected keyword argument
+    # 'dots' -- Dynamic (unlike Note) only has a `level` field. This crashed
+    # on any real piece using so much as a single \mf/\p/\f marking.
+    ly_content = """
+    \\version "2.24.0"
+    \\score {
+      \\relative c' {
+        c4\\mf d4\\p
+      }
+    }
+    """
+    score = LilypondParser().parse(ly_content)
+    notes = score.staves[0].measures[0].notes
+    assert notes[0].dynamics[0].level.name == "MF"
+    assert notes[1].dynamics[0].level.name == "P"
+
+
+def test_in_accord_parses_two_independent_voices():
+    # Real DottedNotes-generated two-hand-on-one-staff BANA in-accord
+    # notation (InAccord.to_relative_lilypond()): voice 1 g'8. b16 d4 g4,
+    # voice 2 d4 g4 g4 -- both voices must come back as two separate lists
+    # of real notes, not silently merged into one 7-note sequence.
+    ly_content = """
+    \\version "2.24.0"
+    \\score {
+      \\relative c' {
+        << { g'8. b16 d4 g4 } \\\\ { d4 g4 g4 } >>
+      }
+    }
+    """
+    score = LilypondParser().parse(ly_content)
+    from dottednotes.models.in_accord import InAccord
+    ia = score.staves[0].measures[0].notes[0]
+    assert isinstance(ia, InAccord)
+    assert len(ia.parts) == 2
+    assert [(n.note_name, n.duration.value) for n in ia.parts[0]] == \
+        [("G", 8), ("B", 16), ("D", 4), ("G", 4)]
+    assert [(n.note_name, n.duration.value) for n in ia.parts[1]] == \
+        [("D", 4), ("G", 4), ("G", 4)]
+
+
+def test_in_accord_voices_track_octave_independently():
+    # Each voice inside << >> must reset to the SAME pre-block relative
+    # reference (InAccord.to_relative_lilypond()'s documented contract) --
+    # not chain from whatever the previous voice's last note was. Before
+    # the fix, voice 2's notes were computed relative to voice 1's *last*
+    # note (since both voices were parsed as one merged stream), causing a
+    # cumulative octave drift across many in-accord groups that eventually
+    # produced an invalid octave and crashed.
+    ly_content = """
+    \\version "2.24.0"
+    \\score {
+      \\relative c' {
+        << { g'8. b16 d4 g4 } \\\\ { d4 g4 g4 } >>
+      }
+    }
+    """
+    score = LilypondParser().parse(ly_content)
+    ia = score.staves[0].measures[0].notes[0]
+    voice1_octaves = [n.octave for n in ia.parts[0]]
+    voice2_octaves = [n.octave for n in ia.parts[1]]
+    # Voice 1: relative to c'(octave 4) -- g'8. reads as G4 (nearest-4th),
+    # b16 as B4, d4 as D5, g4 as G5.
+    assert voice1_octaves == [4, 4, 5, 5]
+    # Voice 2 independently resets to the same c'(octave 4) reference --
+    # d4 as D4, g4 as G4, g4 as G4 -- NOT continuing from voice 1's G5.
+    assert voice2_octaves == [4, 4, 4]
+
+
+def test_relative_reference_after_in_accord_uses_primary_voice():
+    # After the << >> block closes, the ongoing relative-pitch reference
+    # for what follows must advance to voice 0's (the primary voice's)
+    # final note -- matching InAccord.to_relative_lilypond()'s documented
+    # rule -- not voice 1's last note or some other value.
+    ly_content = """
+    \\version "2.24.0"
+    \\score {
+      \\relative c' {
+        << { g'8. b16 d4 g4 } \\\\ { d4 g4 g4 } >> c4
+      }
+    }
+    """
+    score = LilypondParser().parse(ly_content)
+    notes = score.staves[0].measures[0].notes
+    following_note = notes[1]
+    # Voice 0's last note is G5; an unmarked "c" immediately after should
+    # read as the nearest C to G5, i.e. C6 (a 4th up), not C5 or C4.
+    assert (following_note.note_name, following_note.octave) == ("C", 6)
+
+
+def test_self_generated_piano_piece_round_trips_without_crashing():
+    # Regression for the actual reported crash, using the scenario
+    # LilypondParser is actually documented to support (CLAUDE.md: "only
+    # needs to parse LilyPond that DottedNotes itself generated, not
+    # arbitrary LilyPond written by humans") -- a real 41-measure two-hand
+    # piano piece's OWN generated .ly, fed straight back in. Before the
+    # fix, its many in-accord groups' real (non-monotonic) melodic contour
+    # accumulated octave error across voices (see
+    # test_in_accord_voices_track_octave_independently) until a note's
+    # computed octave fell outside Note's valid 0-8 range partway through
+    # and raised an uncaught ValueError.
+    from dottednotes.parser.input_pipeline import BRLInputPipeline
+    from dottednotes.parser.braille_parser import BrailleParser
+    from dottednotes.parser.tokenizer import BrailleTokenizer
+
+    brf_text = BRLInputPipeline().load(FIXTURES / "children_s_piece.brf")
+    original_score = BrailleParser(tokens=BrailleTokenizer().tokenize(brf_text)).parse()
+    generated_ly = original_score.to_lilypond()
+
+    round_tripped = LilypondParser().parse(generated_ly)  # must not raise
+    assert len(round_tripped.staves) == 2
+    assert len(round_tripped.staves[0].measures) == 41
+    assert len(round_tripped.staves[1].measures) == 41
+
+
+def test_grace_note_attaches_to_following_note_and_chains_octave():
+    # \grace {a8(} g4 -- Note.to_relative_lilypond()'s own documented
+    # contract: the grace note chains into the relative-pitch reference
+    # like an ordinary note, and the main note that follows it is relative
+    # to the grace note, not to whatever preceded the \grace block.
+    ly_content = """
+    \\version "2.24.0"
+    \\score {
+      \\relative c' {
+        b'4 \\grace {a8(} g4
+      }
+    }
+    """
+    score = LilypondParser().parse(ly_content)
+    notes = score.staves[0].measures[0].notes
+    main_note = notes[1]
+    assert main_note.note_name == "G"
+    assert main_note.grace_note is not None
+    assert [(n.note_name, n.octave) for n in main_note.grace_note.notes] == [("A", 4)]
+    # "g4" with no mark, relative to the grace note A4, reads as G4 (a step
+    # down), not G3 or G5.
+    assert main_note.octave == 4

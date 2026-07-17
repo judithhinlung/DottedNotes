@@ -2,7 +2,7 @@ services:
   - type: web
     name: dottednotes
     runtime: docker
-    plan: free
+    plan: starter
     autoDeploy: true
     envVars:
       - key: PORT

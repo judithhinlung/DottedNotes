@@ -125,6 +125,7 @@ def _parse_format(format_str: str) -> dict:
 def _run_convert(args: argparse.Namespace) -> None:
     input_path = Path(args.input)
     is_musicxml_input = input_path.suffix.lower() in (".musicxml", ".xml", ".mxl")
+    is_lilypond_input = input_path.suffix.lower() == ".ly"
 
     category_override = args.category
     valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet", "Strophic Song"}
@@ -140,6 +141,25 @@ def _run_convert(args: argparse.Namespace) -> None:
     if is_musicxml_input:
         from dottednotes.parser.musicxml_parser import load_musicxml
         score = load_musicxml(args.input)
+        text = ""
+    elif is_lilypond_input:
+        from dottednotes.parser.lilypond_parser import LilypondParser
+        raw_ly = Path(args.input).read_text(encoding="utf-8")
+        try:
+            score = LilypondParser().parse(raw_ly)
+        except Exception as e:
+            # LilypondParser is a restricted parser -- it only needs to
+            # round-trip LilyPond that DottedNotes itself generated, not
+            # arbitrary hand-authored LilyPond (see CLAUDE.md's "Restricted
+            # LilyPond parser" design note). A failure here is an expected,
+            # documented scope limitation, not a mystery internal bug, so
+            # it gets a plain-text DottedNotesError like any other
+            # malformed/unsupported input -- never a raw traceback.
+            raise DottedNotesError(
+                f"Could not parse LilyPond input '{args.input}': {e}. "
+                "This parser only supports LilyPond that DottedNotes itself "
+                "generated, not arbitrary hand-authored LilyPond."
+            ) from e
         text = ""
     else:
         text = BRLInputPipeline().load(args.input)
