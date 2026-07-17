@@ -5,8 +5,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileNameDisplay = document.getElementById('file-name-display');
     const targetFormatSelect = document.getElementById('target_format');
     const submitBtn = document.getElementById('submit-btn');
-    const btnSpinner = document.getElementById('btn-spinner');
+    const submitBtnLabel = document.getElementById('submit-btn-label');
     const statusAnnouncer = document.getElementById('status-announcement');
+
+    // Progress bar
+    const progressContainer = document.getElementById('progress-container');
+    const progressTrack = document.getElementById('progress-track');
+    const progressFill = document.getElementById('progress-fill');
+    const progressLabel = document.getElementById('progress-label');
 
     // UI Option Groups
     const groupCategory = document.getElementById('group-category');
@@ -41,6 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Handle dropped files
     uploadZone.addEventListener('drop', (e) => {
+        if (fileInput.disabled) {
+            return;
+        }
         const dt = e.dataTransfer;
         const files = dt.files;
         if (files.length > 0) {
@@ -103,11 +112,61 @@ document.addEventListener('DOMContentLoaded', () => {
         statusAnnouncer.textContent = text;
     }
 
+    // FastAPI's own 4xx responses (e.g. HTTPException) send `detail` as a
+    // plain string, but its automatic request-validation errors (422, e.g.
+    // a missing required field) send `detail` as an array of
+    // {type, loc, msg} objects instead. Handle both so the UI never shows
+    // a raw "[object Object]".
+    function formatErrorDetail(detail) {
+        if (typeof detail === 'string') {
+            return detail;
+        }
+        if (Array.isArray(detail)) {
+            return detail
+                .map(item => {
+                    if (item && typeof item === 'object') {
+                        const field = Array.isArray(item.loc) ? item.loc.join('.') : '';
+                        return field ? `${field}: ${item.msg}` : item.msg;
+                    }
+                    return String(item);
+                })
+                .join('\n');
+        }
+        if (detail && typeof detail === 'object') {
+            return JSON.stringify(detail);
+        }
+        return 'An unknown error occurred during conversion.';
+    }
+
+    // Disable/enable the file picker and submit button together, so a
+    // translation in progress can't be interrupted by picking a new file
+    // or double-submitting.
+    function setBusy(isBusy) {
+        submitBtn.disabled = isBusy;
+        fileInput.disabled = isBusy;
+        uploadZone.classList.toggle('disabled', isBusy);
+        submitBtnLabel.textContent = isBusy ? 'Translating...' : 'Translate Score';
+    }
+
+    function setProgress(percent, label, indeterminate) {
+        progressContainer.classList.remove('hidden');
+        progressTrack.classList.toggle('indeterminate', !!indeterminate);
+        progressTrack.setAttribute('aria-valuenow', indeterminate ? '' : String(percent));
+        progressFill.style.width = `${percent}%`;
+        progressLabel.textContent = label;
+    }
+
+    function hideProgress() {
+        progressContainer.classList.add('hidden');
+        progressTrack.classList.remove('indeterminate');
+        progressFill.style.width = '0%';
+    }
+
     // Initialize option visibility
     updateOptionVisibility();
 
     // Form Submission
-    form.addEventListener('submit', async (e) => {
+    form.addEventListener('submit', (e) => {
         e.preventDefault();
 
         if (fileInput.files.length === 0) {
@@ -115,9 +174,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Snapshot the form data before disabling any controls -- FormData
+        // silently omits disabled form fields, so building this after
+        // setBusy(true) would drop the file field entirely.
+        const formData = new FormData(form);
+
         // Set Loading States
-        submitBtn.disabled = true;
-        btnSpinner.classList.remove('sr-only');
+        setBusy(true);
+        setProgress(0, 'Uploading: 0%', false);
         announceStatus('Uploading and translating score. Please wait...', 'assertive');
 
         // Hide old results
@@ -127,34 +191,55 @@ document.addEventListener('DOMContentLoaded', () => {
         downloadLinks.innerHTML = '';
         validationTbody.innerHTML = '';
 
-        const formData = new FormData(form);
+        // XMLHttpRequest (not fetch) is used here specifically because it's
+        // the only option that exposes upload progress events -- fetch has
+        // no equivalent for a multipart body.
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/convert');
 
-        try {
-            const response = await fetch('/api/convert', {
-                method: 'POST',
-                body: formData
-            });
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                const percent = Math.round((e.loaded / e.total) * 100);
+                setProgress(percent, `Uploading: ${percent}%`, false);
+            }
+        });
 
-            const data = await response.json();
+        xhr.upload.addEventListener('load', () => {
+            // Upload finished; the server is now parsing, validating, and
+            // (for LilyPond output) compiling the score. There's no
+            // progress signal for that phase, so switch to an
+            // indeterminate indicator rather than a fake percentage.
+            setProgress(100, 'Processing score...', true);
+            announceStatus('Upload complete. Processing score...', 'polite');
+        });
 
-            // Clear Loading States
-            submitBtn.disabled = false;
-            btnSpinner.classList.add('sr-only');
+        xhr.addEventListener('load', () => {
+            setBusy(false);
+            hideProgress();
 
-            if (!response.ok) {
-                const errMsg = data.detail || 'An unknown error occurred during conversion.';
-                showError(errMsg);
+            let data;
+            try {
+                data = JSON.parse(xhr.responseText);
+            } catch (parseErr) {
+                showError('The server returned an unexpected response.');
                 return;
             }
 
-            // Render Success results
-            showResults(data);
+            if (xhr.status < 200 || xhr.status >= 300) {
+                showError(formatErrorDetail(data.detail));
+                return;
+            }
 
-        } catch (error) {
-            submitBtn.disabled = false;
-            btnSpinner.classList.add('sr-only');
-            showError(`Network/connection error: ${error.message}`);
-        }
+            showResults(data);
+        });
+
+        xhr.addEventListener('error', () => {
+            setBusy(false);
+            hideProgress();
+            showError('Network/connection error: could not reach the server.');
+        });
+
+        xhr.send(formData);
     });
 
     function showError(message) {

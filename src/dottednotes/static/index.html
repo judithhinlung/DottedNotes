@@ -85,9 +85,15 @@
                     </details>
 
                     <button type="submit" class="btn-submit" id="submit-btn">
-                        <span>Translate Score</span>
-                        <div class="spinner sr-only" id="btn-spinner" aria-hidden="true"></div>
+                        <span id="submit-btn-label">Translate Score</span>
                     </button>
+
+                    <div class="progress-container hidden" id="progress-container">
+                        <div class="progress-track" role="progressbar" id="progress-track" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-labelledby="progress-label">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <p class="progress-label" id="progress-label" role="status" aria-live="polite">Uploading: 0%</p>
+                    </div>
                 </form>
             </section>
 
@@ -143,5 +149,6 @@
             <p>DottedNotes Web Service &copy; 2026. Made with care for accessible sheet music.</p>
         </footer>
     </div>
+    <script src="/static/app.js" defer></script>
 </body>
 </html>
