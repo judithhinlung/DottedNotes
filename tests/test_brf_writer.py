@@ -37,3 +37,21 @@ def test_brf_writer(tmp_path):
     content = filepath.read_text(encoding="utf-8")
     # Content must contain only ASCII braille chars
     assert all(ord(c) < 128 or c in ('\n', '\r', '\f', '\t') for c in content)
+
+
+def test_brl_writer(tmp_path):
+    score = Score(title="Simple")
+    staff = Staff(name="Flute")
+    m = Measure(number=1)
+    m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(value=4, dots=0)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    filepath = tmp_path / "test.brl"
+    writer = BRFWriter(line_width=40, page_height=25)
+    writer.write_unicode(score, filepath)
+
+    assert filepath.exists()
+    content = filepath.read_text(encoding="utf-8")
+    # Content should contain Unicode braille cells (e.g. U+2800 range)
+    assert any(0x2800 <= ord(c) <= 0x28FF for c in content)

@@ -39,7 +39,8 @@
                             <label for="target_format">Target Format</label>
                             <select id="target_format" name="target_format">
                                 <option value="lilypond" selected>LilyPond (.ly, .pdf, .midi)</option>
-                                <option value="braille">Braille (.brf)</option>
+                                <option value="braille">Braille Music (.brf)</option>
+                                <option value="brl">Braille Music (.brl)</option>
                                 <option value="musicxml">MusicXML (.musicxml)</option>
                             </select>
                         </div>
@@ -72,6 +73,13 @@
                                 <option value="strict">Strict Profile (Extra Checks)</option>
                             </select>
                         </div>
+
+                        <div class="form-group checkbox-group">
+                            <label for="measure_numbers" class="checkbox-label">
+                                <input type="checkbox" id="measure_numbers" name="measure_numbers" value="true" checked>
+                                <span>Include Measure Numbers</span>
+                            </label>
+                        </div>
                     </div>
 
                     <!-- Advanced Toggle & Overrides -->
@@ -101,32 +109,35 @@
             <div id="status-announcement" class="sr-only" role="status" aria-live="polite"></div>
 
             <!-- Result Section -->
-            <section class="card result-card hidden" id="result-section" aria-labelledby="result-heading">
+            <section class="card result-card" id="result-section" aria-labelledby="result-heading">
                 <h2 id="result-heading">Translation Results</h2>
                 
                 <div class="result-status-bar" id="result-status-bar">
-                    <p>Status: <span id="status-badge" class="badge">Success</span></p>
+                    <p>Status: <span id="status-badge" class="badge neutral">No File</span></p>
                 </div>
 
                 <div class="download-container">
                     <h3>Generated Downloads</h3>
-                    <div class="download-links" id="download-links">
+                    <div id="download-status-region" aria-live="polite" class="status-msg">No file uploaded.</div>
+                    <div class="download-links hidden" id="download-links">
                         <!-- Populated by JavaScript -->
                     </div>
                 </div>
 
                 <!-- LilyPond Compile Log -->
-                <div class="compile-log-container hidden" id="compile-log-container">
+                <div class="compile-log-container" id="compile-log-container">
                     <h3>LilyPond Compilation Report</h3>
-                    <pre class="compile-log" id="compile-log"></pre>
+                    <div id="compile-status-region" aria-live="polite" class="status-msg">No file uploaded.</div>
+                    <pre class="compile-log hidden" id="compile-log"></pre>
                 </div>
             </section>
 
             <!-- BANA Validation Section -->
-            <section class="card validation-card hidden" id="validation-section" aria-labelledby="validation-heading">
+            <section class="card validation-card" id="validation-section" aria-labelledby="validation-heading">
                 <h2 id="validation-heading">BANA Formatting Rule Report</h2>
-                <p class="validation-summary" id="validation-summary">No warnings or errors flagged.</p>
-                <div class="table-responsive">
+                <div id="validation-status-region" aria-live="polite" class="status-msg">No file uploaded.</div>
+                <p class="validation-summary hidden" id="validation-summary">No warnings or errors flagged.</p>
+                <div class="table-responsive hidden" id="validation-table-wrapper">
                     <table class="validation-table" id="validation-table">
                         <thead>
                             <tr>

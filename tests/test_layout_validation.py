@@ -153,4 +153,7 @@ def test_layout_ensemble_parallel_spacing():
     
     # Exporting should format it with exactly 1 blank line before the parallel heading
     rendered = BrailleRenderer(line_width=15, compression_level="none").render(score)
-    assert "\n\n     ⠼" in rendered
+    lines = rendered.splitlines()
+    blank_indices = [i for i, line in enumerate(lines) if line == ""]
+    assert len(blank_indices) == 1
+    assert '⠼' in lines[blank_indices[0] + 1]

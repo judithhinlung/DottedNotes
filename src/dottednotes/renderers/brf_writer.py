@@ -28,10 +28,11 @@ def unicode_to_ascii_braille(text: str) -> str:
 
 
 class BRFWriter:
-    def __init__(self, line_width: int = 40, page_height: int = 25, show_measure_numbers: bool = True):
+    def __init__(self, line_width: int = 40, page_height: int = 25, show_measure_numbers: bool = True, compression_level: str = "full"):
         self.line_width = line_width
         self.page_height = page_height
         self.show_measure_numbers = show_measure_numbers
+        self.compression_level = compression_level
 
     def write(self, score: Score, filepath: Union[str, Path]) -> None:
         """Render a score and write it to a BRF file in ASCII braille."""
@@ -39,9 +40,18 @@ class BRFWriter:
         ascii_content = unicode_to_ascii_braille(brl_content)
         Path(filepath).write_text(ascii_content, encoding="utf-8")
 
+    def write_unicode(self, score: Score, filepath: Union[str, Path]) -> None:
+        """Render a score and write it to a BRL file in Unicode braille."""
+        brl_content = self.render_to_string(score)
+        Path(filepath).write_text(brl_content, encoding="utf-8")
+
     def render_to_string(self, score: Score) -> str:
         """Render the score to a paginated Unicode braille string."""
-        renderer = BrailleRenderer(line_width=self.line_width, show_measure_numbers=self.show_measure_numbers)
+        renderer = BrailleRenderer(
+            line_width=self.line_width,
+            show_measure_numbers=self.show_measure_numbers,
+            compression_level=self.compression_level
+        )
         raw_music = renderer.render(score)
         music_lines = [line.rstrip() for line in raw_music.splitlines()]
 

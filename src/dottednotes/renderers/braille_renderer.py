@@ -34,6 +34,27 @@ def center_line(text: str, width: int) -> str:
     return ' ' * left_padding + text
 
 
+def staff_abbreviation(staff_name: str) -> str:
+    """Look up a staff's BANA Table 29 abbreviation, falling back to its
+    first two letters (or "ms" for an unnamed staff) when not in the table."""
+    abbrev = TABLE_29_ENGLISH.get(staff_name)
+    if abbrev:
+        return abbrev
+    words = [w for w in staff_name.split() if w]
+    return words[0][:2].lower() if words else "ms"
+
+
+def ensemble_abbrev_prefix(staff_name: str, music_str: str) -> str:
+    """Build the '⠜XX' staff-abbreviation prefix for an ensemble system
+    line, appending the ⠄ separator when the line's first cell would
+    otherwise run into the abbreviation (same rule as the instrument-list
+    header)."""
+    prefix = '⠜' + staff_abbreviation(staff_name).upper()
+    if music_str and (ord(music_str[0]) - 0x2800) & 0x07 != 0:
+        prefix += '⠄'
+    return prefix
+
+
 def render_measure_slice(
     measures: list[Measure],
     start_idx: int,
@@ -179,8 +200,9 @@ class BrailleRenderer:
                 rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level)
                 lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level)
                 
-                test_rh = self._build_piano_line_from_strings(idx, rh_slice_strs, is_right=True)
-                test_lh = self._build_piano_line_from_strings(idx, lh_slice_strs, is_right=False)
+                m_num = rh_staff.measures[idx].number
+                test_rh = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
+                test_lh = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
                 
                 if len(test_rh) <= self.line_width and len(test_lh) <= self.line_width:
                     best_rh_lines = test_rh
@@ -195,8 +217,9 @@ class BrailleRenderer:
                 # Force at least one measure to avoid infinite loop
                 rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level)
                 lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level)
-                best_rh_lines = self._build_piano_line_from_strings(idx, rh_slice_strs, is_right=True)
-                best_lh_lines = self._build_piano_line_from_strings(idx, lh_slice_strs, is_right=False)
+                m_num = rh_staff.measures[idx].number
+                best_rh_lines = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
+                best_lh_lines = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
                 fit_size = 1
             else:
                 fit_size = group_size - 1
@@ -212,10 +235,12 @@ class BrailleRenderer:
 
         return "\n".join(lines) + "\n"
 
-    def _build_piano_line_from_strings(self, idx: int, measure_strs: list[str], is_right: bool) -> str:
-        first_num = idx + 1
-        num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(first_num))
-        prefix = num_str + " "
+    def _build_piano_line_from_strings(self, measure_num: int, measure_strs: list[str], is_right: bool) -> str:
+        if self.show_measure_numbers:
+            num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(measure_num))
+            prefix = num_str + " "
+        else:
+            prefix = ""
         
         hand_sign = '⠨⠜' if is_right else '⠸⠜'
         music_str = "".join(measure_strs)
@@ -237,11 +262,8 @@ class BrailleRenderer:
 
         # Instrument list
         for staff in score.staves:
-            abbrev = TABLE_29_ENGLISH.get(staff.name)
-            if not abbrev:
-                words = [w for w in staff.name.split() if w]
-                abbrev = words[0][:2].lower() if words else "ms"
-            
+            abbrev = staff_abbreviation(staff.name)
+
             name_brl = encode_literary_braille(staff.name)
             if len(name_brl) < 12:
                 padding = '⠐' * (12 - len(name_brl))
@@ -283,17 +305,8 @@ class BrailleRenderer:
                 for s_idx, staff in enumerate(score.staves):
                     slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level)
                     music_str = "".join(slice_strs)
-                    
-                    abbrev = TABLE_29_ENGLISH.get(staff.name)
-                    if not abbrev:
-                        words = [w for w in staff.name.split() if w]
-                        abbrev = words[0][:2].lower() if words else "ms"
-                    abbrev_prefix = '⠜' + abbrev.upper()
-                    if music_str:
-                        first_cell = music_str[0]
-                        if (ord(first_cell) - 0x2800) & 0x07 != 0:
-                            abbrev_prefix += '⠄'
-                            
+
+                    abbrev_prefix = ensemble_abbrev_prefix(staff.name, music_str)
                     test_line = abbrev_prefix + music_str
                     if len(test_line) > self.line_width:
                         all_fit = False
@@ -316,27 +329,40 @@ class BrailleRenderer:
                 for s_idx, staff in enumerate(score.staves):
                     slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, 1, prev_notes[s_idx], staff.time_signature, self.compression_level)
                     music_str = "".join(slice_strs)
-                    abbrev = TABLE_29_ENGLISH.get(staff.name)
-                    if not abbrev:
-                        words = [w for w in staff.name.split() if w]
-                        abbrev = words[0][:2].lower() if words else "ms"
-                    abbrev_prefix = '⠜' + abbrev.upper()
-                    if music_str:
-                        first_cell = music_str[0]
-                        if (ord(first_cell) - 0x2800) & 0x07 != 0:
-                            abbrev_prefix += '⠄'
+                    abbrev_prefix = ensemble_abbrev_prefix(staff.name, music_str)
                     best_staff_lines.append(abbrev_prefix + music_str)
                     best_prev_notes.append(tmp_prev)
                 fit_size = 1
             else:
                 fit_size = group_size - 1
                 
-            # Print heading
-            first_num = idx + 1
-            heading_line = "     ⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(first_num))
             if idx > 0:
                 lines.append("")
-            lines.append(heading_line)
+            if self.show_measure_numbers:
+                first_staff = score.staves[0]
+                first_slice_strs, _ = render_measure_slice(
+                    first_staff.measures, idx, fit_size, prev_notes[0], first_staff.time_signature, self.compression_level
+                )
+                music_str = "".join(first_slice_strs)
+                abbrev_prefix = ensemble_abbrev_prefix(first_staff.name, music_str)
+
+                heading_chars = [" "] * self.line_width
+                for k in range(fit_size):
+                    m = first_staff.measures[idx + k]
+                    num_str = "⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
+                    # BANA 33.4.6: the marking is "indented one cell beyond
+                    # the first music signs of the parallel" -- i.e. one
+                    # column past wherever this measure's own content
+                    # starts, not directly above it. So when a measure
+                    # opens with a 1-cell octave mark, the number lands on
+                    # the note itself; the offset is still applied even
+                    # when there's no octave mark to skip.
+                    col = len(abbrev_prefix) + sum(len(first_slice_strs[i]) for i in range(k)) + 1
+                    for char_idx, char in enumerate(num_str):
+                        if col + char_idx < self.line_width:
+                            heading_chars[col + char_idx] = char
+                heading_line = "".join(heading_chars).rstrip()
+                lines.append(heading_line)
             
             lines.extend(best_staff_lines)
             prev_notes = best_prev_notes

@@ -422,7 +422,7 @@ def test_cli_compression_option_writes_braille_output(monkeypatch, tmp_path, cap
     # controls that render (it has no effect on the default .ly output).
     brf_file = tmp_path / "test_comp.brf"
     brf_file.write_text("⠐⠹", encoding="utf-8")
-    out = tmp_path / "test_comp_out.brf"
+    out = tmp_path / "test_comp_out.brl"
     _run_main(monkeypatch, ["convert", str(brf_file), str(out), "--compression", "none"])
     captured = capsys.readouterr()
     assert "Error:" not in captured.err

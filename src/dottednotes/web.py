@@ -126,11 +126,12 @@ def read_root():
 @app.post("/api/convert")
 async def convert_file(
     file: UploadFile = File(...),
-    target_format: str = Form("lilypond"),  # "lilypond", "braille", "musicxml"
+    target_format: str = Form("lilypond"),  # "lilypond", "brf", "brl", "musicxml"
     category: Optional[str] = Form(None),   # "Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet"
     format_overrides: Optional[str] = Form(None),  # e.g., "paper_size=a4,margin_mm=12"
     compression: str = Form("full"),        # "none", "minimal", "full"
     profile: str = Form("standard"),        # "standard", "strict"
+    measure_numbers: bool = Form(False),
 ):
     # Enforce 1MB file limit
     contents = await file.read(1024 * 1024 + 1)
@@ -192,7 +193,11 @@ async def convert_file(
 
         if target_format == "lilypond":
             parsed_format_overrides = _parse_format(format_overrides) if format_overrides else None
-            rendered = score.to_lilypond(category_override=category, format_overrides=parsed_format_overrides)
+            rendered = score.to_lilypond(
+                category_override=category,
+                format_overrides=parsed_format_overrides,
+                measure_numbers=measure_numbers
+            )
             output_ly = job_dir / f"{input_path.stem}.ly"
             output_ly.write_text(rendered, encoding="utf-8")
             available_files["ly"] = f"/api/jobs/{job_id}/ly"
@@ -219,11 +224,21 @@ async def convert_file(
                 compile_success = False
                 compile_error = "LilyPond binary not installed. PDF/MIDI compilation skipped."
 
-        elif target_format == "braille":
-            rendered = score.to_braille(compression_level=compression)
-            output_brf = job_dir / f"{input_path.stem}_output.brf"
-            output_brf.write_text(rendered, encoding="utf-8")
-            available_files["brf"] = f"/api/jobs/{job_id}/brf"
+        elif target_format in ("braille", "brf", "brl"):
+            from .renderers.brf_writer import BRFWriter
+            writer = BRFWriter(
+                line_width=40,
+                show_measure_numbers=measure_numbers,
+                compression_level=compression
+            )
+            if target_format == "brl":
+                output_brl = job_dir / f"{input_path.stem}_output.brl"
+                writer.write_unicode(score, output_brl)
+                available_files["brl"] = f"/api/jobs/{job_id}/brl"
+            else:
+                output_brf = job_dir / f"{input_path.stem}_output.brf"
+                writer.write(score, output_brf)
+                available_files["brf"] = f"/api/jobs/{job_id}/brf"
 
         elif target_format == "musicxml":
             output_xml = job_dir / f"{input_path.stem}.musicxml"
@@ -266,6 +281,7 @@ def get_job_file(job_id: str, file_type: str):
         "pdf": (".pdf", "application/pdf"),
         "midi": (".midi", "audio/midi"),
         "brf": (".brf", "text/plain"),
+        "brl": (".brl", "text/plain"),
         "musicxml": (".musicxml", "application/xml"),
     }
 
@@ -279,7 +295,16 @@ def get_job_file(job_id: str, file_type: str):
     if not matching_files:
         raise HTTPException(status_code=404, detail=f"Requested file type '{file_type}' was not generated for this job.")
 
-    target_file = matching_files[0]
+    target_file = None
+    if file_type in ("brf", "brl"):
+        expected_suffix = f"_output.{file_type}"
+        for f in matching_files:
+            if f.name.endswith(expected_suffix):
+                target_file = f
+                break
+    if not target_file:
+        target_file = matching_files[0]
+        
     return FileResponse(
         path=target_file,
         media_type=media_type,

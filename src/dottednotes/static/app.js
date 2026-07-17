@@ -30,6 +30,115 @@ document.addEventListener('DOMContentLoaded', () => {
     const validationSummary = document.getElementById('validation-summary');
     const validationTbody = document.getElementById('validation-tbody');
 
+    // UI Status regions and wrappers
+    const downloadStatusRegion = document.getElementById('download-status-region');
+    const compileStatusRegion = document.getElementById('compile-status-region');
+    const validationStatusRegion = document.getElementById('validation-status-region');
+    const validationTableWrapper = document.getElementById('validation-table-wrapper');
+
+    function updateSectionState(section, state, details = {}) {
+        if (section === 'validation') {
+            if (state === 'no_file') {
+                validationStatusRegion.textContent = 'No file uploaded.';
+                validationStatusRegion.classList.remove('hidden');
+                validationSummary.classList.add('hidden');
+                validationTableWrapper.classList.add('hidden');
+            } else if (state === 'awaiting') {
+                validationStatusRegion.textContent = 'Awaiting translation.';
+                validationStatusRegion.classList.remove('hidden');
+                validationSummary.classList.add('hidden');
+                validationTableWrapper.classList.add('hidden');
+            } else if (state === 'in_progress') {
+                validationStatusRegion.textContent = 'Translation in progress...';
+                validationStatusRegion.classList.remove('hidden');
+                validationSummary.classList.add('hidden');
+                validationTableWrapper.classList.add('hidden');
+            } else if (state === 'empty') {
+                validationStatusRegion.textContent = '';
+                validationStatusRegion.classList.add('hidden');
+                validationSummary.textContent = 'No warnings or errors flagged.';
+                validationSummary.classList.remove('hidden');
+                validationTableWrapper.classList.add('hidden');
+            } else if (state === 'present') {
+                validationStatusRegion.textContent = '';
+                validationStatusRegion.classList.add('hidden');
+                validationSummary.textContent = `Found ${details.count} BANA formatting rule violation(s). Review recommendations below.`;
+                validationSummary.classList.remove('hidden');
+                validationTableWrapper.classList.remove('hidden');
+            }
+        } else if (section === 'downloads') {
+            if (state === 'no_file') {
+                statusBadge.textContent = 'No File';
+                statusBadge.className = 'badge neutral';
+                downloadStatusRegion.textContent = 'No file uploaded.';
+                downloadStatusRegion.classList.remove('hidden');
+                downloadLinks.classList.add('hidden');
+            } else if (state === 'awaiting') {
+                statusBadge.textContent = 'Awaiting Translation';
+                statusBadge.className = 'badge neutral';
+                downloadStatusRegion.textContent = 'Awaiting translation.';
+                downloadStatusRegion.classList.remove('hidden');
+                downloadLinks.classList.add('hidden');
+            } else if (state === 'in_progress') {
+                statusBadge.textContent = 'Translating';
+                statusBadge.className = 'badge neutral';
+                downloadStatusRegion.textContent = 'Translation in progress...';
+                downloadStatusRegion.classList.remove('hidden');
+                downloadLinks.classList.add('hidden');
+            } else if (state === 'empty') {
+                statusBadge.textContent = 'Success';
+                statusBadge.className = 'badge success';
+                downloadStatusRegion.textContent = 'No output files generated.';
+                downloadStatusRegion.classList.remove('hidden');
+                downloadLinks.classList.add('hidden');
+            } else if (state === 'present') {
+                const badgeText = details.badgeText || 'Success';
+                const badgeClass = details.badgeClass || 'success';
+                statusBadge.textContent = badgeText;
+                statusBadge.className = `badge ${badgeClass}`;
+                downloadStatusRegion.textContent = '';
+                downloadStatusRegion.classList.add('hidden');
+                downloadLinks.classList.remove('hidden');
+            } else if (state === 'error') {
+                statusBadge.textContent = 'Error';
+                statusBadge.className = 'badge error';
+                downloadStatusRegion.textContent = details.message || 'Conversion failed. See diagnostic details below.';
+                downloadStatusRegion.classList.remove('hidden');
+                downloadLinks.classList.add('hidden');
+            }
+        } else if (section === 'compile') {
+            if (state === 'no_file') {
+                compileStatusRegion.textContent = 'No file uploaded.';
+                compileStatusRegion.classList.remove('hidden');
+                compileLog.classList.add('hidden');
+            } else if (state === 'awaiting') {
+                compileStatusRegion.textContent = 'Awaiting translation.';
+                compileStatusRegion.classList.remove('hidden');
+                compileLog.classList.add('hidden');
+            } else if (state === 'in_progress') {
+                compileStatusRegion.textContent = 'Compilation in progress...';
+                compileStatusRegion.classList.remove('hidden');
+                compileLog.classList.add('hidden');
+            } else if (state === 'not_applicable') {
+                compileStatusRegion.textContent = 'Compilation not applicable for the selected target format.';
+                compileStatusRegion.classList.remove('hidden');
+                compileLog.classList.add('hidden');
+            } else if (state === 'success') {
+                compileStatusRegion.textContent = 'Compilation succeeded cleanly.';
+                compileStatusRegion.classList.remove('hidden');
+                compileLog.classList.add('hidden');
+            } else if (state === 'present') {
+                compileStatusRegion.textContent = 'Compilation failed. View log details below.';
+                compileStatusRegion.classList.remove('hidden');
+                compileLog.classList.remove('hidden');
+            } else if (state === 'error') {
+                compileStatusRegion.textContent = 'Error occurred during compilation.';
+                compileStatusRegion.classList.remove('hidden');
+                compileLog.classList.remove('hidden');
+            }
+        }
+    }
+
     // Handle drag and drop styling
     ['dragenter', 'dragover'].forEach(eventName => {
         uploadZone.addEventListener(eventName, (e) => {
@@ -86,6 +195,11 @@ document.addEventListener('DOMContentLoaded', () => {
         
         updateOptionVisibility(ext);
         announceStatus(`Selected file: ${file.name}`);
+
+        // Reset output states to awaiting
+        updateSectionState('validation', 'awaiting');
+        updateSectionState('downloads', 'awaiting');
+        updateSectionState('compile', 'awaiting');
     }
 
     function updateOptionVisibility(fileExt) {
@@ -100,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Show/hide compression: Only relevant when output is Braille
-        if (target === 'braille') {
+        if (target === 'braille' || target === 'brl') {
             groupCompression.classList.remove('hidden');
         } else {
             groupCompression.classList.add('hidden');
@@ -162,8 +276,11 @@ document.addEventListener('DOMContentLoaded', () => {
         progressFill.style.width = '0%';
     }
 
-    // Initialize option visibility
+    // Initialize option visibility and empty states
     updateOptionVisibility();
+    updateSectionState('validation', 'no_file');
+    updateSectionState('downloads', 'no_file');
+    updateSectionState('compile', 'no_file');
 
     // Form Submission
     form.addEventListener('submit', (e) => {
@@ -184,12 +301,14 @@ document.addEventListener('DOMContentLoaded', () => {
         setProgress(0, 'Uploading: 0%', false);
         announceStatus('Uploading and translating score. Please wait...', 'assertive');
 
-        // Hide old results
-        resultSection.classList.add('hidden');
-        validationSection.classList.add('hidden');
-        compileLogContainer.classList.add('hidden');
+        // Transition states to in_progress
+        updateSectionState('validation', 'in_progress');
+        updateSectionState('downloads', 'in_progress');
+        updateSectionState('compile', 'in_progress');
+
         downloadLinks.innerHTML = '';
         validationTbody.innerHTML = '';
+        compileLog.textContent = '';
 
         // XMLHttpRequest (not fetch) is used here specifically because it's
         // the only option that exposes upload progress events -- fetch has
@@ -243,60 +362,72 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function showError(message) {
-        resultSection.classList.remove('hidden');
-        statusBadge.textContent = 'Error';
-        statusBadge.className = 'badge error';
+        updateSectionState('downloads', 'error', { message: 'Conversion failed. See diagnostic details below.' });
+        updateSectionState('compile', 'error');
+        updateSectionState('validation', 'no_file');
         
-        downloadLinks.innerHTML = '<p class="error-text">Conversion failed. See diagnostic details below.</p>';
-        
-        compileLogContainer.classList.remove('hidden');
         compileLog.textContent = message;
-        
         announceStatus(`Conversion failed. Error details: ${message}`, 'assertive');
     }
 
     function showResults(data) {
-        resultSection.classList.remove('hidden');
+        // 1. Compile status check and state transitions
+        let badgeText = 'Success';
+        let badgeClass = 'success';
+        let compileState = 'not_applicable';
+        let announceText = 'Score translated successfully! Download links are ready below.';
 
-        // 1. Compile status check
-        if (data.target_format === 'lilypond' && data.compile_success === false) {
-            statusBadge.textContent = 'Conversion Success (Compile Failed)';
-            statusBadge.className = 'badge warning';
-            
-            compileLogContainer.classList.remove('hidden');
-            compileLog.textContent = data.compile_error || 'LilyPond compilation failed.';
-            announceStatus('Score converted successfully to LilyPond, but PDF/MIDI compilation failed.', 'polite');
-        } else {
-            statusBadge.textContent = 'Success';
-            statusBadge.className = 'badge success';
-            announceStatus('Score translated successfully! Download links are ready below.', 'polite');
+        if (data.target_format === 'lilypond') {
+            if (data.compile_success === false) {
+                badgeText = 'Conversion Success (Compile Failed)';
+                badgeClass = 'warning';
+                compileState = 'present';
+                compileLog.textContent = data.compile_error || 'LilyPond compilation failed.';
+                announceText = 'Score converted successfully to LilyPond, but PDF/MIDI compilation failed.';
+            } else {
+                compileState = 'success';
+            }
         }
-
+        
+        // Update compile section state
+        updateSectionState('compile', compileState);
+        
         // 2. Download Buttons
-        const buttonInfo = {
-            'ly': { text: '🎼 LilyPond Source', title: 'Download LilyPond score source file' },
-            'pdf': { text: '📄 PDF Sheet Music', title: 'Download compiled PDF sheet music' },
-            'midi': { text: '🎵 MIDI Audio', title: 'Download compiled MIDI audio file' },
-            'brf': { text: '⠃ BANA Braille (BRF)', title: 'Download formatted braille music file' },
-            'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' }
-        };
+        downloadLinks.innerHTML = '';
+        const files = data.files || {};
+        const fileKeys = Object.keys(files);
+        
+        if (fileKeys.length > 0) {
+            const buttonInfo = {
+                'ly': { text: '🎼 LilyPond Source', title: 'Download LilyPond score source file' },
+                'pdf': { text: '📄 PDF Sheet Music', title: 'Download compiled PDF sheet music' },
+                'midi': { text: '🎵 MIDI Audio', title: 'Download compiled MIDI audio file' },
+                'brf': { text: '⠃ BANA Braille (BRF)', title: 'Download formatted ASCII braille music file' },
+                'brl': { text: '⠃ BANA Braille (BRL)', title: 'Download formatted Unicode braille music file' },
+                'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' }
+            };
 
-        for (const [key, url] of Object.entries(data.files)) {
-            const info = buttonInfo[key] || { text: `Download ${key.toUpperCase()}`, title: 'Download file' };
-            const link = document.createElement('a');
-            link.href = url;
-            link.className = 'download-btn';
-            link.textContent = info.text;
-            link.title = info.title;
-            link.setAttribute('aria-label', info.title);
-            downloadLinks.appendChild(link);
+            for (const [key, url] of Object.entries(files)) {
+                const info = buttonInfo[key] || { text: `Download ${key.toUpperCase()}`, title: 'Download file' };
+                const link = document.createElement('a');
+                link.href = url;
+                link.className = 'download-btn';
+                link.textContent = info.text;
+                link.title = info.title;
+                link.setAttribute('aria-label', info.title);
+                downloadLinks.appendChild(link);
+            }
+            
+            updateSectionState('downloads', 'present', { badgeText: badgeText, badgeClass: badgeClass });
+        } else {
+            updateSectionState('downloads', 'empty');
         }
+        
+        announceStatus(announceText, 'polite');
 
         // 3. Validation Report
+        validationTbody.innerHTML = '';
         if (data.validation_report && data.validation_report.length > 0) {
-            validationSection.classList.remove('hidden');
-            validationSummary.textContent = `Found ${data.validation_report.length} BANA formatting rule violation(s). Review recommendations below.`;
-
             data.validation_report.forEach(c => {
                 const tr = document.createElement('tr');
                 
@@ -337,6 +468,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 validationTbody.appendChild(tr);
             });
+            
+            updateSectionState('validation', 'present', { count: data.validation_report.length });
+        } else {
+            updateSectionState('validation', 'empty');
         }
     }
 });

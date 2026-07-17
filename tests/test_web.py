@@ -9,6 +9,20 @@ def test_read_root():
     assert response.status_code == 200
     assert "<!DOCTYPE html>" in response.text
 
+
+def test_index_html_has_measure_numbers_checkbox_and_brl_option():
+    # Regression test: the "Include Measure Numbers" checkbox (S11c-3) and
+    # the .brl dropdown option (S11c-4) both landed in index.html and were
+    # then accidentally reverted by a later commit that touched the same
+    # file. The backend keeps working either way, so nothing else in the
+    # suite would have caught the UI regression -- this reads the actual
+    # served markup instead of just exercising /api/convert.
+    response = client.get("/")
+    assert response.status_code == 200
+    assert 'name="measure_numbers"' in response.text
+    assert 'type="checkbox"' in response.text
+    assert '<option value="brl">' in response.text
+
 def test_convert_braille_to_lilypond():
     # '⠐⠹' represents C4 in braille music
     file_content = b"\x10\x39" # ASCII braille equivalent of ⠐⠹ if tokenized
@@ -112,3 +126,99 @@ def test_invalid_job_id():
     
     response = client.get("/api/jobs/invalid_chars_$_%/ly")
     assert response.status_code == 400
+
+
+def test_convert_with_measure_numbers_checkbox():
+    # '⠐⠹' represents C4 in braille music
+    file_content = "⠐⠹".encode("utf-8")
+    
+    # 1. With measure_numbers=true (in LilyPond)
+    response_ly = client.post(
+        "/api/convert",
+        files={"file": ("test.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "lilypond",
+            "category": "Solo Piano",
+            "profile": "standard",
+            "measure_numbers": "true"
+        }
+    )
+    assert response_ly.status_code == 200
+    job_id = response_ly.json()["job_id"]
+    download_ly = client.get(f"/api/jobs/{job_id}/ly")
+    assert "% 1" in download_ly.text  # LilyPond comment for measure 1
+    
+    # 2. With measure_numbers=true (in Braille - BRL format)
+    response_brf = client.post(
+        "/api/convert",
+        files={"file": ("test.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "brl",
+            "compression": "none",
+            "profile": "standard",
+            "measure_numbers": "true"
+        }
+    )
+    assert response_brf.status_code == 200
+    job_id = response_brf.json()["job_id"]
+    download_brf = client.get(f"/api/jobs/{job_id}/brl")
+    assert "⠁ " in download_brf.text  # Braille measure number 1 at start of line
+    
+    # 3. With measure_numbers=false (in Braille - BRL format)
+    response_brf_off = client.post(
+        "/api/convert",
+        files={"file": ("test.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "brl",
+            "compression": "none",
+            "profile": "standard",
+            "measure_numbers": "false"
+        }
+    )
+    assert response_brf_off.status_code == 200
+    job_id = response_brf_off.json()["job_id"]
+    download_brf_off = client.get(f"/api/jobs/{job_id}/brl")
+    assert "⠁ " not in download_brf_off.text
+
+
+def test_convert_brf_and_brl_formats():
+    # '⠐⠹' represents C4 in braille music
+    file_content = "⠐⠹".encode("utf-8")
+    
+    # 1. Convert to target_format="brf" (ASCII braille)
+    response_brf = client.post(
+        "/api/convert",
+        files={"file": ("test.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "brf",
+            "compression": "none",
+            "profile": "standard",
+            "measure_numbers": "true"
+        }
+    )
+    assert response_brf.status_code == 200
+    job_id = response_brf.json()["job_id"]
+    download_brf = client.get(f"/api/jobs/{job_id}/brf")
+    assert download_brf.status_code == 200
+    text_brf = download_brf.text
+    # Content must contain only ASCII braille chars
+    assert all(ord(c) < 128 or c in ('\n', '\r', '\f', '\t') for c in text_brf)
+    
+    # 2. Convert to target_format="brl" (Unicode braille)
+    response_brl = client.post(
+        "/api/convert",
+        files={"file": ("test.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "brl",
+            "compression": "none",
+            "profile": "standard",
+            "measure_numbers": "true"
+        }
+    )
+    assert response_brl.status_code == 200
+    job_id = response_brl.json()["job_id"]
+    download_brl = client.get(f"/api/jobs/{job_id}/brl")
+    assert download_brl.status_code == 200
+    text_brl = download_brl.text
+    # Content should contain Unicode braille cells (e.g. U+2800 range)
+    assert any(0x2800 <= ord(c) <= 0x28FF for c in text_brl)

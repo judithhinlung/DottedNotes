@@ -204,7 +204,18 @@ def _run_convert(args: argparse.Namespace) -> None:
                 raise DottedNotesError(
                     "--compile requires LilyPond (.ly) output, not a .brf/.brl output path."
                 )
-            rendered = score.to_braille(compression_level=args.compression)
+            from dottednotes.renderers.brf_writer import BRFWriter, unicode_to_ascii_braille
+            writer = BRFWriter(
+                line_width=40,
+                show_measure_numbers=args.measure_numbers,
+                compression_level=args.compression,
+            )
+            is_brl = output_path is not None and Path(output_path).suffix.lower() == ".brl"
+            if is_brl:
+                rendered = writer.render_to_string(score)
+            else:
+                brl_content = writer.render_to_string(score)
+                rendered = unicode_to_ascii_braille(brl_content)
         else:
             rendered = score.to_lilypond(
                 category_override=category_override,

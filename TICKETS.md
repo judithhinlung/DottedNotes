@@ -6715,3 +6715,70 @@ Estimated time: 1–1.5 weeks.
 - [x] Run-over lines are properly indented (to cell 3 for solo/keyboard, cell 5 for vocal).
 - [x] All unit and integration tests pass.
 
+---
+
+### [x] S11c-3: Implement Measure Numbers in Braille Music and UI Integration
+
+**Why:** The user wants to easily locate and reference measures in both braille music and LilyPond. Emitting measure numbers helps blind musicians keep track of score positions. Adding a checkbox in the web UI lets users toggle this option dynamically.
+
+**Steps:**
+1. Update `src/dottednotes/static/index.html` to include a checkbox "Include Measure Numbers" in the settings grid. Add corresponding styling in `src/dottednotes/static/style.css` if needed.
+2. Update the `/api/convert` endpoint in `src/dottednotes/web.py` to accept a `measure_numbers: bool = Form(False)` field and pass it to both `to_lilypond` and `to_braille`.
+3. Update `Score.to_braille` in `src/dottednotes/models/score.py` to accept `measure_numbers` and pass it to `BrailleRenderer`.
+4. Update CLI (`src/dottednotes/cli.py`) to pass the `--measure-numbers` flag to `to_braille`.
+5. Update `BrailleRenderer` in `src/dottednotes/renderers/braille_renderer.py` to format measure numbers per BANA rules:
+   - For **solo and solo piano** formats: format the measure numbers using literary digits **without** the number sign (e.g. `BJ` for measure 20), followed by a space.
+   - For **ensemble** formats: format the measure numbers using literary digits **with** the number sign (e.g. `#BJ` / `⠼⠃⠚`), aligned vertically in the heading line above each measure's start in the top staff.
+6. Write comprehensive unit and integration tests verifying the measure number formatting for all layouts (solo, piano, ensemble) and the UI/API checkbox integration.
+
+**Definition of Done:**
+- [x] UI has a checkbox for measure numbers.
+- [x] Backend endpoint `/api/convert` accepts `measure_numbers` form parameter.
+- [x] For solo/piano format, measure numbers are printed in the left margin without number sign, followed by a space.
+- [x] For ensemble format, measure numbers are printed above each measure's start, preceded by the number sign.
+- [x] Omitted or disabled measure numbers do not print numbers at all.
+- [x] Existing tests and new tests all pass.
+
+---
+
+### [x] S11c-4: Support .brl (Unicode) and .brf (ASCII) Braille Export
+
+**Why:** The user wants to support both `.brf` (ASCII Braille text) and `.brl` (Unicode Braille dots) file formats. Currently, DottedNotes writes Unicode braille to `.brf` files, which is incorrect as `.brf` files should contain standard ASCII braille. Adding `.brl` provides proper support for modern screen readers and braille displays attached to computers.
+
+**Steps:**
+1. Update `src/dottednotes/static/index.html` to add options for both `.brf` (ASCII) and `.brl` (Unicode) braille.
+2. Update `src/dottednotes/static/app.js` to enable setting overrides/controls for both formats.
+3. Update `BRFWriter` in `src/dottednotes/renderers/brf_writer.py` to support `compression_level` and write raw Unicode braille for `.brl`.
+4. Update FastAPI backend `web.py` to route `target_format` of `brf` and `brl` to the paginated `BRFWriter`.
+5. Update `cli.py` to write ASCII or Unicode braille based on output file extension (`.brf` vs `.brl`).
+6. Write tests verifying the formats.
+
+**Definition of Done:**
+- [x] UI dropdown has "Braille Music (.brf)" and "Braille Music (.brl)".
+- [x] Web backend routes both formats correctly.
+- [x] `.brf` files contain only ASCII braille characters.
+- [x] `.brl` files contain raw Unicode braille characters.
+- [x] CLI correctly differentiates formats by extension.
+- [x] Existing tests and new tests all pass.
+
+---
+
+### [x] S11c-5: Accessible UI Empty-State Handlers for Result Reports
+
+**Why:** The results UI has three main report blocks (BANA violations table, Generated downloads, and LilyPond compilation report) which render in an ambiguous/hidden state before a file is parsed. We want these sections to transition cleanly through four explicit states: (1) No file uploaded yet, (2) Awaiting translation / in progress, (3) Translation complete but nothing to report, (4) Content present. The messages must be fully accessible and announced to screen readers.
+
+**Steps:**
+1. Update `TICKETS.md` (this ticket).
+2. Add `.badge.neutral` style to `src/dottednotes/static/style.css`. Remove `.hidden` class from parent `#result-section` and `#validation-section` classes in `index.html` to keep cards persistently rendered.
+3. Add status wrappers with `aria-live="polite"` to `index.html` for downloads, compile log, and validation reports.
+4. Implement `updateSectionState` helper in `app.js` and hook it into DOM initialization, file select, form submit, conversion success, and conversion failure lifecycles.
+5. Verify screen reader landmarks, semantic accessibility markup, and visual states.
+
+**Definition of Done:**
+- [x] BANA report, downloads, and compilation logs transition correctly through all 4 states.
+- [x] No file structures (tables, lists, pre blocks) render when empty or not applicable.
+- [x] State messages have appropriate `aria-live` regions or semantic markup.
+- [x] All 880+ existing test cases pass.
+
+
+
