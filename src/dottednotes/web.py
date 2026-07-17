@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -140,7 +141,9 @@ async def convert_file(
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
-    input_filename = file.filename or "input.brf"
+    input_filename = Path(file.filename or "input.brf").name
+    if not input_filename or input_filename in (".", ".."):
+        input_filename = "input.brf"
     input_path = job_dir / input_filename
     input_path.write_bytes(contents)
 
@@ -248,8 +251,9 @@ async def convert_file(
 
 @app.get("/api/jobs/{job_id}/{file_type}")
 def get_job_file(job_id: str, file_type: str):
-    # Sanitize inputs
-    if not job_id.isalnum() and "-" not in job_id:
+    # Sanitize inputs: job IDs are always our own uuid4() strings, so no
+    # path separators or other special characters are ever legitimate here.
+    if not re.fullmatch(r"[A-Za-z0-9-]+", job_id):
         raise HTTPException(status_code=400, detail="Invalid job ID format.")
     
     job_dir = JOBS_DIR / job_id

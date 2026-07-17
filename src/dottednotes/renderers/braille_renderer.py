@@ -76,8 +76,9 @@ class BrailleRenderer:
         # isinstance(score, OrchestraScore): LilypondParser tags any parsed
         # score containing "PianoStaff" as an OrchestraScore, so a 2-staff
         # piano score must not automatically fall into ensemble layout.
+        from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
         is_piano = len(score.staves) == 2 and any(
-            "piano" in s.name.lower() or "harp" in s.name.lower() for s in score.staves
+            get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP for s in score.staves
         )
         is_ensemble = not is_piano and (isinstance(score, OrchestraScore) or len(score.staves) > 2)
 

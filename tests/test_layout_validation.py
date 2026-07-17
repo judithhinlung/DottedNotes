@@ -100,12 +100,35 @@ def test_layout_piano_parallel_spacing():
     validator = BANAValidator(enabled_rules=["S11c-2"])
     result = validator.validate(score, raw_brl_text=brf_text)
     
-    piano_warns = [c for c in result.corrections if "Keyboard parallels must be separated by exactly 2 blank lines" in c.message]
+    piano_warns = [c for c in result.corrections if "Keyboard parallels must be separated by at least 2 blank lines" in c.message]
     assert len(piano_warns) == 1
-    
+
     # Exporting should format it with exactly 2 blank lines between parallels
     rendered = BrailleRenderer(line_width=8, compression_level="none").render(score)
     assert "\n\n\n" in rendered
+
+
+def test_layout_organ_parallel_spacing():
+    # Same violation as test_layout_piano_parallel_spacing (only 1 blank line
+    # between parallels), but with staff names that don't literally contain
+    # "piano"/"harp" -- regression test for the keyboard-family detection
+    # bug where "Organ"/"Harpsichord"/etc. staves fell through to the solo
+    # layout, which has no parallel-spacing check at all.
+    brf_text = "⠁⠀⠨⠜⠐⠹\n⠀⠀⠸⠜⠐⠹\n\n⠃⠀⠨⠜⠐⠹\n⠀⠀⠸⠜⠐⠹"
+
+    score = parse_brf(brf_text)
+    score.staves[0].name = "Organ right hand"
+    score.staves[1].name = "Organ left hand"
+
+    validator = BANAValidator(enabled_rules=["S11c-2"])
+    result = validator.validate(score, raw_brl_text=brf_text)
+
+    organ_warns = [c for c in result.corrections if "Keyboard parallels must be separated by at least 2 blank lines" in c.message]
+    assert len(organ_warns) == 1
+
+    # Exporting must not silently drop the left-hand staff either.
+    rendered = BrailleRenderer(line_width=8, compression_level="none").render(score)
+    assert "⠨⠜" in rendered and "⠸⠜" in rendered
 
 
 def test_layout_ensemble_parallel_spacing():
@@ -125,7 +148,7 @@ def test_layout_ensemble_parallel_spacing():
     validator = BANAValidator(enabled_rules=["S11c-2"])
     result = validator.validate(score, raw_brl_text=brf_text)
     
-    ensemble_warns = [c for c in result.corrections if "Ensemble parallels must be preceded by exactly 1 blank line" in c.message]
+    ensemble_warns = [c for c in result.corrections if "Ensemble parallels must be preceded by at least 1 blank line" in c.message]
     assert len(ensemble_warns) == 1
     
     # Exporting should format it with exactly 1 blank line before the parallel heading

@@ -294,6 +294,17 @@ class BANAValidator:
                 prev_val = last_note.octave * 7 + PITCH_CLASS_TO_DIATONIC[last_note.note_name]
                 diff = abs(curr_val - prev_val)
 
+                # "Missing octave mark" checks for a 6th+ interval, or a
+                # 4th/5th that crosses octaves, are NOT done here: the
+                # parser itself (BrailleParser._resolve_unmarked_octave)
+                # now resolves any unmarked note to the nearest octave per
+                # this same rule (BANA Sec. 3.2.2), so curr_note.octave is
+                # never actually a 6th+ away, and never crosses octaves on
+                # an unmarked 4th/5th -- there is nothing left to flag from
+                # the resolved pitches. Only redundant (unnecessary)
+                # explicit marks are still detectable here, since the
+                # parser trusts an explicit mark at face value rather than
+                # second-guessing it.
                 if diff <= 2:
                     # 2nd or 3rd: octave mark must not be present
                     if has_mark:
@@ -304,28 +315,10 @@ class BANAValidator:
                             severity="warning",
                             rule_id="S9b-3"
                         ))
-                elif diff >= 5:
-                    # 6th or greater: octave mark must be present
-                    if not has_mark:
-                        corrections.append(Correction(
-                            line_number=line_num,
-                            measure_number=m_num,
-                            message=f"Missing octave mark on note '{curr_note.note_name}' (interval of 6th or greater).",
-                            severity="warning",
-                            rule_id="S9b-3"
-                        ))
                 elif diff in (3, 4):
-                    # 4th or 5th: mark only if crossing octaves
+                    # 4th or 5th: redundant if marked but not crossing octaves
                     crosses = (curr_note.octave != last_note.octave)
-                    if crosses and not has_mark:
-                        corrections.append(Correction(
-                            line_number=line_num,
-                            measure_number=m_num,
-                            message=f"Missing octave mark on note '{curr_note.note_name}' (interval of 4th/5th crossing octaves).",
-                            severity="warning",
-                            rule_id="S9b-3"
-                        ))
-                    elif not crosses and has_mark:
+                    if not crosses and has_mark:
                         corrections.append(Correction(
                             line_number=line_num,
                             measure_number=m_num,
@@ -654,8 +647,9 @@ class BANAValidator:
         corrections = []
         pages = raw_brl_text.split('\f')
 
+        from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
         is_piano = len(score.staves) == 2 and any(
-            "piano" in s.name.lower() or "harp" in s.name.lower() for s in score.staves
+            get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP for s in score.staves
         )
         from dottednotes.models.orchestra_score import OrchestraScore
         is_ensemble = not is_piano and (isinstance(score, OrchestraScore) or len(score.staves) > 2)
@@ -778,14 +772,14 @@ class BANAValidator:
                     lh_idx = lh_indices[k]
                     rh_idx = rh_indices[k+1]
                     actual_blanks = sum(1 for line_idx in range(lh_idx + 1, rh_idx) if p_lines[line_idx].strip() == "")
-                    if actual_blanks != 2:
+                    if actual_blanks < 2:
                         corrections.append(Correction(
                             line_number=global_line_offset + lh_idx + 1,
                             measure_number=0,
-                            message=f"BANA Parallel Spacing Violation: Keyboard parallels must be separated by exactly 2 blank lines (found {actual_blanks}).",
+                            message=f"BANA Parallel Spacing Violation: Keyboard parallels must be separated by at least 2 blank lines (found {actual_blanks}).",
                             severity="warning",
                             rule_id="S11c-2",
-                            proposed_fix="Ensure 2 blank lines between parallels."
+                            proposed_fix="Ensure at least 2 blank lines between parallels."
                         ))
             elif is_ensemble:
                 from dottednotes.parser.ensemble_parser import extract_measure_number
@@ -800,10 +794,10 @@ class BANAValidator:
                         corrections.append(Correction(
                             line_number=global_line_offset + h_idx,
                             measure_number=0,
-                            message="BANA Parallel Spacing Violation: Ensemble parallels must be preceded by exactly 1 blank line.",
+                            message="BANA Parallel Spacing Violation: Ensemble parallels must be preceded by at least 1 blank line.",
                             severity="warning",
                             rule_id="S11c-2",
-                            proposed_fix="Insert 1 blank line before parallel."
+                            proposed_fix="Insert at least 1 blank line before parallel."
                         ))
             global_line_offset += len(p_lines) + 1
 
