@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 VALID_DURATIONS = {0, 1, 2, 4, 8, 16, 32, 64}
