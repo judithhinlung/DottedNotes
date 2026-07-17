@@ -448,6 +448,78 @@ def test_standalone_whole_note_exactly_filling_measure_is_unaffected():
     assert not caught
 
 
+# --- BANA Sec. 5.1: a lone ambiguous whole/16th rest cell (⠍) is always a
+#     whole-measure rest, regardless of time signature, except in 4/2 time ---
+
+
+def test_lone_ambiguous_rest_is_full_measure_in_3_4():
+    # Before the fix: Bug B's overflow check (built for notes) treated a
+    # literal "whole rest" as 4 beats, which overflows a 3/4 measure, so it
+    # silently demoted this to a 16th rest instead of a dotted-half
+    # full-measure rest.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        notes = _parse('⠼⠉⠲⠍')  # 3/4 time, lone ⠍ rest
+    assert notes[0].duration.value == 2
+    assert notes[0].duration.dots == 1
+    assert notes[0].is_full_measure is True
+    assert not caught  # no beat-count mismatch warning
+
+
+def test_lone_ambiguous_rest_is_full_measure_in_6_8():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        notes = _parse('⠼⠋⠦⠍')  # 6/8 time, lone ⠍ rest
+    assert notes[0].duration.value == 2
+    assert notes[0].duration.dots == 1
+    assert notes[0].is_full_measure is True
+    assert not caught
+
+
+def test_lone_ambiguous_rest_is_full_measure_in_2_4():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        notes = _parse('⠼⠃⠲⠍')  # 2/4 time, lone ⠍ rest
+    assert notes[0].duration.value == 2
+    assert notes[0].duration.dots == 0
+    assert notes[0].is_full_measure is True
+    assert not caught
+
+
+def test_lone_ambiguous_rest_still_whole_measure_in_4_4():
+    # 4/4 already worked before the fix, by coincidence (a literal whole
+    # rest's tick length happens to equal a 4/4 measure's) -- must still work.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        notes = _parse('⠼⠙⠲⠍')  # 4/4 time, lone ⠍ rest
+    assert notes[0].duration.value == 1
+    assert notes[0].is_full_measure is True
+    assert not caught
+
+
+def test_lone_ambiguous_rest_in_4_2_keeps_prior_ambiguity_resolution():
+    # BANA Sec. 5.1's stated exception: in 4/2 time the ambiguity is real,
+    # so the ordinary note-style whole/16th state machine (not a full-
+    # measure-rest override) still applies -- unlike every other time
+    # signature. A literal whole rest (4 beats) doesn't overflow an 8-beat
+    # 4/2 measure, so Bug B leaves it as a plain (non-full-measure) whole
+    # rest here, same as before this fix.
+    notes = _parse('⠼⠙⠆⠍')  # 4/2 time, lone ⠍ rest
+    assert notes[0].duration.value == 1
+    assert notes[0].is_full_measure is False
+
+
+def test_rest_run_adjacency_unaffected_by_full_measure_rule():
+    # The full-measure-rest override only applies to a *lone* rest
+    # (len(pending) == 1) -- it must not interfere with the existing
+    # run/individual adjacency resolution for consecutive ambiguous cells.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse('⠼⠉⠲⠍⠭')  # 3/4 time, ⠍ followed by ⠭ (genuine 8th) -> run
+    assert notes[0].duration.value == 16
+    assert notes[0].is_full_measure is False
+
+
 # --- S5-8: single-cell triplet sign (BANA 8.4) ---
 
 

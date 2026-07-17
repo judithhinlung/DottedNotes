@@ -1585,12 +1585,32 @@ class BrailleParser:
         # reconstruct two independent voices instead of stacked notes.
         divisi_partners: list = []
         for pnote, dur_value in zip(pending, resolved):
-            dur = Duration(value=dur_value, dots=pnote.dots, is_triplet=pnote.is_triplet)
             if isinstance(pnote, _PendingRest):
-                is_full = (
-                    len(pending) == 1
-                    and dur.duration_in_ticks() == measure_ticks
+                # BANA Sec. 5.1: a lone dots-1-3-4 rest cell (REST_CELLS'
+                # ambiguous base_duration 1, ⠍) not resolved to a 16th by
+                # the run/individual adjacency rules above always means
+                # "rest for the whole measure", regardless of time
+                # signature -- except in 4/2 time, where the ambiguity is
+                # real and _resolve_measure_durations' ordinary note-style
+                # whole/16th state machine (including its overflow-based
+                # "Bug B" re-check) still applies. Without this, the full-
+                # measure reading only ever happened to work in 4/4, where
+                # a literal whole note's tick length happens to equal the
+                # measure's -- every other time signature overflowed Bug B
+                # and silently became a 16th rest instead.
+                is_four_two = (
+                    self._time_signature.numerator == 4
+                    and self._time_signature.denominator == 2
                 )
+                if len(pending) == 1 and pnote.base_duration == 1 and not is_four_two:
+                    dur = self._time_signature.get_full_measure_duration()
+                    is_full = True
+                else:
+                    dur = Duration(value=dur_value, dots=pnote.dots, is_triplet=pnote.is_triplet)
+                    is_full = (
+                        len(pending) == 1
+                        and dur.duration_in_ticks() == measure_ticks
+                    )
                 items.append(Rest(
                     dots=frozenset(),
                     category=SymbolCategory.REST,
@@ -1601,6 +1621,7 @@ class BrailleParser:
                 ))
                 divisi_partners.append(None)
                 continue
+            dur = Duration(value=dur_value, dots=pnote.dots, is_triplet=pnote.is_triplet)
             written = Note(
                 dots=frozenset(),
                 category=SymbolCategory.NOTE,
