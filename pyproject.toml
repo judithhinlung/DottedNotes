@@ -23,6 +23,13 @@ dottednotes = "dottednotes.cli:main"
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    # starlette.testclient (via fastapi.testclient, used in test_web.py)
+    # requires httpx on starlette<0.50 (the last version supporting Python
+    # 3.9) and httpx2 on starlette>=0.50 (which requires Python >=3.10) --
+    # neither package alone installs cleanly across our full 3.9-3.11
+    # support matrix, so both are pulled in behind version markers.
+    "httpx; python_version < \"3.10\"",
+    "httpx2; python_version >= \"3.10\"",
 ]
 
 [tool.setuptools.packages.find]
