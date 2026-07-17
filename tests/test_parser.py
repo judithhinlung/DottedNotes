@@ -4091,13 +4091,20 @@ def test_in_accord_to_relative_lilypond_structure():
     assert ly.count('\\\\') == 1  # exactly one separator for two voices
 
 
-def test_in_accord_to_relative_lilypond_prev_midi_advances_with_primary_voice():
-    # After the in-accord block, prev_midi should reflect the last note of voice 1 (F4 = 65).
+def test_in_accord_to_relative_lilypond_prev_midi_advances_through_last_voice():
+    # LilyPond's \relative pitch tracking treats '<<', '\\', and '>>' as
+    # complete no-ops -- a purely sequential/textual chain through the
+    # token stream (verified against real `lilypond`'s `\displayLilyMusic`
+    # output; see test_lilypond_parser.py's in-accord tests for the
+    # disambiguating cases). So prev_midi must advance through voice 1
+    # (C4 D4 E4 F4, ending at F4=65) and then through voice 2, which
+    # chains from voice 1's F4 rather than resetting to the original
+    # prev_midi=60: G4=67, A4=69, B4=71, C5=72.
     items = _parse_in_accord(_FULL_ACCORD)
     ia = items[0]
     _, new_midi = ia.to_relative_lilypond(60)
-    # F4 = MIDI 65
-    assert new_midi == 65
+    # C5 = MIDI 72
+    assert new_midi == 72
 
 
 def test_in_accord_renders_inside_measure_to_lilypond():

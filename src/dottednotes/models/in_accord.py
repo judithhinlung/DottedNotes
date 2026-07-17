@@ -49,18 +49,21 @@ class InAccord:
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Render as LilyPond simultaneous voices.
 
-        Each voice resets to `prev_midi` as its relative-mode reference
-        (LilyPond behaviour: each `{ }` inside `<< >>` inherits the reference
-        from before the block).  After `>>`, the reference advances to the last
-        note of `parts[0]` (the primary voice), matching LilyPond's own rule.
+        LilyPond's \\relative pitch tracking treats '<<', '\\\\', and '>>' as
+        complete no-ops -- it is a purely sequential/textual chain through the
+        token stream, blind to the << \\\\ >> structure (verified against the
+        real `lilypond` binary's `\\displayLilyMusic` output). So voice 2's
+        first note continues the reference from voice 1's LAST note (not from
+        `prev_midi`, the pitch before '<<'), voice 3 continues from voice 2's
+        last note, and whatever follows '>>' continues from the LAST voice's
+        last note, not `parts[0]`'s.
 
         Returns (lilypond_str, new_prev_midi).
         """
         voice_strs: list[str] = []
-        last_midi = prev_midi
+        cur_midi = prev_midi
 
-        for idx, part in enumerate(self.parts):
-            cur_midi = prev_midi  # each voice starts from the same reference
+        for part in self.parts:
             note_strs: list[str] = []
             for item in part:
                 if hasattr(item, 'to_relative_lilypond'):
@@ -69,7 +72,5 @@ class InAccord:
                     s = item.to_lilypond()
                 note_strs.append(s)
             voice_strs.append('{ ' + ' '.join(note_strs) + ' }')
-            if idx == 0:
-                last_midi = cur_midi  # primary voice sets the post-block reference
 
-        return '<< ' + ' \\\\ '.join(voice_strs) + ' >>', last_midi
+        return '<< ' + ' \\\\ '.join(voice_strs) + ' >>', cur_midi

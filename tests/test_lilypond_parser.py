@@ -296,53 +296,84 @@ def test_in_accord_parses_two_independent_voices():
         [("D", 4), ("G", 4), ("G", 4)]
 
 
-def test_in_accord_voices_track_octave_independently():
-    # Each voice inside << >> must reset to the SAME pre-block relative
-    # reference (InAccord.to_relative_lilypond()'s documented contract) --
-    # not chain from whatever the previous voice's last note was. Before
-    # the fix, voice 2's notes were computed relative to voice 1's *last*
-    # note (since both voices were parsed as one merged stream), causing a
-    # cumulative octave drift across many in-accord groups that eventually
-    # produced an invalid octave and crashed.
+def test_in_accord_second_voice_chains_from_first_voices_last_note():
+    # LilyPond's \relative pitch tracking treats '<<', '\\', and '>>' as
+    # complete no-ops -- it is a purely sequential/textual chain through the
+    # token stream, blind to the << \\ >> structure (verified against the
+    # real `lilypond` binary's `\displayLilyMusic` output: `\relative c' {
+    # g4 << { c,4 b'4 } \\ { d4 } >> c4 }` displays as `<< { c4 b4 } \\
+    # { d'4 } >> c'4` -- voice 2's "d4" resolves to D4, which only matches
+    # "continue from voice 1's LAST note" (B3); "reset to the pre-<< pitch"
+    # (G3) would give D3, and "voice 1's FIRST note" (C3) would also give
+    # D3). This uses the same non-degenerate shape (voice 1 ends far from
+    # where it started) to pin down the same rule inside DottedNotes'
+    # in-accord parsing.
     ly_content = """
     \\version "2.24.0"
     \\score {
       \\relative c' {
-        << { g'8. b16 d4 g4 } \\\\ { d4 g4 g4 } >>
+        g4 << { c,4 b'4 } \\\\ { d4 } >> c4
       }
     }
     """
     score = LilypondParser().parse(ly_content)
-    ia = score.staves[0].measures[0].notes[0]
-    voice1_octaves = [n.octave for n in ia.parts[0]]
-    voice2_octaves = [n.octave for n in ia.parts[1]]
-    # Voice 1: relative to c'(octave 4) -- g'8. reads as G4 (nearest-4th),
-    # b16 as B4, d4 as D5, g4 as G5.
-    assert voice1_octaves == [4, 4, 5, 5]
-    # Voice 2 independently resets to the same c'(octave 4) reference --
-    # d4 as D4, g4 as G4, g4 as G4 -- NOT continuing from voice 1's G5.
-    assert voice2_octaves == [4, 4, 4]
+    ia = score.staves[0].measures[0].notes[1]
+    assert [(n.note_name, n.octave) for n in ia.parts[0]] == [("C", 3), ("B", 3)]
+    # Voice 2's "d" chains from voice 1's last note (B3), giving D4 -- not
+    # D3 (which "reset to pre-<< G3" or "voice 1's first note C3" would give).
+    assert [(n.note_name, n.octave) for n in ia.parts[1]] == [("D", 4)]
 
 
-def test_relative_reference_after_in_accord_uses_primary_voice():
+def test_relative_reference_after_in_accord_uses_last_voice():
     # After the << >> block closes, the ongoing relative-pitch reference
-    # for what follows must advance to voice 0's (the primary voice's)
-    # final note -- matching InAccord.to_relative_lilypond()'s documented
-    # rule -- not voice 1's last note or some other value.
+    # for what follows must continue from the LAST voice parsed (matching
+    # real LilyPond's purely sequential pitch tracking -- see the comment on
+    # test_in_accord_second_voice_chains_from_first_voices_last_note), not
+    # voice 0's/the first voice's last note. Verified against real
+    # `lilypond`'s `\displayLilyMusic`: `\relative c' { << { c'8 d8 e8 f8 g8
+    # a8 b8 c8 } \\ { c,8 } >> d4 }` displays as `<< { c''8 ... c'''8 } \\
+    # { c''8 } >> d''4` -- voice 1 ends on C6 ("c'''8"), voice 2 ends on C5
+    # ("c''8"); the trailing "d4" resolves to D5, which matches "continue
+    # from voice 2/the last voice's C5" (nearest D to C5 is D5) and rules
+    # out "continue from voice 1's C6" (nearest D to C6 would be D6).
     ly_content = """
     \\version "2.24.0"
     \\score {
       \\relative c' {
-        << { g'8. b16 d4 g4 } \\\\ { d4 g4 g4 } >> c4
+        << { c'8 d8 e8 f8 g8 a8 b8 c8 } \\\\ { c,8 } >> d4
       }
     }
     """
     score = LilypondParser().parse(ly_content)
     notes = score.staves[0].measures[0].notes
     following_note = notes[1]
-    # Voice 0's last note is G5; an unmarked "c" immediately after should
-    # read as the nearest C to G5, i.e. C6 (a 4th up), not C5 or C4.
-    assert (following_note.note_name, following_note.octave) == ("C", 6)
+    assert (following_note.note_name, following_note.octave) == ("D", 5)
+
+
+def test_two_consecutive_in_accord_measures_chain_through_last_voice():
+    # Two << \\ >> measures back to back (as in a real two-hand piano
+    # piece): the second measure's voice 1 must branch from the FIRST
+    # measure's LAST voice's last note, not voice 1's. Verified against
+    # real `lilypond`'s `\displayLilyMusic`: `\relative c' { << { c'8 d8 e8
+    # f8 g8 a8 b8 c8 } \\ { c,8 } >> | << { d4 } \\ { e4 } >> | }` displays
+    # as `<< {...c'''8} \\ {c''8} >> | << {d''4} \\ {e''4} >> |` -- voice 1
+    # of measure 1 ends on C6 ("c'''8"), voice 2 ends on C5 ("c''8");
+    # measure 2 voice 1's "d4" resolves to D5, matching "continue from
+    # measure 1's LAST voice's C5" (nearest D to C5 is D5) and ruling out
+    # "continue from voice 1's C6" (nearest D to C6 would be D6).
+    ly_content = """
+    \\version "2.24.0"
+    \\score {
+      \\relative c' {
+        << { c'8 d8 e8 f8 g8 a8 b8 c8 } \\\\ { c,8 } >> |
+        << { d4 } \\\\ { e4 } >> |
+      }
+    }
+    """
+    score = LilypondParser().parse(ly_content)
+    ia2 = score.staves[0].measures[1].notes[0]
+    assert [(n.note_name, n.octave) for n in ia2.parts[0]] == [("D", 5)]
+    assert [(n.note_name, n.octave) for n in ia2.parts[1]] == [("E", 5)]
 
 
 def test_self_generated_piano_piece_round_trips_without_crashing():

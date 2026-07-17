@@ -429,6 +429,42 @@ See TICKETS.md for full ticket details and step-by-step instructions.
 
 ---
 
+## Known Issues / In-Progress Work
+
+### Resolved (2026-07-17): `Children_s_Piece.ly` crash was a real parser bug, not a transcription error
+
+An earlier version of this note concluded that `tests/fixtures/Children_s_Piece.ly`
+(a hand-authored ground-truth fixture) contained transcription errors —
+specifically spurious/missing octave marks like `fis'8` vs `f8` — because
+parsing it made `LilypondParser` crash with `Octave 9 out of range`. That
+diagnosis was wrong, and the fixture's transcription is correct as written.
+
+The real bug was in how `LilypondParser`'s `<<` handling
+(`src/dottednotes/parser/lilypond_parser.py`) and
+`InAccord.to_relative_lilypond()` (`src/dottednotes/models/in_accord.py`)
+resolved `\relative` pitches through `<< {voice1} \\ {voice2} >>`: both
+reset each voice to a shared reference pitch and resumed afterward from
+voice 1, which is self-consistent but does **not** match real LilyPond.
+Verified against the actual `lilypond` binary's `\displayLilyMusic` output:
+`\relative` pitch tracking treats `<<`, `\\`, and `>>` as complete no-ops —
+it's pure sequential/textual chaining through the token stream. Voice 2
+continues from voice 1's *last* note (not the pre-`<<` pitch, not voice 1's
+first note); whatever follows `>>` continues from the *last* voice's last
+note (not voice 1's). The old model's artificial per-voice reset compounded
+into runaway octave drift over many real in-accord measures, eventually
+exceeding `Note`'s valid octave range.
+
+Both call sites now implement real sequential chaining. Regression tests
+using real-lilypond-verified, non-degenerate probes are in
+`tests/test_lilypond_parser.py` (search `chains_from_first_voices_last_note`
+/ `uses_last_voice` / `chain_through_last_voice`) and
+`tests/test_parser.py::test_in_accord_to_relative_lilypond_prev_midi_advances_through_last_voice`.
+`tests/test_e2e_cli.py::test_convert_hand_authored_lilypond_round_trips_cleanly`
+confirms `Children_s_Piece.ly` now converts cleanly end to end, producing
+41 measures per staff matching its own `%1`–`%41` comment labels.
+
+---
+
 ## How to Work With This File
 
 At the start of every Claude Code session:

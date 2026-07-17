@@ -98,22 +98,31 @@ def test_convert_self_generated_lilypond_to_braille(tmp_path):
     assert content.count("⠶") < 5
 
 
-def test_convert_hand_authored_lilypond_fails_cleanly(tmp_path):
+def test_convert_hand_authored_lilypond_round_trips_cleanly(tmp_path):
     # tests/fixtures/Children_s_Piece.ly is a hand-authored ground-truth
     # fixture, not DottedNotes-generated -- outside LilypondParser's
-    # documented scope, and it uses at least one construct (deep
-    # chord-chain relative-octave tracking) the restricted parser can't
-    # fully resolve. That's an acceptable, expected limitation; what's not
-    # acceptable is a raw Python traceback. Must fail with a plain-text
-    # Error: line and non-zero exit, same as any other malformed/unsupported
-    # input -- not a stack trace.
+    # documented "only needs to parse LilyPond DottedNotes itself
+    # generated" scope, but it uses only constructs (two-voice in-accord,
+    # plain chords) the parser does support. It used to crash with a raw
+    # ValueError ("Octave 9 out of range") because the in-accord `<< \\ >>`
+    # handling incorrectly reset each voice to a shared reference pitch
+    # instead of matching real LilyPond's actual \relative semantics (pure
+    # sequential/textual chaining through the token stream, blind to
+    # `<<`/`\\`/`>>` -- verified against the real `lilypond` binary's
+    # `\displayLilyMusic` output; see test_lilypond_parser.py's in-accord
+    # tests). With that fixed, it converts cleanly and produces the 41
+    # measures per staff that the fixture's own `%1`-`%41` comments name.
     out = tmp_path / "children.brl"
     result = _run_cli(["convert", str(FIXTURES / "Children_s_Piece.ly"), str(out)])
 
-    assert result.returncode != 0
-    assert result.stderr.startswith("Error:")
+    assert result.returncode == 0, result.stderr
     assert "Traceback" not in result.stderr
-    assert not out.exists()
+    assert out.exists()
+
+    from dottednotes.parser.lilypond_parser import LilypondParser
+    score = LilypondParser().parse((FIXTURES / "Children_s_Piece.ly").read_text())
+    for staff in score.staves:
+        assert len(staff.measures) == 41
 
 
 def test_convert_musicxml_to_braille(tmp_path):

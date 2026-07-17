@@ -455,13 +455,20 @@ class LilypondParser:
             elif t == '<<':
                 # In-accord: two or more independent voices sharing one
                 # measure, separated by a bare '\\' (BANA Ch. 11 InAccord).
-                # Mirrors InAccord.to_relative_lilypond()'s own contract
-                # exactly: every voice starts from the SAME relative_base/
-                # current_duration as just before the '<<' (each voice's
-                # own '{ }' independently inherits the pre-block reference,
-                # not whatever the previous voice ended on); after the
-                # block, the outer reference advances to voice 0's (the
-                # primary voice's) final state, not the last voice parsed.
+                # LilyPond's \relative pitch tracking treats '<<', '\\', and
+                # '>>' as complete no-ops: it is a purely sequential/textual
+                # chain through the token stream, blind to the << \\ >>
+                # structure. So voice 2 continues from voice 1's LAST note
+                # (not from the pitch before '<<', and not from voice 1's
+                # FIRST note), voice 3 continues from voice 2's last note,
+                # and whatever follows the closing '>>' continues from the
+                # LAST voice's last note (not voice 0's). Verified against
+                # the real `lilypond` binary's `\displayLilyMusic` output --
+                # see the commit introducing this comment for the disambiguating
+                # test cases (the "reset per voice, resume from voice 0" model
+                # implemented here previously was self-consistent but did not
+                # match real LilyPond, and caused runaway octave drift on real
+                # multi-measure in-accord passages).
                 depth = 1
                 j = i + 1
                 group_tokens: list[str] = []
@@ -494,32 +501,23 @@ class LilypondParser:
                         voices_tokens[-1].append(gt)
 
                 parts: list[list] = []
-                primary_relative_base = relative_base
-                primary_duration = current_duration
-                for v_idx, voice_tokens in enumerate(voices_tokens):
-                    v_relative_base = relative_base
-                    v_duration = current_duration
+                for voice_tokens in voices_tokens:
                     voice_items: list = []
                     vi = 0
                     while vi < len(voice_tokens):
                         if voice_tokens[vi] in ('{', '}'):
                             vi += 1
                             continue
-                        item, vi, v_relative_base, v_duration = self._parse_one_music_item(
-                            voice_tokens, vi, is_relative, v_relative_base,
-                            v_duration, current_measure.clef
+                        item, vi, relative_base, current_duration = self._parse_one_music_item(
+                            voice_tokens, vi, is_relative, relative_base,
+                            current_duration, current_measure.clef
                         )
                         if item is not None:
                             voice_items.append(item)
                     parts.append(voice_items)
-                    if v_idx == 0:
-                        primary_relative_base = v_relative_base
-                        primary_duration = v_duration
 
                 if any(parts):
                     current_measure.add_note(InAccord(parts=parts, in_accord_type='full_measure'))
-                    relative_base = primary_relative_base
-                    current_duration = primary_duration
                 continue
 
             # Check if note or rest
