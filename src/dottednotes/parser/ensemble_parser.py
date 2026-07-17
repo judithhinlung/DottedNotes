@@ -151,10 +151,17 @@ def _line_has_word_sign(line: str) -> bool:
 def has_ensemble_header(text: str) -> bool:
     """True if `text` (normalized Unicode braille) contains a BANA §33.2
     instrument-list header line. Used to dispatch between EnsembleParser
-    and the solo BrailleParser/tokenizer path (see cli.py)."""
+    and the solo BrailleParser/tokenizer path (see cli.py).
+
+    Both checks below are required, for the same two independent
+    false-positive reasons documented on EnsembleParser.parse()'s own
+    instrument-collection loop -- this dispatch decision must not be looser
+    than that loop's, or a line can slip past here (e.g. a title line like
+    "Children's Piece", whose apostrophe shares END_WORD_SIGN's dot pattern)
+    only to have the whole file misrouted to EnsembleParser."""
     for line in text.splitlines():
         m_num, _ = extract_measure_number(line)
-        if m_num is None and _line_has_word_sign(line):
+        if m_num is None and _line_has_word_sign(line) and _parse_instrument_line(line) is not None:
             return True
     return False
 

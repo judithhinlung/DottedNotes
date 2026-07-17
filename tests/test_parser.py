@@ -4470,6 +4470,23 @@ def test_parse_instrument_list_skips_non_header_lines():
     assert [e.name for e in entries] == ['Flute']
 
 
+def test_parse_instrument_list_skips_title_with_apostrophe():
+    # "Children's Piece" -- the apostrophe is END_WORD_SIGN's own dot-3
+    # pattern, which previously fooled _parse_line into treating the whole
+    # title line as a bogus one-instrument header (S11-bug: caused
+    # Children_s_piece.brf to route to EnsembleParser and render as nothing
+    # but a run of r16 rests). A genuine abbreviation always starts with a
+    # real WORD_SIGN, which this title line never has.
+    pipeline = BRLInputPipeline()
+    raw = (
+        "              ,CHILDREN'S ,PIECE\n"
+        ',FLUTE """""  >FL\'\n'
+    )
+    text = pipeline._ascii_to_unicode(raw)
+    entries = parse_instrument_list(text)
+    assert [e.name for e in entries] == ['Flute']
+
+
 def test_parse_instrument_list_fengyang_real_header():
     pipeline = BRLInputPipeline()
     text = pipeline.load(FIXTURES / 'fengyang_flower_drum.brf')

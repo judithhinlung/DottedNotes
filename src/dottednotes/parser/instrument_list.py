@@ -111,6 +111,18 @@ def _parse_line(line: str) -> InstrumentInfo | None:
         return None
 
     name = _decode_name_column(line[:start])
+    if not name:
+        # A genuine §33.2 line always has real name-column text before its
+        # abbreviation (e.g. "Piccolo, Flutes I&II" -- some real-world
+        # transcriptions omit the leading WORD_SIGN cell entirely, so that
+        # can't be required here). An *empty* name means the backward scan
+        # never hit an earlier blank/guide-dot boundary at all -- i.e. `end`
+        # just matched some other dot-3 cell with literary text running all
+        # the way back to the start of the line (e.g. a literary apostrophe
+        # near the start of a title, which shares END_WORD_SIGN's dot
+        # pattern) -- not a real instrument line. See Children_s_piece.brf's
+        # "Children's Piece" title.
+        return None
     abbrev_cells = line[start:end]
     while abbrev_cells and abbrev_cells[0] in (WORD_SIGN, CAPITAL_INDICATOR):
         abbrev_cells = abbrev_cells[1:]

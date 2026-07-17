@@ -210,6 +210,28 @@ def test_convert_fingering_melody_not_misrouted_to_ensemble_parser(
     assert "instrumentName" not in content  # not an OrchestraScore
 
 
+def test_convert_children_s_piece_not_misrouted_to_ensemble_parser(
+    monkeypatch, tmp_path, capsys
+):
+    # Same class of bug as the fingering_melody regression above, different
+    # trigger: this real two-hand piano piece's title ("Children's Piece")
+    # contains an apostrophe, which is END_WORD_SIGN's own dot-3 cell.
+    # instrument_list._parse_line used to accept that as a genuine
+    # abbreviation terminator with no real WORD_SIGN required, so the title
+    # line parsed as a bogus one-instrument header and the whole file got
+    # routed to EnsembleParser -- which rendered it as nothing but a run of
+    # unmarked r16 rests instead of the real music. Must now go through the
+    # solo parser and produce a real two-staff PianoStaff.
+    brf = FIXTURES / "Children_s_piece.brf"
+    out = tmp_path / "children_s_piece.ly"
+    _run_main(monkeypatch, ["convert", str(brf), str(out)])
+
+    content = out.read_text(encoding="utf-8")
+    assert r'\new PianoStaff' in content
+    assert "r16" not in content
+    assert content.count("|") > 30
+
+
 # --- S7b-10: category and formatting overrides ---
 
 
