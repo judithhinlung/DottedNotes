@@ -584,3 +584,17 @@ footer {
     font-size: 0.85rem;
     margin-top: 1rem;
 }
+
+.footer-link {
+    color: var(--accent-blue);
+    text-decoration: underline;
+}
+
+.footer-link:hover {
+    color: var(--accent-purple);
+}
+
+.footer-link:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
