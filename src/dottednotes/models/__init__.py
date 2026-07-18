@@ -7,6 +7,7 @@ from .base import BrailleSymbol
 from .clef import Clef, ClefType, CLEF_TO_LILYPOND
 from .duration import Duration
 from .dynamic import Dynamic, DynamicLevel
+from .fermata import Fermata, FermataShape
 from .in_accord import InAccord
 from .instrument import InstrumentInfo, InstrumentFamily, get_instrument_family
 from .key_signature import KeySignature, KEY_TO_LILYPOND
@@ -38,6 +39,8 @@ __all__ = [
     "Duration",
     "Dynamic",
     "DynamicLevel",
+    "Fermata",
+    "FermataShape",
     "InAccord",
     "InstrumentInfo",
     "InstrumentFamily",

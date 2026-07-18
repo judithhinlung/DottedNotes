@@ -206,6 +206,13 @@ class Measure:
     bar_line_type: str = 'measure_separator'
     text_markings: list[TextMarking] = field(default_factory=list)
     line: int = 0
+    # A fermata over/under this measure's bar line (BANA Par. 22.2, Table
+    # 22(B) -- distinct from a fermata on a note, which lives on Note
+    # instead; see models/fermata.py). Which of Table 22(B)'s three
+    # bar-line-fermata variants gets rendered depends on `bar_line_type`
+    # (plain bar line / sectional double bar / final double bar) -- see
+    # to_braille() below.
+    bar_line_fermata: bool = False
 
     def add_note(self, note: MeasureItem) -> None:
         self.notes.append(note)
@@ -245,6 +252,21 @@ class Measure:
             parts.append(s)
 
         bar_ly = _BAR_LINE_TO_LY.get(self.bar_line_type, '|')
+        if self.bar_line_fermata:
+            # Unlike the braille side, the LilyPond Notation Reference
+            # (checked v2.26 "Bar lines" and "Expressive marks" sections)
+            # does not document a way to attach \fermata to a bar line
+            # itself (postfix events only attach to a rhythmic event, and
+            # no example covers this case) -- warn and omit rather than
+            # emit unconfirmed syntax that might not even compile.
+            import warnings
+            warnings.warn(
+                "A fermata over a bar line has no confirmed LilyPond "
+                "syntax (checked Notation Reference v2.26's \"Bar lines\" "
+                "and \"Expressive marks\" sections) -- omitting it from "
+                "the LilyPond output; the braille output still has it.",
+                stacklevel=2,
+            )
         return ' '.join(parts) + ' ' + bar_ly, cur_midi
 
     def to_braille(
@@ -276,6 +298,31 @@ class Measure:
         bar_cell = {v: k for k, v in BAR_LINE_CELLS.items()}.get(self.bar_line_type, '')
         if not bar_cell:
             bar_cell = {v: k for k, v in BAR_LINE_SEQUENCES.items()}.get(self.bar_line_type, '')
+
+        if self.bar_line_fermata:
+            from dottednotes.bana_symbols import FERMATA_OVER_BAR_LINE_CELL
+            from dottednotes.models.fermata import FermataShape, Fermata
+            if self.bar_line_type == 'measure_separator':
+                # Table 22(B)'s "above/below a bar line" variant is its own
+                # dedicated compound sign, not the (blank) plain-bar-line
+                # cell with a fermata appended -- ASCII `_<l` decodes to
+                # dots 4,5,6 + the plain fermata cell, unrelated to the
+                # blank measure-separator cell it replaces here.
+                bar_cell = FERMATA_OVER_BAR_LINE_CELL
+            elif self.bar_line_type in ('section_double_bar', 'final_double_bar'):
+                # These two variants ARE the existing double-bar cell with
+                # the plain fermata cell appended (ASCII `<k'<l`/`<k<l`).
+                bar_cell = bar_cell + Fermata(shape=FermataShape.NORMAL).to_braille()
+            else:
+                import warnings
+                warnings.warn(
+                    f"A fermata over a '{self.bar_line_type}' bar line is not "
+                    "demonstrated anywhere in BANA Table 22(B) (only plain bar "
+                    "lines, sectional double bars, and final double bars are) "
+                    "-- rendering the bar line without the fermata sign rather "
+                    "than guessing.",
+                    stacklevel=2,
+                )
 
         # Determine last note for relative octave context propagation
         last_note = None

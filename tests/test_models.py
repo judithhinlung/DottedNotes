@@ -13,6 +13,8 @@ from dottednotes.models import (
     Duration,
     Dynamic,
     DynamicLevel,
+    Fermata,
+    FermataShape,
     GraceNote,
     KEY_TO_LILYPOND,
     KeySignature,
@@ -131,7 +133,7 @@ def test_duration_in_ticks_triplet_sixteenth():
 
 
 def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None,
-               ornaments=None):
+               ornaments=None, fermata=None):
     return Note(
         dots=frozenset(),
         category=SymbolCategory.NOTE,
@@ -142,6 +144,7 @@ def _make_note(note_name, octave, duration_value, dots=0, accidental=None, artic
         accidental=accidental,
         articulations=articulations or [],
         ornaments=ornaments or [],
+        fermata=fermata,
     )
 
 
@@ -482,6 +485,57 @@ def test_articulation_swell():
 
 def test_articulation_staccatissimo():
     assert Articulation(ArticulationType.STACCATISSIMO).to_lilypond() == '-!'
+
+
+def test_fermata_normal_to_lilypond_and_braille():
+    f = Fermata(shape=FermataShape.NORMAL)
+    assert f.to_lilypond() == r'\fermata'
+    assert f.to_braille() == '⠣⠇'
+
+
+def test_fermata_between_notes_to_braille():
+    assert Fermata(shape=FermataShape.BETWEEN_NOTES).to_braille() == '⠐⠣⠇'
+    # No distinct print shape from the plain variant.
+    assert Fermata(shape=FermataShape.BETWEEN_NOTES).to_lilypond() == r'\fermata'
+
+
+def test_fermata_squared_and_tent_to_lilypond_and_braille():
+    assert Fermata(shape=FermataShape.SQUARED).to_lilypond() == r'\henzelongfermata'
+    assert Fermata(shape=FermataShape.SQUARED).to_braille() == '⠰⠣⠇'
+    assert Fermata(shape=FermataShape.TENT).to_lilypond() == r'\henzeshortfermata'
+    assert Fermata(shape=FermataShape.TENT).to_braille() == '⠘⠣⠇'
+
+
+def test_note_with_fermata_to_lilypond():
+    note = _make_note('C', 4, 4, fermata=Fermata())
+    assert note.to_lilypond() == "c'4\\fermata"
+
+
+def test_note_with_fermata_to_braille_places_after_fingering():
+    from dottednotes.models import Fingering
+    note = _make_note('C', 4, 4, fermata=Fermata())
+    note.fingerings = [Fingering(dots=frozenset(), category=None, raw_brl='', finger=1)]
+    brl = note.to_braille(is_measure_start=True)
+    fermata_brl = Fermata().to_braille()
+    fingering_brl = note.fingerings[0].to_braille()
+    # Par. 22.2: fermata follows the note and follows any fingering already
+    # on it.
+    assert brl.index(fingering_brl) < brl.index(fermata_brl)
+
+
+def test_measure_bar_line_fermata_on_plain_bar_line():
+    m = Measure(number=1, bar_line_fermata=True)
+    ly, _ = m.to_lilypond()
+    assert ly.strip() == '|'  # no confirmed LilyPond syntax -- omitted, not guessed
+    brl, _ = m.to_braille()
+    from dottednotes.bana_symbols import FERMATA_OVER_BAR_LINE_CELL
+    assert brl == FERMATA_OVER_BAR_LINE_CELL
+
+
+def test_measure_bar_line_fermata_on_final_double_bar():
+    m = Measure(number=1, bar_line_type='final_double_bar', bar_line_fermata=True)
+    brl, _ = m.to_braille()
+    assert brl == '⠣⠅' + Fermata().to_braille()
 
 
 def test_note_with_accent():

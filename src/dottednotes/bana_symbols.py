@@ -307,6 +307,17 @@ BAR_LINE_SEQUENCES: dict[str, str] = {
     '⠣⠆':  'end_repeat',          # dots 1,2,6 + dots 2,3
 }
 
+# A fermata over/under a plain (measure_separator) bar line -- BANA Music
+# Braille Code 2015, Par. 22.2, Table 22(B), ASCII `_<l` = dots 4,5,6
+# (prefix) + dots 1,2,6 + dots 1,2,3 (the plain fermata cell, see
+# models/fermata.py). Decoded from the manual's own ASCII against
+# ASCII_TO_DOTS (parser/input_pipeline.py) -- derived, not yet
+# developer-confirmed against a real fixture. Distinct from
+# BAR_LINE_SEQUENCES/BAR_LINE_CELLS: this is its own compound sign, not the
+# blank measure-separator cell with anything appended (see
+# Measure.to_braille()'s bar_line_fermata handling).
+FERMATA_OVER_BAR_LINE_CELL: str = '⠸⠣⠇'
+
 # ---------------------------------------------------------------------------
 # Measure repeat sign (S5b-2, BANA Music Braille Code 2015, Table 18 / Pars.
 # 18.1-18.4, ASCII '7' — dots 2,3,5,6 — confirmed by developer).

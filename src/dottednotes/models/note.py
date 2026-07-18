@@ -10,6 +10,7 @@ from .accidental import Accidental
 from .base import BrailleSymbol
 from .duration import Duration
 from .dynamic import Dynamic
+from .fermata import Fermata
 from .ornament import GraceNote, Ornament
 from .fingering import Fingering
 from .tremolo import RepeatedTremolo
@@ -65,6 +66,7 @@ class Note(BrailleSymbol):
     articulation_format: str = "single"
     parsed_tokens: list = field(default_factory=list)
     after_numeric_indicator: bool = False
+    fermata: Optional[Fermata] = None
 
     def __post_init__(self):
         if self.note_name not in NOTE_NAME_TO_LILYPOND:
@@ -94,6 +96,7 @@ class Note(BrailleSymbol):
         fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         ornament_str = ''.join(o.to_lilypond() for o in self.ornaments)
+        fermata_str = self.fermata.to_lilypond() if self.fermata else ''
         tie_str = '~' if self.tie else ''
         dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
         slur_str = (
@@ -112,7 +115,7 @@ class Note(BrailleSymbol):
         elif self.pedal_sustain == "on_off":
             pedal_str = r"\sustainOn\sustainOff"
         return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
-                f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}")
+                f"{articulation_str}{ornament_str}{fermata_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}")
 
     def to_braille(
         self,
@@ -276,13 +279,18 @@ class Note(BrailleSymbol):
                     tremolo_str = ""
 
         fingering_str = "".join(f.to_braille() for f in self.fingerings)
+        # Par. 22.2: the fermata (like the breath/break mark) follows the
+        # note, and follows any value dot, fingering, or interval sign
+        # already on that note -- placed here, after fingering_str/
+        # intervals_str/dots_str, and before the tie/slur suffix.
+        fermata_str = self.fermata.to_braille() if self.fermata else ''
         tie_str = '⠨⠉' if getattr(self, '_is_chord_written_note', False) and self.tie else ('⠈⠉' if self.tie else '')
         slur_start_str = '⠉' if self.slur_start else ''
 
         end_dyn_str = "".join(d.to_braille() for d in end_dynamics)
 
         prefix = grace_str + pedal_down_str + slur_bracket_open_str + start_dyn_str + art_str + orn_str + accidental_str + octave_str
-        suffix = dots_str + gliss_str + intervals_str + tremolo_str + fingering_str + tie_str + slur_start_str + slur_bracket_close_str + end_dyn_str + pedal_up_str
+        suffix = dots_str + gliss_str + intervals_str + tremolo_str + fingering_str + fermata_str + tie_str + slur_start_str + slur_bracket_close_str + end_dyn_str + pedal_up_str
 
         return prefix + note_cell + suffix
 
@@ -306,7 +314,8 @@ class Note(BrailleSymbol):
             self.grace_note == other.grace_note and
             self.tremolo == other.tremolo and
             self.pedal_sustain == other.pedal_sustain and
-            self.after_numeric_indicator == other.after_numeric_indicator
+            self.after_numeric_indicator == other.after_numeric_indicator and
+            self.fermata == other.fermata
         )
 
     def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
