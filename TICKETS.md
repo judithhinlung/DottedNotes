@@ -6653,6 +6653,510 @@ Estimated time: 1–1.5 weeks.
 - [x] Integration tests pass.
 
 ---
+
+# Sprint 10b: MusicXML Import Hardening (after Sprint 10)
+
+Estimated time: 1.5–2 weeks.
+
+**Why this sprint exists:** A code audit of `src/dottednotes/parser/musicxml_parser.py`
+(the `MusicXMLTranslator` built in S10-2) found eight cases where real-world
+MusicXML input is silently mishandled — not rejected with an error, just
+imported wrong or dropped, which is worse for a blind composer who can't
+visually spot-check the result against the source file. Two of the eight
+were confirmed empirically against `music21` 10.5.0 (this repo's `.venv`),
+not just read off the source; the rest are grounded in a direct reading of
+`musicxml_parser.py`. Three of the eight (fermatas, breath marks, first/second
+endings) are blocked on Sprint 10c landing the BANA model/braille support for
+those signs first, since there's nowhere in the internal model to import them
+into yet.
+
+---
+
+### [ ] S10b-1: Import multi-voice single-staff writing as `InAccord`
+
+**Why:** `InAccord` (`models/in_accord.py`, BANA Chapter 11) is imported into
+`musicxml_parser.py` (line 12) but never instantiated anywhere in the file.
+`translate_measure` reads `m21_measure.notesAndRests` directly, and that does
+not descend into nested `music21.stream.Voice` sub-streams. **Confirmed
+empirically:** a `Measure` containing two `Voice` children (the normal
+`music21` representation of MusicXML's `<voice>` numbering — the standard way
+piano/keyboard music encodes two independent rhythmic lines in one staff) has
+`len(m.notesAndRests) == 0`. This isn't misordering — the entire measure
+silently imports as empty. This is the highest-severity gap of the eight,
+since polyphonic single-staff writing (e.g. hymn/piano textures) is common,
+not a corner case.
+
+**Steps:**
+1. In `translate_measure`, check `m21_measure.voices` before falling back to
+   flat `notesAndRests`; when voices are present, translate each one
+   separately using the existing per-element translation logic (factor the
+   note/chord/rest-and-tuplet loop out of `translate_measure` so it can run
+   once per voice).
+2. Wrap the resulting per-voice note lists in
+   `InAccord(parts=[...], in_accord_type='full_measure')`.
+3. Order voices per BANA 11's documented convention (already in
+   `models/in_accord.py`'s docstring): highest voice first for treble/alto
+   clef, lowest voice first for bass/tenor clef. `music21` voice numbering
+   (`Voice.id`) doesn't reliably encode pitch order, so derive the order from
+   the voices' actual pitch content, not just numbering.
+4. Add a two-voice piano MusicXML fixture and a test asserting the resulting
+   `Measure` contains an `InAccord` with both voices' notes present, in the
+   correct order — not an empty measure.
+
+**Definition of Done:**
+- [ ] Multi-voice measures import as `InAccord` instead of importing empty.
+- [ ] Voice ordering matches BANA 11's clef-dependent convention.
+- [ ] New tests pass; existing single-voice tests still pass.
+
+---
+
+### [ ] S10b-2: Normalize instrument names so transposition lookup actually fires
+
+**Why:** `get_transposition()` (`models/transposition.py:52`) only matches
+strings shaped exactly `"<instrument> in <key>"` against a 6-entry table
+(horn/F, english horn/F, clarinet/Bb, clarinet/A, trumpet/Bb, trumpet/C).
+`translate_part` (musicxml_parser.py:68-70) sets `staff.name` straight from
+`music21`'s `part.partName`/`part.id` with no normalization. Real-world
+MusicXML part names from notation software ("Bb Clarinet", "Horn in F 1",
+"French Horn") won't match, so imported orchestral scores silently keep
+written pitch unmarked instead of wrapping it in `\transpose` for concert
+pitch — with no error, just wrong output.
+
+**Steps:**
+1. Prefer `music21`'s own structured transposition data
+   (`part.getInstrument().transposition`, an `Interval` object, present for
+   nearly any MusicXML exported by real notation software) over string-
+   matching the part name — this sidesteps naming variance entirely.
+2. Where `music21` doesn't supply transposition data, normalize common part-
+   name variants (numbering suffixes like "Horn in F 1", "Bb"/"B-flat"
+   spelling, common abbreviations) toward the `"<instrument> in <key>"` form
+   `get_transposition()` expects, or extend `get_transposition()` to accept
+   an `Interval` directly instead of a name string.
+3. `_TRANSPOSITIONS` in `models/transposition.py` currently only has 6
+   entries; if this work surfaces instruments/keys not in that table, do not
+   guess the interval — flag it to the developer for confirmation before
+   adding it (per CLAUDE.md's rule on transposition intervals).
+4. Add a test importing a transposing-instrument MusicXML fixture (e.g.
+   Clarinet in Bb exported from real notation software) and assert the
+   output gets the same `\transpose` wrapping as the equivalent BRF/ensemble
+   input does today.
+
+**Definition of Done:**
+- [ ] Transposing instruments imported from MusicXML get correct `\transpose`
+      wrapping regardless of exact part-name spelling.
+- [ ] Any newly-added transposition intervals are developer-confirmed.
+- [ ] New tests pass.
+
+---
+
+### [ ] S10b-3: Import lead-sheet chord symbols, and stop mis-importing them as played chords
+
+**Why:** DottedNotes has `ChordSymbol`/`ChordNamesTrack` models built
+specifically for BANA §23/§27 lead-sheet chord symbols, but
+`musicxml_parser.py` never looks for `music21.harmony.ChordSymbol` elements.
+**Confirmed empirically**, this is worse than a missing feature:
+`music21.harmony.ChordSymbol` is a subclass of `music21.chord.Chord`
+(`isinstance(ChordSymbol('Cmaj7'), music21.chord.Chord)` is `True`), and a
+`ChordSymbol` placed inline in a measure shows up in `notesAndRests`
+alongside the real notes. `translate_measure`'s
+`elif isinstance(el, music21.chord.Chord):` branch (line 259) has no
+exclusion for it, so today a chord symbol in the source MusicXML gets
+imported as a real, sounding 4-note chord (root/3rd/5th/7th — confirmed
+`ChordSymbol('Cmaj7').pitches` gives `['C3','E3','G3','B3']`) competing for
+the same beat as the actual melody note, not as an annotation. This will
+visibly corrupt the measure's rhythm and pitch content, not just drop
+formatting.
+
+**Steps:**
+1. Exclude `music21.harmony.ChordSymbol` from the
+   `isinstance(el, music21.chord.Chord)` branch in `translate_measure`
+   (check `music21.harmony.ChordSymbol` first and route separately).
+2. Collect chord-symbol elements per measure/offset and translate them into
+   `ChordSymbol`/`ChordNamesTrack` entries aligned to the rhythm, per BANA
+   §23/§27 — reuse the alignment logic `lead_sheet_parser.py` already has for
+   the BRF-side lead-sheet parallel where practical.
+3. Add a lead-sheet MusicXML fixture (chord symbols over a melody line) and
+   a test asserting correct `ChordSymbol` import and rhythm alignment, and a
+   regression test confirming a chord symbol no longer produces a phantom
+   played chord in the `Measure`.
+
+**Definition of Done:**
+- [ ] Chord symbols import as `ChordSymbol`/`ChordNamesTrack` entries.
+- [ ] A `ChordSymbol` in the source XML no longer imports as a played chord.
+- [ ] New tests pass.
+
+---
+
+### [ ] S10b-4: Import fermatas
+
+**Why:** `translate_note_obj`'s expression-mapping loop
+(musicxml_parser.py:448-461) handles Trill/Mordent/InvertedMordent/Turn/
+InvertedTurn but has no case for `music21.expressions.Fermata` — a fermata
+in the source MusicXML is silently dropped, with no warning.
+
+**Blocked on:** S10c-1 (there's no model field to import a fermata into
+yet — this ticket only wires the `music21` → DottedNotes mapping once that
+exists).
+
+**Steps:**
+1. Add a case in the expression loop mapping `music21.expressions.Fermata` to
+   whatever model S10c-1 lands (confirmed: a `music21.expressions.Fermata`
+   instance carries `.shape` — `'normal'`/`'angled'`/`'square'`/etc. — and
+   `.type` — `'upright'`/`'inverted'`, i.e. above/below the staff, which BANA
+   Table 22(B) does *not* distinguish with a separate sign, so `.type` can be
+   ignored for the braille side but may matter for `to_lilypond()`).
+2. Add a test importing a MusicXML fixture with a fermata over a note.
+
+**Definition of Done:**
+- [ ] Fermatas import instead of silently disappearing.
+- [ ] New tests pass.
+
+---
+
+### [ ] S10b-5: Import first/second endings (voltas)
+
+**Why:** `translate_measure` only reads `m21_measure.rightBarline`/
+`leftBarline` for simple repeat bar lines (lines 191-203);
+`music21.spanner.RepeatBracket` — voltas / alternate endings — is never
+inspected, so multi-ending sections lose their ending numbers on import.
+
+**Blocked on:** S10c-3 (needs the `Measure`-level ending-number field that
+ticket adds).
+
+**Steps:**
+1. For each measure, check spanner sites for `RepeatBracket` and record which
+   ending number(s) apply. **Confirmed:** `RepeatBracket.numberRange` already
+   gives this as a list (e.g. `[1, 2]` for a combined "1,2" bracket), which
+   maps directly onto BANA 17.1.1(b)'s combined/ranged-ending handling.
+2. Add a test importing a MusicXML fixture with a first/second ending pair,
+   asserting correct ending numbers land on the right measures.
+
+**Definition of Done:**
+- [ ] Voltas import with correct ending numbers per measure.
+- [ ] New tests pass.
+
+---
+
+### [ ] S10b-6: Import breath marks and caesuras
+
+**Why:** No reference to `music21.articulations.BreathMark` or
+`music21.articulations.Caesura` (confirmed those are the correct classes —
+both live in `music21.articulations`, not `music21.expressions`) anywhere in
+`musicxml_parser.py`; both are silently dropped on import.
+
+**Blocked on:** S10c-2 (needs the model field this ticket adds).
+
+**Steps:**
+1. Map `music21.articulations.BreathMark` and `music21.articulations.Caesura`
+   to whatever model S10c-2 lands. Note BANA gives breath/break marks two
+   distinct signs (Table 22(B), "(a)" and "(b)") with no stated rule
+   distinguishing when to use which in the portion of the manual reviewed for
+   this ticket — confirm with the developer which print glyph(s) map to which
+   braille sign before wiring this, rather than guessing.
+2. Add a test importing a MusicXML fixture with a breath mark and a caesura.
+
+**Definition of Done:**
+- [ ] Breath marks and caesuras import instead of silently disappearing.
+- [ ] New tests pass.
+
+---
+
+### [ ] S10b-7: Consolidate consecutive full-measure rests into multi-measure rests
+
+**Why:** `translate_measure`'s rest-handling (lines 318-327) always sets
+`multi_measure_count=1`, even when `is_full_measure` is `True`. Consecutive
+full-measure rests come through as N separate single-measure rests instead
+of one multi-measure rest, even though the `Rest` model already supports the
+count and both the BANA renderer and validator key off it (see CLAUDE.md's
+note on numeric-indicator octave resets after "a multi-measure rest").
+
+**Steps:**
+1. After the per-measure translation loop, post-process each `Staff`'s
+   measures to merge runs of consecutive full-measure rests into a single
+   `Rest` with `multi_measure_count` set to the run length (matching however
+   the BRF parser already represents multi-measure rests, for consistency).
+2. Add a test importing a MusicXML fixture with several consecutive whole-
+   measure rests, asserting they collapse into one multi-measure `Rest`.
+
+**Definition of Done:**
+- [ ] Consecutive full-measure rests import as one multi-measure rest.
+- [ ] New tests pass.
+
+---
+
+### [ ] S10b-8: Verify and, if needed, fix ottava (8va/15ma) pitch handling on import
+
+**Why:** No reference to `music21.spanner.Ottava` anywhere in
+`musicxml_parser.py`. BANA's default (nonfacsimile) convention for 8va/15ma
+is unambiguous — Par. 3.3: "the words '8va,' '15ma,' 'loco,' and similar
+expressions are represented by transcribing the pitches in the octave in
+which they are to be performed without noting the expressions" — i.e. no
+special braille sign at all, just the real sounding octave. The open
+question is whether the *pitch data DottedNotes reads from `music21`* is
+already the sounding pitch or the as-notated (pre-shift) pitch — this was
+not fully resolved during the code audit. A quick empirical check found
+`Ottava.transposing` defaults to `True` and `music21` exposes explicit
+`performTransposition()`/`undoTransposition()` methods, which suggests the
+stored `Note.pitch` is *not* automatically the sounding pitch and may need
+transposition applied before import — but this needs to be confirmed against
+a real ottava-bearing fixture, not assumed.
+
+**Steps:**
+1. Build a small MusicXML fixture with an 8va passage (or find one) and trace
+   exactly what pitch `translate_note_obj` currently receives for a note
+   under the bracket, compared to the sounding pitch a musician would
+   actually read off the page.
+2. If the stored pitch is the pre-shift/notated pitch, apply the ottava's
+   octave shift during import so the internal model always holds the
+   sounding pitch, per BANA 3.3 — no special sign, no model changes needed
+   beyond getting the octave right.
+3. Add a regression test locking in the correct behavior either way.
+
+**Definition of Done:**
+- [ ] Ottava-bracketed passages import at the correct sounding octave.
+- [ ] New tests pass.
+
+---
+
+# Sprint 10c: BANA Transcription for Fermatas, Breath Marks, and First/Second Endings
+
+Estimated time: 1.5–2 weeks.
+
+**Why this sprint exists:** Fermatas, breath/break marks, and first/second
+endings (voltas) currently have **no representation anywhere in DottedNotes**
+— not in `bana_symbols.py`, not in any model class, not in
+`braille_renderer.py`, not in `docs/bana_reference.md` (confirmed by
+grepping the whole tree). This sprint adds them from scratch: model support,
+the BANA braille cells, `to_braille()` placement per BANA's rules, and
+`to_lilypond()` output — and is a prerequisite for S10b-4/5/6, which only
+wire MusicXML *import* into whatever model these tickets create.
+
+All dot patterns below are **derived**, not developer-confirmed: they were
+decoded mechanically from the BANA Music Braille Code 2015 manual's own ASCII
+transcriptions in Tables 17 and 22(B), cross-referenced bit-for-bit against
+this repo's existing `ASCII_TO_DOTS` table
+(`src/dottednotes/parser/input_pipeline.py`) — the method CLAUDE.md
+prescribes — not guessed from memory. Per CLAUDE.md, treat them as a starting
+point for implementation, not a substitute for developer confirmation against
+a real fixture before shipping.
+
+---
+
+### [ ] S10c-1: Add fermata sign support (model + `to_braille()` + `to_lilypond()`)
+
+**Why:** BANA Music Braille Code 2015, Table 22(B) (Par. 22.2, "Symbols That
+Follow the Note in Braille") defines seven fermata variants. Par. 22.2's
+placement rule: "Any of the ... various fermata markings, given in Table
+22(B), follows the affected note. If a value dot, a fingering, or an
+interval is given for the note, that sign precedes the ... fermata."
+
+**BANA dot patterns (Table 22(B), derived from `ASCII_TO_DOTS`, not yet
+developer-confirmed):**
+| Variant | BANA ASCII | Braille |
+|---|---|---|
+| over or under a note | `<l` | ⠣⠇ (dots 1-2-6, 1-2-3) |
+| between notes | `"<l` | ⠐⠣⠇ (dot 5 prefix) |
+| above/below a bar line | `_<l` | ⠸⠣⠇ (dots 4-5-6 prefix) |
+| above/below a sectional double bar | `<k'<l` | ⠣⠅⠄⠣⠇ |
+| above/below a final double bar | `<k<l` | ⠣⠅⠣⠇ |
+| squared shape | `;<l` | ⠰⠣⠇ (dots 5-6 prefix) |
+| tent-shaped | `^<l` | ⠘⠣⠇ (dots 4-5 prefix) |
+
+Note BANA does **not** distinguish "over" vs. "under" (above/below the
+staff) with different signs — one cell pair covers both, which conveniently
+matches `music21.expressions.Fermata.type` (upright/inverted) being
+irrelevant to the braille output; only `.shape` (normal/angled/square) picks
+a different braille variant.
+
+**Steps:**
+1. Add the seven cells above to `bana_symbols.py`, following the file's
+   existing citation/confidence-flagging convention (see e.g. the triplet
+   sign's "developer-confirmed" comment for the format to match).
+2. Add fermata support to the domain model. The over/under-note and squared/
+   tent-shaped variants are Note-attached (scope the first pass to these);
+   the bar-line/double-bar variants attach to the measure boundary instead
+   and may be worth splitting into a follow-up ticket rather than
+   overloading this one — flag this trade-off to the developer rather than
+   deciding it unilaterally.
+3. Implement `to_braille()` placement per Par. 22.2: after the note, after
+   any value dot/fingering/interval sign, before the breath/break mark if
+   both are present on the same note (Par. 22.2's ordering: value dot,
+   fingering, interval, *then* breath/break mark or fermata). Wire this into
+   the BANAValidator's existing sign-ordering rule (S9b) so a misordered
+   fermata gets flagged like other sign-order violations.
+4. Implement `to_lilypond()` — fetch LilyPond Notation Reference's
+   "Expressive marks" section before writing this (CLAUDE.md's standing
+   rule); `\fermata` is the expected postfix articulation but verify exact
+   syntax and how shape variants (square/angled) are expressed, if at all,
+   against the Notation Reference rather than assuming.
+5. Unit tests for the model, `to_braille()` placement (including the
+   value-dot/fingering/interval ordering interaction), and `to_lilypond()`.
+
+**Definition of Done:**
+- [ ] Fermata cells added to `bana_symbols.py` with confidence flags.
+- [ ] Model support for at least the over/under-note variant.
+- [ ] `to_braille()` places the sign correctly per Par. 22.2's ordering rule.
+- [ ] `to_lilypond()` verified against the real LilyPond Notation Reference.
+- [ ] BANAValidator's sign-order rule covers fermatas.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S10c-2: Add breath/break mark sign support (model + `to_braille()` + `to_lilypond()`)
+
+**Why:** BANA Music Braille Code 2015, Table 22(B) (Par. 22.2) gives two
+breath/break mark signs, subject to the same "follows the note, after any
+value dot/fingering/interval" placement rule as fermatas above.
+
+**BANA dot patterns (derived from `ASCII_TO_DOTS`, not yet
+developer-confirmed):**
+| Variant | BANA ASCII | Braille |
+|---|---|---|
+| breath or break mark (a) | `>1` | ⠨⠂ (dots 3-4-5, dot 2) |
+| breath or break mark (b) | `,/` | ⠠⠌ (dot 6, dots 3-4) |
+
+The manual doesn't state, in the sections reviewed for this ticket, which
+print glyph (comma-shaped breath mark vs. tick/caesura-style break, etc.)
+maps to (a) vs. (b) — **do not guess this mapping; confirm with the
+developer before implementing**, per CLAUDE.md.
+
+**Steps:**
+1. Get the (a)/(b) print-glyph mapping confirmed by the developer first.
+2. Add both cells to `bana_symbols.py` with confidence flags.
+3. Add model support — likely Note-attached, same shape as S10c-1's
+   over/under-note fermata field.
+4. Implement `to_braille()` placement per Par. 22.2 (same ordering rule as
+   fermatas — value dot/fingering/interval, then breath/break mark).
+5. Implement `to_lilypond()` — fetch the Notation Reference's "Expressive
+   marks" section first; `\breathe` is the expected LilyPond construct
+   (inserted as a standalone event between notes, not attached to one), but
+   verify against the Notation Reference rather than assuming, since its
+   placement model differs from postfix articulations like `\fermata`.
+6. Unit tests for the model, `to_braille()` placement, and `to_lilypond()`.
+
+**Definition of Done:**
+- [ ] (a)/(b) glyph mapping confirmed by the developer.
+- [ ] Breath/break mark cells added to `bana_symbols.py` with confidence flags.
+- [ ] Model, `to_braille()`, and `to_lilypond()` support implemented.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S10c-3: Add first/second ending (volta) support (model + `to_braille()` + `to_lilypond()`)
+
+**Why:** BANA Music Braille Code 2015, Chapter 17 "Print Repeats" (Table 17),
+Par. 17.1.1 "Voltas": "The sign for a volta (alternate ending) is placed
+without intervening space before the first sign connected with the measure
+in which it occurs. The first note after the sign requires a special octave
+mark. If the sign following the volta sign contains a dot 1, 2, or 3, the
+volta sign must be followed by a dot 3 as a separator," plus: (a) multiple
+voltas may share a line if there's room; (b) combined print endings ("1,2")
+get each numeral its own numeric indicator unless following a hyphen, and a
+hyphen showing a numeral range (e.g. "1-3") is followed in braille; (c) the
+print bracket above the measure(s) is not itself brailled — only the
+numeral(s).
+
+**BANA dot pattern (Table 17):** Prima volta (1st ending) = `#1`, Seconda
+volta (2nd ending) = `#2`. Decoded: `#` is `NUMBER_SIGN` (⠼, dots 3-4-5-6,
+already defined in `bana_symbols.py`), and `1`/`2` are `LOWER_DIGIT_CELLS`'
+existing entries (⠂ dot 2, ⠆ dots 2-3 — both already marked
+**confirmed** elsewhere in `bana_symbols.py` for measure-number digits). So
+first/second endings reuse two already-confirmed cells (⠼⠂ and ⠼⠆); what's
+*not* yet confirmed is that this specific usage (numeral immediately after
+the number sign, meaning "ending number" rather than "measure number") is
+correct — flag that distinction to the developer rather than assuming the
+existing confirmation carries over.
+
+**Steps:**
+1. Add a `Measure`-level ending-number field (e.g. `ending_numbers:
+   list[int] | None`, alongside the existing `bar_line_type` field this
+   mirrors), able to hold a combined/ranged set of numbers per Par.
+   17.1.1(b).
+2. Implement `to_braille()` placement per Par. 17.1.1: immediately before the
+   first sign of the measure (no space, no dot-3 separator unless the
+   following sign has a dot 1/2/3), forcing a special octave mark on the
+   first note of the measure (reuse the existing octave-mark-reset machinery
+   the BANAValidator/`Note.to_braille()` already has for other "requires
+   fresh octave mark" triggers, per CLAUDE.md's note on that logic), and
+   correct handling of combined/ranged numbers per 17.1.1(b)-(c).
+3. Implement `to_lilypond()` — fetch the Notation Reference's "Repeats"
+   section first; `\repeat volta N { ... } \alternative { {...} {...} }` is
+   the expected construct, but verify exact syntax against the Notation
+   Reference rather than assuming, especially for how it interacts with
+   `\relative` pitch tracking (per this project's standing rule to verify
+   `\relative` claims against the real binary, given the `<< \\ >>` bug found
+   earlier this project — an `\alternative` block has its own pitch-chaining
+   behavior that shouldn't be assumed by analogy).
+4. Unit tests: model, `to_braille()` (including a combined "1,2" and a
+   ranged "1-3" ending), and `to_lilypond()`.
+
+**Definition of Done:**
+- [ ] `Measure` carries ending-number data.
+- [ ] Volta cells reuse the existing confirmed `NUMBER_SIGN`/
+      `LOWER_DIGIT_CELLS` constants; the ending-number *usage* is flagged for
+      developer confirmation.
+- [ ] `to_braille()` implements Par. 17.1.1's placement, octave-mark, and
+      combined/ranged-numeral rules.
+- [ ] `to_lilypond()` verified against the real LilyPond Notation Reference
+      and, if `\relative` is involved, the real `lilypond` binary.
+- [ ] Unit tests pass.
+
+---
+
+### [ ] S10c-4: Wire fermatas, breath marks, and voltas through MusicXML import and export
+
+**Why:** S10c-1/2/3 add the model/braille/LilyPond support; this ticket
+closes the loop by unblocking S10b-4/5/6 (MusicXML → model import) and
+adding the matching model → MusicXML export path in
+`renderers/musicxml_renderer.py`, so these signs survive a full BRF ↔
+MusicXML round trip, not just BRF ↔ LilyPond.
+
+**Steps:**
+1. Complete S10b-4, S10b-5, and S10b-6 now that the model fields they need
+   exist.
+2. Add the reverse mapping in `musicxml_renderer.py`: model fermata/breath-
+   mark/ending data → `music21.expressions.Fermata` /
+   `music21.articulations.BreathMark`/`Caesura` / `music21.spanner.
+   RepeatBracket`.
+3. Extend `tests/test_musicxml_integration.py` with a round-trip test (BRF
+   with a fermata/breath mark/volta → model → MusicXML → model) asserting
+   the sign survives the round trip.
+
+**Definition of Done:**
+- [ ] S10b-4, S10b-5, S10b-6 complete.
+- [ ] Export path implemented in `musicxml_renderer.py`.
+- [ ] Round-trip test passes.
+
+---
+
+### [ ] S10c-5: BANAValidator and braille-renderer test coverage for all three signs
+
+**Why:** Every other BANA sign category in this project (octave marks,
+articulation shorthand, sign ordering, line length) has BANAValidator
+coverage and dedicated `test_compression.py`/`test_validation.py`-style
+tests; fermatas, breath marks, and voltas should get the same treatment
+rather than being an under-tested bolt-on.
+
+**Steps:**
+1. Extend the BANAValidator's existing sign-ordering rule (S9b) to cover
+   fermata/breath-mark placement relative to value dots, fingerings, and
+   intervals (Par. 22.2).
+2. Add a validation rule (or extend an existing one) for volta placement —
+   e.g. flag a volta sign that isn't immediately before the first sign of its
+   measure, per Par. 17.1.1.
+3. Add `docs/bana_reference.md` entries for all three signs, citing the same
+   Table/Par. numbers used in S10c-1/2/3, so this doesn't have to be
+   re-derived from the manual next time.
+4. Full test pass: `pytest tests/`.
+
+**Definition of Done:**
+- [ ] BANAValidator covers fermata/breath-mark sign ordering and volta
+      placement.
+- [ ] `docs/bana_reference.md` updated.
+- [ ] `pytest tests/` passes.
+
+---
+
 **Sprint 11: Web Interface (2–3 weeks after Sprint 7)**
 - [ ] S11-1: Add FastAPI to project dependencies and create `web.py`
 - [ ] S11-2: Implement file upload endpoint with DottedNotes conversion
