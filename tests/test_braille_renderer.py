@@ -5,7 +5,7 @@ from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
 from dottednotes.models.note import Note, Rest
 from dottednotes.models.duration import Duration
-from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefix, encode_literary_braille, abbrev_to_brl, wrap_run_over_line
+from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefix, encode_literary_braille, abbrev_to_brl, wrap_run_over_line, pad_to_boundary
 
 
 def test_solo_renderer():
@@ -185,10 +185,14 @@ def test_ensemble_renderer_measure_numbers_alignment():
     slice_strs, _ = render_measure_slice(s1.measures, 0, len(s1.measures), None, s1.time_signature, "none")
     music_str = "".join(slice_strs)
     col = len(ensemble_abbrev_prefix(s1.name, music_str))
+    # Each interior measure boundary is a fixed table column: the widest
+    # rendering of that measure across staves, plus a 2-cell gap (BANA
+    # 33.4) -- both staves render identically here, so that's just this
+    # measure's own length + 2.
     for slice_str, digit in zip(slice_strs, ['⠁', '⠃']):
         assert heading_line[col + 1] == '⠼'
         assert heading_line[col + 2] == digit
-        col += len(slice_str)
+        col += len(slice_str) + 2
 
 
 def test_encode_literary_braille_double_capital_for_all_caps_word():
@@ -245,6 +249,33 @@ def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
     # first, since there's no octave mark to skip there).
     assert heading[violin_m2_col + 1] == '⠼'
     assert violin_line[violin_m2_col + 1] == '⠪'  # A, the second note
+
+    # BANA 33.4/Example 33.4.6-1: the shared column is exactly 2 cells
+    # past the longest staff's own content for that measure -- like a
+    # table column, not just "wide enough to fit". Violin is the longest
+    # (Flute rests), so Violin's own gap before measure 2 is exactly 2
+    # plain blank cells (well under the >6 guide-dot threshold).
+    violin_m1_end = violin_m2_col - 2
+    assert violin_line[violin_m1_end:violin_m2_col] == chr(0x2800) * 2
+
+
+def test_pad_to_boundary_uses_guide_dots_with_blanks_on_both_sides():
+    # BANA 28.1.3/33.4/Example 33.4.6-1: a gap of more than 6 cells is
+    # guide dots (dot 3), separated from this staff's own content by one
+    # blank cell AND from the next measure by one blank cell -- not
+    # flush against the following measure.
+    padded = pad_to_boundary("⠍", width=10)
+    assert padded[0] == '⠍'
+    assert padded[1] == chr(0x2800)  # blank separating content from dots
+    assert padded[2:-1] == '⠄' * 7   # 7 guide dots (minimum 5, BANA 28.1.3)
+    assert padded[-1] == chr(0x2800)  # blank separating dots from what follows
+    assert len(padded) == 10
+
+
+def test_pad_to_boundary_uses_plain_blanks_for_a_small_gap():
+    # A gap of 6 or fewer cells (e.g. the fixed 2-cell table-column gap
+    # when a staff is already the widest) is plain blanks, not dots.
+    assert pad_to_boundary("⠍", width=3) == "⠍" + chr(0x2800) * 2
 
 
 def test_wrap_run_over_line_marks_continuation_with_music_hyphen():

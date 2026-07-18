@@ -148,9 +148,14 @@ def test_layout_ensemble_parallel_spacing():
     ensemble_warns = [c for c in result.corrections if "Ensemble parallels must be preceded by at least 1 blank line" in c.message]
     assert len(ensemble_warns) == 1
     
-    # Exporting should format it with exactly 1 blank line before the parallel heading
+    # Exporting should format it with a blank line immediately before
+    # every parallel heading, never anywhere else. (Not "exactly 1" --
+    # the table-column measure alignment (BANA 33.4) can force more or
+    # fewer systems at a given line_width than the raw input had.)
     rendered = BrailleRenderer(line_width=15, compression_level="none").render(score)
     lines = rendered.splitlines()
     blank_indices = [i for i, line in enumerate(lines) if line == ""]
-    assert len(blank_indices) == 1
+    assert len(blank_indices) >= 1
+    for blank_idx in blank_indices:
+        assert '⠼' in lines[blank_idx + 1]
     assert '⠼' in lines[blank_indices[0] + 1]

@@ -114,15 +114,17 @@ def ensemble_abbrev_prefix(staff_name: str, music_str: str) -> str:
 def pad_to_boundary(text: str, width: int) -> str:
     """Right-pad `text` to `width` cells so the next measure's content
     starts at a consistent column across every staff of a parallel
-    (BANA 33.4). A gap of 6 or fewer blank cells is plain blank cells;
-    a larger gap is guide dots (a blank-cell separator, then dot-3
-    cells) per BANA 28.1.3/33.4."""
+    (BANA 33.4), like a table column. A gap of 6 or fewer blank cells is
+    plain blank cells; a larger gap is guide dots with a blank cell on
+    each side -- one separating them from this staff's own music, one
+    separating them from the next measure -- per BANA 28.1.3/33.4 and
+    Example 33.4.6-1."""
     gap = width - len(text)
     if gap <= 0:
         return text
     blank = chr(0x2800)
     if gap > 6:
-        return text + blank + '⠄' * (gap - 1)
+        return text + blank + '⠄' * (gap - 2) + blank
     return text + blank * gap
 
 
@@ -383,11 +385,16 @@ class BrailleRenderer:
             ]
             max_prefix_len = max(len(p) for p in prefixes)
 
-            # Every measure but the last in the system is padded to the
-            # widest rendering of that measure across all staves, so the
-            # next measure's start column is the same in every part.
+            # Every measure but the last in the system is a fixed table
+            # column: its width is the widest rendering of that measure
+            # across all staves, plus 2 cells -- the next measure starts
+            # exactly 2 cells after the longest staff's content for this
+            # one, and shorter staves get that same width filled with
+            # guide dots (or plain blanks for a small gap), never packed
+            # flush against the next measure (BANA 33.4, like how the
+            # instrument list aligns names to a fixed column).
             measure_widths = [
-                max(len(slices[s][k]) for s in range(n_staves))
+                max(len(slices[s][k]) for s in range(n_staves)) + 2
                 for k in range(group_size - 1)
             ]
 
