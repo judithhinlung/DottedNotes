@@ -467,3 +467,45 @@ def test_musicxml_note_without_breath_mark_has_none():
 
     score = MusicXMLTranslator().translate(m21_score)
     assert score.staves[0].measures[0].notes[0].breath_mark is None
+
+def test_musicxml_volta_ending_numbers_import():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+
+    m1 = music21.stream.Measure(number=1)
+    m1.append(music21.note.Note('C4', quarterLength=4))
+    m2 = music21.stream.Measure(number=2)
+    m2.append(music21.note.Note('D4', quarterLength=4))
+    m3 = music21.stream.Measure(number=3)
+    m3.append(music21.note.Note('E4', quarterLength=4))
+    part.append(m1)
+    part.append(m2)
+    part.append(m3)
+
+    rb1 = music21.spanner.RepeatBracket(m1, number='1')
+    rb2 = music21.spanner.RepeatBracket(m2, number='2')
+    part.insert(0, rb1)
+    part.insert(0, rb2)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    measures = score.staves[0].measures
+    assert measures[0].ending_numbers == [1]
+    assert measures[1].ending_numbers == [2]
+    assert measures[2].ending_numbers is None
+
+
+def test_musicxml_combined_volta_ending_numbers_import():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+
+    m1 = music21.stream.Measure(number=1)
+    m1.append(music21.note.Note('C4', quarterLength=4))
+    part.append(m1)
+
+    rb = music21.spanner.RepeatBracket(m1, number='1,2')
+    part.insert(0, rb)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    assert score.staves[0].measures[0].ending_numbers == [1, 2]

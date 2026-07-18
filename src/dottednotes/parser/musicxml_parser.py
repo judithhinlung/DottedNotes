@@ -241,7 +241,17 @@ class MusicXMLTranslator:
             if isinstance(lb, music21.bar.Repeat) and lb.direction == 'start':
                 bar_line = 'forward_repeat'
         measure.bar_line_type = bar_line
-        
+
+        # First/second (or later) endings (BANA Chapter 17, Par. 17.1.1,
+        # S10b-5). Confirmed against music21 10.5.0: a measure spanned by a
+        # RepeatBracket exposes it via getSpannerSites, and
+        # RepeatBracket.numberRange already gives the combined/ranged
+        # ending numbers as a plain list (e.g. [1, 2] for a "1,2" bracket).
+        repeat_brackets = m21_measure.getSpannerSites(music21.spanner.RepeatBracket)
+        if repeat_brackets:
+            measure.ending_numbers = list(repeat_brackets[0].numberRange)
+
+
         # Text markings & Metronome marks
         for t in m21_measure.getElementsByClass(music21.expressions.TextExpression):
             text_val = t.content or ""
