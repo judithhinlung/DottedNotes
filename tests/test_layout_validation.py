@@ -80,13 +80,17 @@ def test_layout_running_head_centering():
     rh_warns = [c for c in result.corrections if "Running Head" in c.message]
     assert len(rh_warns) == 1
     
-    # BRFWriter should center the running head on page 2
+    # BRFWriter should center the running head on page 2. The form feed
+    # is followed by a newline, not glued directly to the header text,
+    # so a raw embosser's column position resets instead of carrying
+    # over from wherever the previous page's last line ended.
     writer = BRFWriter(line_width=40, page_height=1)
     rendered = writer.render_to_string(score)
     pages = rendered.split('\f')
     assert len(pages) > 1
+    assert pages[1].startswith('\n')
     expected_header = "                 ⠠⠎⠕⠝⠛                 ⠃"
-    assert pages[1].splitlines()[0] == expected_header
+    assert pages[1].splitlines()[1] == expected_header
 
 
 def test_layout_piano_parallels_have_no_blank_lines():

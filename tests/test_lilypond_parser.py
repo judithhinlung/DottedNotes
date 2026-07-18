@@ -102,6 +102,10 @@ def test_tokenize_punctuation_articulations_and_dynamics():
 
 
 def test_parse_multi_measure_rest():
+    # R1*8 is Staff.to_lilypond()'s own compression of 8 consecutive
+    # whole-measure-rest Measures into one compact token (see staff.py) --
+    # the parser must expand it back into 8 real Measure objects, each a
+    # single-measure rest, or the trailing c4's measure number drifts.
     ly_content = """
     \\version "2.24.0"
     \\score {
@@ -112,11 +116,17 @@ def test_parse_multi_measure_rest():
     """
     parser = LilypondParser()
     score = parser.parse(ly_content)
-    rest = score.staves[0].measures[0].notes[0]
-    assert isinstance(rest, Rest)
-    assert rest.is_full_measure is True
-    assert rest.duration.value == 1
-    assert rest.multi_measure_count == 8
+    measures = score.staves[0].measures
+    assert len(measures) == 9
+    for i, m in enumerate(measures[:8]):
+        rest = m.notes[0]
+        assert isinstance(rest, Rest)
+        assert rest.is_full_measure is True
+        assert rest.duration.value == 1
+        assert rest.multi_measure_count == 1
+        assert m.number == i + 1
+    assert measures[8].number == 9
+    assert isinstance(measures[8].notes[0], Note)
 
 
 def test_parse_full_measure_rest_without_multiplier_defaults_to_one():

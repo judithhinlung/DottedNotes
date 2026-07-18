@@ -529,7 +529,37 @@ class LilypondParser:
                     tokens, i, is_relative, relative_base, current_duration,
                     current_measure.clef
                 )
-                if item is not None:
+                if isinstance(item, Rest) and item.multi_measure_count > 1:
+                    # R1*N (Staff.to_lilypond()'s own compression of N
+                    # consecutive whole-measure-rest Measures into one
+                    # compact token, see staff.py) must expand back into N
+                    # real Measure objects here, or every later measure
+                    # number in this staff drifts by N-1.
+                    count = item.multi_measure_count
+                    for k in range(count):
+                        rest_measure = Measure(
+                            number=measure_number + k,
+                            key_signature=current_measure.key_signature,
+                            time_signature=current_measure.time_signature,
+                            clef=current_measure.clef,
+                        )
+                        rest_measure.add_note(Rest(
+                            dots=item.dots,
+                            category=item.category,
+                            raw_brl=item.raw_brl,
+                            duration=item.duration,
+                            is_full_measure=True,
+                            multi_measure_count=1,
+                        ))
+                        staff.add_measure(rest_measure)
+                    measure_number += count
+                    current_measure = Measure(
+                        number=measure_number,
+                        key_signature=current_measure.key_signature,
+                        time_signature=current_measure.time_signature,
+                        clef=current_measure.clef,
+                    )
+                elif item is not None:
                     current_measure.add_note(item)
                 continue
 

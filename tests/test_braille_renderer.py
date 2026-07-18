@@ -5,7 +5,7 @@ from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
 from dottednotes.models.note import Note, Rest
 from dottednotes.models.duration import Duration
-from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefix
+from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefix, encode_literary_braille, abbrev_to_brl, wrap_run_over_line
 
 
 def test_solo_renderer():
@@ -171,7 +171,8 @@ def test_ensemble_renderer_measure_numbers_alignment():
     lines = output.splitlines()
 
     # Heading line immediately precedes the top (Violin) staff line.
-    violin_line = next(l for l in lines if l.startswith('⠜VI'))
+    violin_prefix = '⠜' + abbrev_to_brl('vi')
+    violin_line = next(l for l in lines if l.startswith(violin_prefix))
     heading_line = lines[lines.index(violin_line) - 1]
 
     # Recompute each measure's own start column from the same building
@@ -188,3 +189,107 @@ def test_ensemble_renderer_measure_numbers_alignment():
         assert heading_line[col + 1] == '⠼'
         assert heading_line[col + 2] == digit
         col += len(slice_str)
+
+
+def test_encode_literary_braille_double_capital_for_all_caps_word():
+    # A whole word of 2+ uppercase letters takes the double capital sign
+    # (dots 6,6) once, not a single capital sign before every letter.
+    assert encode_literary_braille("II") == '⠠⠠⠊⠊⠲'
+    assert encode_literary_braille("SATB Choir") == '⠠⠠⠎⠁⠞⠃⠀⠠⠉⠓⠕⠊⠗⠲'
+
+
+def test_encode_literary_braille_single_capital_for_title_case_word():
+    # A normally-capitalized (title case) word still gets one capital
+    # sign before its single capitalized letter, not the double sign.
+    assert encode_literary_braille("Song") == '⠠⠎⠕⠝⠛⠲'
+    assert encode_literary_braille("Symphony No. II") == '⠠⠎⠽⠍⠏⠓⠕⠝⠽⠀⠠⠝⠕⠨⠀⠠⠠⠊⠊⠲'
+
+
+def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
+    # BANA 33.4: "the first signs of the measures are vertically aligned
+    # in all parts" -- a resting staff's short measure must be padded to
+    # match a busy staff's longer measure so the NEXT measure starts at
+    # the same column in every part, and the heading numbers land
+    # correctly relative to every staff, not just staff 0.
+    score = OrchestraScore(title="Trio")
+
+    flute = Staff(name="Flute")
+    for n in [1, 2]:
+        m = Measure(number=n)
+        m.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+        flute.add_measure(m)
+    score.add_staff(flute)
+
+    violin = Staff(name="Violin")
+    for n, note_names in [(1, ["C", "D", "E", "F"]), (2, ["G", "A", "B", "C"])]:
+        m = Measure(number=n)
+        for note_name in note_names:
+            m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name=note_name, octave=5, duration=Duration(value=4, dots=0)))
+        violin.add_measure(m)
+    score.add_staff(violin)
+
+    rendered = BrailleRenderer(line_width=40, compression_level="none").render(score)
+    lines = rendered.splitlines()
+
+    heading = next(l for l in lines if l.startswith('     ⠼'))
+    flute_line = next(l for l in lines if l.startswith('⠜' + abbrev_to_brl('fl')))
+    violin_line = next(l for l in lines if l.startswith('⠜' + abbrev_to_brl('vi')))
+
+    # Both staves' second measure must start at the same column.
+    flute_m2_col = len(flute_line) - 2  # "⠍⠀" (2 cells)
+    violin_m2_col = violin_line.index('⠳')  # first note of measure 2 (G)
+    assert flute_m2_col == violin_m2_col
+
+    # The second measure's number sits one cell beyond that shared
+    # column, landing on Violin's second note of measure 2 (not its
+    # first, since there's no octave mark to skip there).
+    assert heading[violin_m2_col + 1] == '⠼'
+    assert violin_line[violin_m2_col + 1] == '⠪'  # A, the second note
+
+
+def test_wrap_run_over_line_marks_continuation_with_music_hyphen():
+    # BANA 1.11 (the music hyphen)/28.1.2/33.4.7: a line too long to fit
+    # is cut with dot 5 directly abutting the last cell that fits (no
+    # space before it), and the remainder continues on the next line
+    # indented two cells, with no further indent growth on later lines.
+    line = "⠜FL⠄" + "⠹" * 10
+    wrapped = wrap_run_over_line(line, width=8)
+    assert all(len(w) <= 8 for w in wrapped)
+    assert "".join(w.rstrip('⠐').removeprefix("  ") for w in wrapped[:-1]) + wrapped[-1].removeprefix("  ") == line
+    for w in wrapped[:-1]:
+        assert w.endswith('⠐')
+    assert not wrapped[-1].endswith('⠐')
+    assert all(w.startswith("  ") for w in wrapped[1:])
+
+
+def test_wrap_run_over_line_no_op_when_it_already_fits():
+    assert wrap_run_over_line("⠜FL⠄⠹⠹", width=40) == ["⠜FL⠄⠹⠹"]
+
+
+def test_ensemble_renderer_splits_overlong_measure_into_run_over_lines():
+    # A single measure that's too dense to fit even alone (the "force 1
+    # measure" fallback) must be split into run-over lines rather than
+    # emitted as one line wider than line_width.
+    score = OrchestraScore(title="Solo")
+    staff = Staff(name="Flute")
+    m = Measure(number=1)
+    for i in range(30):
+        # Alternate octaves so each note needs its own octave mark,
+        # keeping the measure from compressing down to something that
+        # already fits.
+        octave = 5 if i % 2 == 0 else 6
+        m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=octave, duration=Duration(value=4, dots=0)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+    # A second staff so this routes through _render_ensemble, not _render_solo.
+    other = Staff(name="Oboe")
+    m2 = Measure(number=1)
+    m2.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+    other.add_measure(m2)
+    score.add_staff(other)
+
+    rendered = BrailleRenderer(line_width=20, compression_level="none").render(score)
+    lines = rendered.splitlines()
+    assert all(len(l) <= 20 for l in lines)
+    flute_lines = [l for l in lines if l.startswith('⠜' + abbrev_to_brl('fl')) or l.startswith("  ")]
+    assert any(l.endswith('⠐') for l in flute_lines)

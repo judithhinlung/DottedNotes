@@ -14,16 +14,27 @@ _INT_TO_LITERARY_DIGIT = {
 def encode_literary_braille(text: str) -> str:
     """Encode standard ASCII text to BANA Unicode braille cells."""
     from dottednotes.parser.input_pipeline import ASCII_TO_DOTS
-    result = []
     text_to_encode = text.rstrip('.')
-    for char in text_to_encode:
-        if char.isupper():
-            result.append('⠠')
-            char = char.lower()
-        dots = ASCII_TO_DOTS.get(char.upper(), 0)
-        result.append(chr(0x2800 + dots))
-    result.append('⠲')
-    return ''.join(result)
+
+    def encode_word(word: str) -> str:
+        letters = [c for c in word if c.isalpha()]
+        result = []
+        # A whole word of 2+ uppercase letters takes the double capital
+        # sign once, not a single capital sign before every letter.
+        if len(letters) >= 2 and all(c.isupper() for c in letters):
+            result.append('⠠⠠')
+            word = word.lower()
+        for char in word:
+            if char.isupper():
+                result.append('⠠')
+                char = char.lower()
+            dots = ASCII_TO_DOTS.get(char.upper(), 0)
+            result.append(chr(0x2800 + dots))
+        return ''.join(result)
+
+    blank_cell = chr(0x2800)
+    encoded = blank_cell.join(encode_word(w) for w in text_to_encode.split(' '))
+    return encoded + '⠲'
 
 
 def center_line(text: str, width: int) -> str:
@@ -32,6 +43,18 @@ def center_line(text: str, width: int) -> str:
         return text
     left_padding = (width - len(text)) // 2
     return ' ' * left_padding + text
+
+
+def join_tempo_and_signature(tempo_brl: str, *signature_parts: str) -> str:
+    """Join a tempo/expression marking with the combined clef/key/time
+    signature unit, separated by one space when both are present. The
+    signature parts themselves stay joined with no space between them
+    (they're a single combined unit); only the tempo marking, a
+    separate word-sign expression, is set off from it."""
+    combined = "".join(signature_parts)
+    if tempo_brl and combined:
+        return tempo_brl + " " + combined
+    return tempo_brl or combined
 
 
 def staff_abbreviation(staff_name: str) -> str:
@@ -44,15 +67,63 @@ def staff_abbreviation(staff_name: str) -> str:
     return words[0][:2].lower() if words else "ms"
 
 
+def abbrev_to_brl(abbrev: str) -> str:
+    """Encode an instrument abbreviation (e.g. "v1", "fl") to braille
+    cells: letters through the standard literary alphabet cells, digits
+    through the same lower-cell digit forms as ASCII_TO_DOTS ('1' -> dot
+    2, etc.) -- BANA 33.2.2 requires instrument numbers in abbreviations
+    to be lower-cell digits with no numeric indicator, not upper-cell
+    digits behind a number sign."""
+    from dottednotes.parser.input_pipeline import ASCII_TO_DOTS
+    return ''.join(chr(0x2800 + ASCII_TO_DOTS.get(c.upper(), 0)) for c in abbrev)
+
+
+def wrap_run_over_line(line: str, width: int) -> list[str]:
+    """Split one staff's parallel line into BANA 28.1.2/33.4.7 run-over
+    lines when it's too long to fit alone: the music hyphen (dot 5, BANA
+    1.11) is appended directly to the last cell that fits (no space
+    before it) to mark the interruption, and the remainder continues on
+    a new line indented two cells beyond the parallel's margin -- with
+    no re-stated abbreviation, since it's a continuation of the same
+    line, not a new instrument line."""
+    if len(line) <= width:
+        return [line]
+    result = []
+    remaining = line
+    indent = ""
+    while len(indent) + len(remaining) > width:
+        content_width = width - len(indent) - 1  # reserve 1 cell for ⠐
+        result.append(indent + remaining[:content_width] + '⠐')
+        remaining = remaining[content_width:]
+        indent = "  "
+    result.append(indent + remaining)
+    return result
+
+
 def ensemble_abbrev_prefix(staff_name: str, music_str: str) -> str:
     """Build the '⠜XX' staff-abbreviation prefix for an ensemble system
     line, appending the ⠄ separator when the line's first cell would
     otherwise run into the abbreviation (same rule as the instrument-list
     header)."""
-    prefix = '⠜' + staff_abbreviation(staff_name).upper()
+    prefix = '⠜' + abbrev_to_brl(staff_abbreviation(staff_name))
     if music_str and (ord(music_str[0]) - 0x2800) & 0x07 != 0:
         prefix += '⠄'
     return prefix
+
+
+def pad_to_boundary(text: str, width: int) -> str:
+    """Right-pad `text` to `width` cells so the next measure's content
+    starts at a consistent column across every staff of a parallel
+    (BANA 33.4). A gap of 6 or fewer blank cells is plain blank cells;
+    a larger gap is guide dots (a blank-cell separator, then dot-3
+    cells) per BANA 28.1.3/33.4."""
+    gap = width - len(text)
+    if gap <= 0:
+        return text
+    blank = chr(0x2800)
+    if gap > 6:
+        return text + blank + '⠄' * (gap - 1)
+    return text + blank * gap
 
 
 def render_measure_slice(
@@ -118,19 +189,19 @@ class BrailleRenderer:
 
         # Signatures line
         staff = score.staves[0]
-        sig_parts = []
-        if staff.tempo:
-            sig_parts.append(staff.tempo.to_braille())
+        signature_parts = []
         if staff.clef:
-            sig_parts.append(staff.clef.to_braille())
+            signature_parts.append(staff.clef.to_braille())
         if staff.key_signature:
-            sig_parts.append(staff.key_signature.to_braille())
+            signature_parts.append(staff.key_signature.to_braille())
         if staff.time_signature:
-            sig_parts.append(staff.time_signature.to_braille())
+            signature_parts.append(staff.time_signature.to_braille())
+        tempo_brl = staff.tempo.to_braille() if staff.tempo else ""
+        sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
 
-        if sig_parts:
+        if sig_line:
             # BANA solo signature line starts with 8 spaces indentation
-            lines.append("        " + "".join(sig_parts))
+            lines.append("        " + sig_line)
 
         # Pack measures on the fly
         current_line = ""
@@ -170,16 +241,16 @@ class BrailleRenderer:
 
         # Signatures line
         rh_staff = score.staves[0]
-        sig_parts = []
-        if rh_staff.tempo:
-            sig_parts.append(rh_staff.tempo.to_braille())
+        signature_parts = []
         if rh_staff.key_signature:
-            sig_parts.append(rh_staff.key_signature.to_braille())
+            signature_parts.append(rh_staff.key_signature.to_braille())
         if rh_staff.time_signature:
-            sig_parts.append(rh_staff.time_signature.to_braille())
+            signature_parts.append(rh_staff.time_signature.to_braille())
+        tempo_brl = rh_staff.tempo.to_braille() if rh_staff.tempo else ""
+        sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
 
-        if sig_parts:
-            lines.append("        " + "".join(sig_parts))
+        if sig_line:
+            lines.append("        " + sig_line)
 
         # Render measures for both hands
         lh_staff = score.staves[1]
@@ -267,101 +338,110 @@ class BrailleRenderer:
             else:
                 padding = ""
             
-            abbrev_brl = '⠜' + abbrev.upper() + '⠄'
+            abbrev_brl = '⠜' + abbrev_to_brl(abbrev) + '⠄'
             lines.append(name_brl + padding + "  " + abbrev_brl)
 
         # Signature line
         first_staff = score.staves[0]
-        sig_parts = []
-        if first_staff.tempo:
-            sig_parts.append(first_staff.tempo.to_braille())
+        signature_parts = []
         if first_staff.key_signature:
-            sig_parts.append(first_staff.key_signature.to_braille())
+            signature_parts.append(first_staff.key_signature.to_braille())
         if first_staff.time_signature:
-            sig_parts.append(first_staff.time_signature.to_braille())
+            signature_parts.append(first_staff.time_signature.to_braille())
+        tempo_brl = first_staff.tempo.to_braille() if first_staff.tempo else ""
+        sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
 
-        if sig_parts:
-            lines.append("       " + "".join(sig_parts))
+        if sig_line:
+            lines.append("       " + sig_line)
 
-        # Pack measures into systems on the fly
+        # Pack measures into systems on the fly. Per BANA 33.4, the first
+        # signs of each measure must be vertically aligned across every
+        # part of the parallel, and the music of every line must start
+        # one space beyond the longest instrument abbreviation -- so a
+        # candidate system is built for ALL staves together (not staff by
+        # staff), padding each staff's shorter measures/abbreviation up
+        # to the widest rendering of that measure/abbreviation across the
+        # whole parallel, before checking whether it fits line_width.
         n_measures = len(score.staves[0].measures) if score.staves else 0
+        n_staves = len(score.staves)
         idx = 0
-        prev_notes = [None] * len(score.staves)
-        
+        prev_notes = [None] * n_staves
+
+        def render_candidate(group_size: int):
+            slices = []
+            prevs = []
+            for s_idx, staff in enumerate(score.staves):
+                slice_strs, tmp_prev = render_measure_slice(
+                    staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level
+                )
+                slices.append(slice_strs)
+                prevs.append(tmp_prev)
+
+            prefixes = [
+                ensemble_abbrev_prefix(score.staves[s].name, "".join(slices[s]))
+                for s in range(n_staves)
+            ]
+            max_prefix_len = max(len(p) for p in prefixes)
+
+            # Every measure but the last in the system is padded to the
+            # widest rendering of that measure across all staves, so the
+            # next measure's start column is the same in every part.
+            measure_widths = [
+                max(len(slices[s][k]) for s in range(n_staves))
+                for k in range(group_size - 1)
+            ]
+
+            staff_lines = []
+            for s_idx in range(n_staves):
+                prefix = prefixes[s_idx] + chr(0x2800) * (max_prefix_len - len(prefixes[s_idx]))
+                body = "".join(
+                    pad_to_boundary(slices[s_idx][k], measure_widths[k])
+                    for k in range(group_size - 1)
+                )
+                body += slices[s_idx][group_size - 1]
+                staff_lines.append(prefix + body)
+
+            return staff_lines, prevs, max_prefix_len, measure_widths
+
         while idx < n_measures:
             group_size = 1
-            best_staff_lines = []
-            best_prev_notes = list(prev_notes)
-            
-            while idx + group_size <= n_measures:
-                # Try to render candidate slice
-                all_fit = True
-                temp_staff_lines = []
-                temp_prev_notes = []
-                
-                for s_idx, staff in enumerate(score.staves):
-                    slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level)
-                    music_str = "".join(slice_strs)
+            best = None
 
-                    abbrev_prefix = ensemble_abbrev_prefix(staff.name, music_str)
-                    test_line = abbrev_prefix + music_str
-                    if len(test_line) > self.line_width:
-                        all_fit = False
-                        break
-                    
-                    temp_staff_lines.append(test_line)
-                    temp_prev_notes.append(tmp_prev)
-                    
-                if all_fit:
-                    best_staff_lines = temp_staff_lines
-                    best_prev_notes = temp_prev_notes
-                    group_size += 1
-                else:
+            while idx + group_size <= n_measures:
+                staff_lines, prevs, max_prefix_len, measure_widths = render_candidate(group_size)
+                if any(len(line) > self.line_width for line in staff_lines):
                     break
-                    
-            if not best_staff_lines:
-                # Force 1 measure
-                best_staff_lines = []
-                best_prev_notes = []
-                for s_idx, staff in enumerate(score.staves):
-                    slice_strs, tmp_prev = render_measure_slice(staff.measures, idx, 1, prev_notes[s_idx], staff.time_signature, self.compression_level)
-                    music_str = "".join(slice_strs)
-                    abbrev_prefix = ensemble_abbrev_prefix(staff.name, music_str)
-                    best_staff_lines.append(abbrev_prefix + music_str)
-                    best_prev_notes.append(tmp_prev)
-                fit_size = 1
-            else:
-                fit_size = group_size - 1
-                
+                best = (group_size, staff_lines, prevs, max_prefix_len, measure_widths)
+                group_size += 1
+
+            if best is None:
+                # Force 1 measure even if it doesn't fit.
+                best = (1, *render_candidate(1))
+
+            fit_size, best_staff_lines, best_prev_notes, max_prefix_len, measure_widths = best
+
             if idx > 0:
                 lines.append("")
             if self.show_measure_numbers:
-                first_staff = score.staves[0]
-                first_slice_strs, _ = render_measure_slice(
-                    first_staff.measures, idx, fit_size, prev_notes[0], first_staff.time_signature, self.compression_level
-                )
-                music_str = "".join(first_slice_strs)
-                abbrev_prefix = ensemble_abbrev_prefix(first_staff.name, music_str)
-
                 heading_chars = [" "] * self.line_width
+                # BANA 33.4.6: the marking is "indented one cell beyond
+                # the first music signs of the parallel" -- one column
+                # past wherever each measure's own (now cross-staff
+                # aligned) content starts, not directly above it.
+                col = max_prefix_len + 1
                 for k in range(fit_size):
-                    m = first_staff.measures[idx + k]
+                    m = score.staves[0].measures[idx + k]
                     num_str = "⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
-                    # BANA 33.4.6: the marking is "indented one cell beyond
-                    # the first music signs of the parallel" -- i.e. one
-                    # column past wherever this measure's own content
-                    # starts, not directly above it. So when a measure
-                    # opens with a 1-cell octave mark, the number lands on
-                    # the note itself; the offset is still applied even
-                    # when there's no octave mark to skip.
-                    col = len(abbrev_prefix) + sum(len(first_slice_strs[i]) for i in range(k)) + 1
                     for char_idx, char in enumerate(num_str):
                         if col + char_idx < self.line_width:
                             heading_chars[col + char_idx] = char
+                    if k < len(measure_widths):
+                        col += measure_widths[k]
                 heading_line = "".join(heading_chars).rstrip()
                 lines.append(heading_line)
-            
-            lines.extend(best_staff_lines)
+
+            for staff_line in best_staff_lines:
+                lines.extend(wrap_run_over_line(staff_line, self.line_width))
             prev_notes = best_prev_notes
             idx += fit_size
 

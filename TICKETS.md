@@ -6780,5 +6780,55 @@ Estimated time: 1–1.5 weeks.
 - [x] State messages have appropriate `aria-live` regions or semantic markup.
 - [x] All 880+ existing test cases pass.
 
+---
+
+### [x] S11c-6: Fix Braille Formatting Bugs in Ensemble and Piano Layouts
+
+**Why:** Several formatting discrepancies and layout bugs have been identified when transcribing `fengyang_flower_drum.ly` and `children_s_piece.ly` to braille (`.brl`/`.brf`). Addressing these ensures strict compliance with BANA braille music formatting rules.
+
+**Steps:**
+1. **Remove unnecessary blank lines between ensemble parallel systems:**
+   - In `src/dottednotes/renderers/braille_renderer.py`, locate `_render_ensemble()`.
+   - Remove the code block that appends a blank line when `idx > 0`. (The "blank line" separation in BANA 33.4.6/34.4.6 refers to the sparse heading line containing the measure/rehearsal numbers, so an additional empty line is incorrect).
+
+2. **Fix literary braille double-capital capitalization rule:**
+   - In `src/dottednotes/renderers/braille_renderer.py`, update `encode_literary_braille()` to check if a word (or the entire text, if single word) is in all caps (such as "II").
+   - If a word is in all caps (consists of 2 or more uppercase letters), prefix it with a double capital sign (`⠠⠠`) instead of prefixing each character individually with a single capital sign (`⠠`).
+
+3. **Position measure numbers correctly for subsequent measures in ensemble heading lines:**
+   - In `_render_ensemble()`, adjust the column calculation for measure numbers.
+   - When placing measure numbers, ensure that the second measure's number `#B` is indented one cell beyond the music of measure 2 on the next line (the staff lines below it), rather than being placed right next to the number of the first measure.
+
+4. **Correct multi-measure rests in LilypondParser:**
+   - In `src/dottednotes/parser/lilypond_parser.py`, when parsing a Rest that has a `multi_measure_count > 1` (e.g. `R1*45`), expand it into `multi_measure_count` separate `Measure` objects containing single-measure rests.
+   - This ensures the subsequent measures are positioned at the correct measure numbers (e.g. Flute starts at Measure 46 instead of Measure 1/2).
+
+5. **Format Violin I and Violin II abbreviations correctly:**
+   - In `src/dottednotes/renderers/braille_renderer.py`, ensure the instrument abbreviations (like `v1` and `v2`) are rendered as lowercase letter `v` + lower-cell digits (e.g., `⠧⠂` for `v1`, `⠧⠆` for `v2`) rather than upper-cell digits with number signs (e.g., `v#A`).
+   - Create a helper `abbrev_to_brl(abbrev: str)` that maps letters to their standard braille cells and digits to their lower-cell equivalents (as defined in `ASCII_TO_DOTS` mapping). Use it in both the instrument list and the system lines prefix.
+
+6. **Separate tempo and key/time signatures with a space:**
+   - In `braille_renderer.py`, update `_render_solo()`, `_render_piano()`, and `_render_ensemble()` to ensure that the tempo/expression marking (if present) is separated from the combined key/time signature unit by a single space.
+
+7. **Ensure identical indent for left and right hand parts in piano layout:**
+   - In `src/dottednotes/renderers/brf_writer.py`, avoid prepending the form feed character `\f` directly to the first music line of a new page, which shifts the right hand line's column index.
+   - Instead, place the form feed `\f` on its own line (or end each page with `\f\n`) so it doesn't affect the text alignment of the next page's first line.
+
+8. **Remove unnecessary blank lines between parallels in piano layout:**
+   - In `src/dottednotes/renderers/braille_renderer.py`, locate `_render_piano()`.
+   - Remove the lines appending two blank lines when `idx > 0`.
+
+**Definition of Done:**
+- [x] Ensemble scores do not have separate blank lines between parallel systems (the measure number line is the only separator).
+- [x] Capitalized words (e.g., "II") are prefixed with double capital sign `⠠⠠` rather than repeating `⠠` for each letter.
+- [x] Ensemble measure numbers are aligned 1 cell past the start of their corresponding measure's music.
+- [x] LilyPond multi-measure rests (e.g., `R1*45`) expand into individual measure rest objects, and the subsequent measures are numbered correctly.
+- [x] Violin I/II abbreviations format as `⠧⠂` / `⠧⠆` (lowercase v + lower-cell digit) in both headers and prefixes.
+- [x] Tempo is separated from key/time signatures by one space.
+- [x] Left and right hand lines in piano layout align perfectly at the same indentation cell even across page boundaries.
+- [x] Consecutive piano parallel systems are not separated by blank lines.
+- [x] All unit and integration tests pass.
+
+
 
 

@@ -102,4 +102,9 @@ class BRFWriter:
         if current_page_lines:
             pages.append("\n".join(current_page_lines))
 
-        return "\f".join(pages) + "\n"
+        # The form feed sits on its own line: a raw embosser/terminal
+        # doesn't reset its column to 0 on \f the way it does on \n, so
+        # \f immediately followed by text (the old "\f".join behavior)
+        # shifted that text's indentation by however many columns the
+        # previous page's last line had already used.
+        return "\n\f\n".join(pages) + "\n"
