@@ -9,7 +9,8 @@ from dottednotes.models import (
     Accidental, AccidentalType, Dynamic, DynamicLevel,
     Articulation, ArticulationType, Ornament, OrnamentType,
     GraceNote, Clef, ClefType, KeySignature, TimeSignature,
-    TextMarking, TextMarkingType, Tuplet, InAccord
+    TextMarking, TextMarkingType, Tuplet, InAccord,
+    ChordSymbol, ChordNamesTrack,
 )
 from dottednotes.models.fingering import Fingering
 from dottednotes.models.duration import TICKS_PER_QUARTER
@@ -60,13 +61,21 @@ class MusicXMLTranslator:
             score.composer = m21_score.metadata.composer or ""
             score.copyright = m21_score.metadata.copyright or ""
             
-        for part in m21_score.parts:
-            staff = self.translate_part(part)
+        parts = list(m21_score.parts)
+        for part in parts:
+            staff, chord_track_entries = self.translate_part(part)
             score.add_staff(staff)
-            
+            # Lead-sheet chord symbols (BANA Sec. 23/27, S10b-3) are only
+            # supported for a single melody staff, matching
+            # lead_sheet_parser.py's identical restriction on the BRF side --
+            # a chord-symbol line has no defined alignment against more than
+            # one staff.
+            if len(parts) == 1 and chord_track_entries:
+                score.chord_names = ChordNamesTrack(entries=chord_track_entries)
+
         return score
 
-    def translate_part(self, part: music21.stream.Part) -> Staff:
+    def translate_part(self, part: music21.stream.Part) -> tuple[Staff, list]:
         # Determine staff name
         name = str(part.partName) if hasattr(part, 'partName') and part.partName else str(part.id)
         if not name:
@@ -103,10 +112,15 @@ class MusicXMLTranslator:
         
         # Collect lyrics by verse number
         verses_data: dict[int, list[str]] = {}
-        
+
+        # Lead-sheet chord-symbol alignment (BANA Sec. 23/27, S10b-3),
+        # accumulated across all of this part's measures in melody order.
+        chord_track_entries: list = []
+
         for m21_measure in part.getElementsByClass(music21.stream.Measure):
-            measure = self.translate_measure(m21_measure, current_clef, current_key, current_time)
-            
+            measure, measure_chord_entries = self.translate_measure(m21_measure, current_clef, current_key, current_time)
+            chord_track_entries.extend(measure_chord_entries)
+
             # Carry over active clef/key/time signatures
             current_clef = measure.clef
             current_key = measure.key_signature
@@ -154,8 +168,8 @@ class MusicXMLTranslator:
                 staff.verse_prefixes = [f"{n}." for n in sorted_v_nums]
             else:
                 staff.verse_prefixes = [None] * len(sorted_v_nums)
-                
-        return staff
+
+        return staff, chord_track_entries
 
     def map_clef_model(self, m21_clef) -> Clef:
         if isinstance(m21_clef, music21.clef.TrebleClef):
@@ -170,7 +184,7 @@ class MusicXMLTranslator:
             ct = ClefType.TREBLE
         return Clef(dots=frozenset(), category=None, raw_brl="", clef_type=ct)
 
-    def translate_measure(self, m21_measure: music21.stream.Measure, prev_clef: str, prev_key: int, prev_time: tuple[int, int]) -> Measure:
+    def translate_measure(self, m21_measure: music21.stream.Measure, prev_clef: str, prev_key: int, prev_time: tuple[int, int]) -> tuple[Measure, list]:
         # Determine signatures for this measure
         clef_name = prev_clef
         clefs = list(m21_measure.getElementsByClass(music21.clef.Clef))
@@ -256,6 +270,7 @@ class MusicXMLTranslator:
         # voice is translated separately and wrapped in an InAccord (BANA
         # Chapter 11) instead (S10b-1).
         voices = list(m21_measure.voices)
+        chord_track_entries: list = []
         if voices:
             voice_items = [
                 self._translate_note_stream(voice.notesAndRests, clef_name, dynamic_offsets)
@@ -263,11 +278,119 @@ class MusicXMLTranslator:
             ]
             ordered = self._order_voices_by_bana_convention(voice_items, clef_name)
             measure.add_note(InAccord(parts=ordered, in_accord_type='full_measure'))
+            # Lead-sheet chord symbols (BANA 27.1) are only defined for a
+            # single melody line, matching lead_sheet_parser.py's identical
+            # restriction on the BRF side -- a multi-voice measure has no
+            # single line to align chord symbols against, so any chord
+            # symbols here are silently not collected.
         else:
-            for item in self._translate_note_stream(m21_measure.notesAndRests, clef_name, dynamic_offsets):
+            stream_elements = list(m21_measure.notesAndRests)
+            for item in self._translate_note_stream(stream_elements, clef_name, dynamic_offsets):
                 measure.add_note(item)
+            chord_symbols = list(m21_measure.getElementsByClass(music21.harmony.ChordSymbol))
+            if chord_symbols:
+                chord_track_entries = self._align_chord_symbols(stream_elements, chord_symbols)
 
-        return measure
+        return measure, chord_track_entries
+
+    def _align_chord_symbols(self, elements, m21_chord_symbols) -> list:
+        """Align music21 harmony.ChordSymbol elements to the melody notes/
+        rests in `elements` by offset (S10b-3), mirroring lead_sheet_parser.py's
+        column-alignment for the BRF side: BANA 27.1 places a chord symbol's
+        initial cell "below the first sign of the note...with which it
+        coincides," so each chord symbol attaches to the melody item at or
+        immediately after its own offset. Returns one (Duration, ChordSymbol
+        | None) entry per melody note/rest -- Chord items are excluded, since
+        BANA lead sheets pair chord symbols with a single melody line, the
+        same restriction lead_sheet_parser.py applies on the BRF side.
+        """
+        melody = [
+            el for el in elements
+            if isinstance(el, (music21.note.Note, music21.note.Rest)) and not el.duration.isGrace
+        ]
+        if not melody:
+            return []
+
+        chord_for_index: dict[int, ChordSymbol] = {}
+        for cs in sorted(m21_chord_symbols, key=lambda c: c.offset):
+            candidates = [i for i, el in enumerate(melody) if el.offset <= cs.offset]
+            if not candidates:
+                continue
+            chord_for_index[max(candidates)] = self._translate_chord_symbol(cs)
+
+        return [
+            (self.map_duration(el.duration), chord_for_index.get(i))
+            for i, el in enumerate(melody)
+        ]
+
+    _CHORD_KIND_TO_MODEL_FIELDS: dict[str, dict] = {
+        'major': {},
+        'minor': {'is_minor': True},
+        'augmented': {'is_augmented': True},
+        'diminished': {'is_diminished': True},
+        'diminished-seventh': {'is_diminished': True, 'extensions': [(7, None)]},
+        'half-diminished-seventh': {'is_half_diminished': True},
+        'dominant-seventh': {'extensions': [(7, None)]},
+        'dominant-ninth': {'extensions': [(9, None)]},
+        'dominant-11th': {'extensions': [(11, None)]},
+        'dominant-13th': {'extensions': [(13, None)]},
+        'major-seventh': {'has_explicit_maj': True},
+        'major-ninth': {'has_explicit_maj': True, 'extensions': [(9, None)]},
+        'major-11th': {'has_explicit_maj': True, 'extensions': [(11, None)]},
+        'major-13th': {'has_explicit_maj': True, 'extensions': [(13, None)]},
+        'major-sixth': {'extensions': [(6, None)]},
+        'minor-sixth': {'is_minor': True, 'extensions': [(6, None)]},
+        'minor-seventh': {'is_minor': True, 'extensions': [(7, None)]},
+        'minor-ninth': {'is_minor': True, 'extensions': [(9, None)]},
+        'minor-11th': {'is_minor': True, 'extensions': [(11, None)]},
+        'minor-13th': {'is_minor': True, 'extensions': [(13, None)]},
+        'minor-major-seventh': {'is_minor': True, 'has_explicit_maj': True},
+        'suspended-second': {'suspended': 2},
+        'suspended-fourth': {'suspended': 4},
+        'suspended-fourth-seventh': {'suspended': 4, 'extensions': [(7, None)]},
+    }
+
+    _M21_ACCIDENTAL_TO_MODEL = {'sharp': 'sharp', 'flat': 'flat', 'natural': 'natural'}
+
+    def _translate_chord_symbol(self, cs) -> ChordSymbol:
+        """Translate one music21 harmony.ChordSymbol into a DottedNotes
+        ChordSymbol (BANA Sec. 23/27). `cs.chordKind` is MusicXML's own
+        controlled-vocabulary chord-quality string (e.g. 'minor-seventh');
+        `_CHORD_KIND_TO_MODEL_FIELDS` covers the common jazz/lead-sheet
+        qualities. An unrecognized kind raises rather than guessing a chord
+        quality that would then sound (or print) wrong -- matching
+        chord_symbol_parser.py's own fail-fast behavior on an unrecognized
+        braille chord-symbol cell, rather than silently defaulting to a
+        plain major triad.
+        """
+        if cs.chordKind == 'none' or cs.root() is None:
+            return ChordSymbol(no_chord=True)
+
+        if cs.chordKind not in self._CHORD_KIND_TO_MODEL_FIELDS:
+            raise DottedNotesError(
+                f"Unrecognized MusicXML chord kind '{cs.chordKind}' (chord symbol "
+                f"'{cs.figure}') -- not one of the lead-sheet chord qualities "
+                "DottedNotes currently maps (BANA Sec. 23/27)."
+            )
+
+        root = cs.root()
+        root_accidental = (
+            self._M21_ACCIDENTAL_TO_MODEL.get(root.accidental.name) if root.accidental else None
+        )
+
+        fields = dict(self._CHORD_KIND_TO_MODEL_FIELDS[cs.chordKind])
+        extensions = list(fields.pop('extensions', []))
+
+        chord = ChordSymbol(root=root.step, accidental=root_accidental, extensions=extensions, **fields)
+
+        bass = cs.bass()
+        if bass is not None and bass is not root:
+            bass_accidental = (
+                self._M21_ACCIDENTAL_TO_MODEL.get(bass.accidental.name) if bass.accidental else None
+            )
+            chord.bass_note = (bass.step, bass_accidental)
+
+        return chord
 
     def _order_voices_by_bana_convention(self, voice_items: list, clef_name: str) -> list:
         """Order InAccord voices per BANA Chapter 11: highest voice first for
@@ -308,6 +431,19 @@ class MusicXMLTranslator:
         tuplet_group = []
 
         for el in elements:
+            # music21.harmony.ChordSymbol is itself a music21.chord.Chord
+            # subclass (confirmed against music21 10.5.0) and shows up in
+            # `elements` right alongside real notes -- without this check it
+            # falls into the `isinstance(el, music21.chord.Chord)` branch
+            # below and imports as a real, sounding chord (e.g. a "Cmaj7"
+            # lead-sheet symbol becomes a 4-note played chord competing with
+            # the actual melody note at that beat) instead of the annotation
+            # it is. Lead-sheet chord symbols are collected separately by
+            # `_align_chord_symbols` (S10b-3); they carry no rhythmic weight
+            # of their own here.
+            if isinstance(el, music21.harmony.ChordSymbol):
+                continue
+
             duration = self.map_duration(el.duration)
 
             if isinstance(el, music21.note.Note):

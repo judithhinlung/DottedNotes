@@ -234,3 +234,82 @@ def test_musicxml_non_transposing_instrument_has_no_resolved_transposition():
     staff = score.staves[0]
 
     assert staff.resolved_transposition is None
+
+def test_musicxml_chord_symbol_does_not_import_as_played_chord():
+    # music21.harmony.ChordSymbol is itself a music21.chord.Chord subclass,
+    # so without an explicit exclusion it used to fall into the generic
+    # Chord-translation branch and import as a real 4-note sounding chord
+    # competing with the actual melody note at that beat (S10b-3).
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.harmony.ChordSymbol('Cmaj7'))
+    measure.insert(0, music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    m = score.staves[0].measures[0]
+
+    assert len(m.notes) == 1
+    assert m.notes[0].note_name == 'C'
+    assert m.notes[0].octave == 4
+
+
+def test_musicxml_lead_sheet_chord_symbols_import_and_align():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.TrebleClef())
+    measure.insert(0.0, music21.harmony.ChordSymbol('Cmaj7'))
+    measure.insert(0.0, music21.note.Note('C4', quarterLength=2))
+    measure.insert(2.0, music21.harmony.ChordSymbol('Dm7'))
+    measure.insert(2.0, music21.note.Note('D4', quarterLength=2))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+
+    assert score.chord_names is not None
+    entries = score.chord_names.entries
+    assert len(entries) == 2
+    assert entries[0][1].root == 'C'
+    assert entries[0][1].has_explicit_maj is True
+    assert entries[1][1].root == 'D'
+    assert entries[1][1].is_minor is True
+    assert entries[1][1].extensions == [(7, None)]
+
+    ly = score.chord_names.to_lilypond()
+    assert 'c2:maj7' in ly
+    assert 'd2:m7' in ly
+
+
+def test_musicxml_chord_symbol_with_slash_bass():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0.0, music21.harmony.ChordSymbol('G7/B'))
+    measure.insert(0.0, music21.note.Note('G4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    chord = score.chord_names.entries[0][1]
+    assert chord.root == 'G'
+    assert chord.extensions == [(7, None)]
+    assert chord.bass_note == ('B', None)
+
+
+def test_musicxml_unrecognized_chord_kind_raises():
+    from dottednotes.exceptions import DottedNotesError
+
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0.0, music21.harmony.ChordSymbol('Cpower'))
+    measure.insert(0.0, music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    with pytest.raises(DottedNotesError):
+        MusicXMLTranslator().translate(m21_score)
