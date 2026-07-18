@@ -232,12 +232,67 @@ class MusicXMLTranslator:
             if lvl is not None:
                 dynamic_offsets[d.offset] = Dynamic(level=lvl)
                 
-        # Parse notes and rests
+        # Parse notes and rests. A measure whose content lives in nested
+        # music21 Voice streams (MusicXML's <voice> numbering -- the normal
+        # way a single staff carries two independent rhythmic lines, e.g.
+        # piano writing) is NOT reached by `m21_measure.notesAndRests`: that
+        # call does not descend into Voice sub-streams and would silently
+        # return an empty measure (confirmed against music21 10.5.0). Each
+        # voice is translated separately and wrapped in an InAccord (BANA
+        # Chapter 11) instead (S10b-1).
+        voices = list(m21_measure.voices)
+        if voices:
+            voice_items = [
+                self._translate_note_stream(voice.notesAndRests, clef_name, dynamic_offsets)
+                for voice in voices
+            ]
+            ordered = self._order_voices_by_bana_convention(voice_items, clef_name)
+            measure.add_note(InAccord(parts=ordered, in_accord_type='full_measure'))
+        else:
+            for item in self._translate_note_stream(m21_measure.notesAndRests, clef_name, dynamic_offsets):
+                measure.add_note(item)
+
+        return measure
+
+    def _order_voices_by_bana_convention(self, voice_items: list, clef_name: str) -> list:
+        """Order InAccord voices per BANA Chapter 11: highest voice first for
+        treble/alto clef, lowest voice first for bass/tenor clef. music21's
+        own voice numbering doesn't reliably reflect pitch order (a "voice
+        2" can sit above "voice 1" depending on how the source engraving
+        software assigned voice numbers), so this derives order from each
+        voice's actual average pitch instead of trusting the numbering."""
+        def avg_pitch(items: list) -> float:
+            pitches: list[int] = []
+
+            def collect(item):
+                if isinstance(item, Note):
+                    pitches.append(item._midi_pitch())
+                elif isinstance(item, Chord) and item.notes:
+                    pitches.append(item.notes[0]._midi_pitch())
+                elif isinstance(item, Tuplet):
+                    for sub in item.items:
+                        collect(sub)
+
+            for item in items:
+                collect(item)
+            return sum(pitches) / len(pitches) if pitches else 0.0
+
+        reverse = clef_name not in ("bass", "tenor")
+        return sorted(voice_items, key=avg_pitch, reverse=reverse)
+
+    def _translate_note_stream(self, elements, clef_name: str, dynamic_offsets: dict) -> list:
+        """Translate one flat sequence of music21 notes/rests/chords (a whole
+        single-voice measure, or one voice of a multi-voice measure) into
+        DottedNotes measure items, handling grace notes, chords, and triplet
+        tuplet-grouping. Extracted from `translate_measure` (S10b-1) so it
+        can run once per InAccord voice as well as for a single-voice
+        measure."""
+        items: list = []
         current_grace_notes: list[Note] = []
         current_grace_unslashed: list[bool] = []
         tuplet_group = []
 
-        for el in m21_measure.notesAndRests:
+        for el in elements:
             duration = self.map_duration(el.duration)
 
             if isinstance(el, music21.note.Note):
@@ -350,27 +405,27 @@ class MusicXMLTranslator:
                 t = el.duration.tuplets[0]
                 if t.numberNotesActual == 3 and t.numberNotesNormal == 2:
                     if t.type == 'start' and tuplet_group:
-                        measure.add_note(Tuplet(items=tuplet_group))
+                        items.append(Tuplet(items=tuplet_group))
                         tuplet_group = []
                     tuplet_group.append(dn_item)
                     if t.type == 'stop':
-                        measure.add_note(Tuplet(items=tuplet_group))
+                        items.append(Tuplet(items=tuplet_group))
                         tuplet_group = []
                 else:
                     if tuplet_group:
-                        measure.add_note(Tuplet(items=tuplet_group))
+                        items.append(Tuplet(items=tuplet_group))
                         tuplet_group = []
-                    measure.add_note(dn_item)
+                    items.append(dn_item)
             else:
                 if tuplet_group:
-                    measure.add_note(Tuplet(items=tuplet_group))
+                    items.append(Tuplet(items=tuplet_group))
                     tuplet_group = []
-                measure.add_note(dn_item)
-                
+                items.append(dn_item)
+
         if tuplet_group:
-            measure.add_note(Tuplet(items=tuplet_group))
-            
-        return measure
+            items.append(Tuplet(items=tuplet_group))
+
+        return items
 
     def map_duration(self, m21_duration) -> Duration:
         is_triplet = False

@@ -5,6 +5,7 @@ from dottednotes.parser.musicxml_parser import load_musicxml, MusicXMLTranslator
 from dottednotes.models import (
     AccidentalType, ArticulationType, OrnamentType, DynamicLevel, ClefType
 )
+from dottednotes.models.in_accord import InAccord
 
 def test_musicxml_pitch_and_octave_translation():
     # Construct a music21 score in memory
@@ -157,3 +158,41 @@ def test_musicxml_lyrics_translation():
     assert staff.verses[1] == ['A', 'B']
     assert staff.lyrics == ['He --', 'lo']
     assert staff.verse_prefixes == ['1.', '2.']
+
+def test_musicxml_multi_voice_single_staff_imports_as_in_accord():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.TrebleClef())
+
+    # Voice id '1' deliberately holds the LOWER pitch material and voice id
+    # '2' the HIGHER -- this checks that voice ordering is derived from
+    # actual pitch content, not from music21's voice numbering (S10b-1).
+    low_voice = music21.stream.Voice()
+    low_voice.id = '1'
+    low_voice.append(music21.note.Note('C4', quarterLength=2))
+
+    high_voice = music21.stream.Voice()
+    high_voice.id = '2'
+    high_voice.append(music21.note.Note('G4', quarterLength=1))
+    high_voice.append(music21.note.Note('A4', quarterLength=1))
+
+    measure.insert(0, low_voice)
+    measure.insert(0, high_voice)
+
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    m = score.staves[0].measures[0]
+
+    assert len(m.notes) == 1
+    in_accord = m.notes[0]
+    assert isinstance(in_accord, InAccord)
+    assert len(in_accord.parts) == 2
+
+    # Treble clef -> highest voice first (BANA Chapter 11), regardless of
+    # which music21 voice id the higher pitches happened to be stored under.
+    top_voice, bottom_voice = in_accord.parts
+    assert [n.note_name for n in top_voice] == ['G', 'A']
+    assert [n.note_name for n in bottom_voice] == ['C']
