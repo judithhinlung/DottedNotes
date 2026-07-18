@@ -371,3 +371,52 @@ def test_musicxml_note_without_ottava_is_unaffected():
     score = MusicXMLTranslator().translate(m21_score)
     note = score.staves[0].measures[0].notes[0]
     assert note.octave == 5
+
+def test_musicxml_fermata_over_note_imports():
+    from dottednotes.models import FermataShape
+
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    n = music21.note.Note('C4', quarterLength=4)
+    n.expressions.append(music21.expressions.Fermata())
+    measure.append(n)
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.fermata is not None
+    assert note.fermata.shape == FermataShape.NORMAL
+
+
+def test_musicxml_fermata_shape_variants_import():
+    from dottednotes.models import FermataShape
+
+    for m21_shape, expected in [('square', FermataShape.SQUARED), ('angled', FermataShape.TENT)]:
+        m21_score = music21.stream.Score()
+        part = music21.stream.Part()
+        measure = music21.stream.Measure(number=1)
+        n = music21.note.Note('C4', quarterLength=4)
+        fermata = music21.expressions.Fermata()
+        fermata.shape = m21_shape
+        n.expressions.append(fermata)
+        measure.append(n)
+        part.append(measure)
+        m21_score.append(part)
+
+        score = MusicXMLTranslator().translate(m21_score)
+        note = score.staves[0].measures[0].notes[0]
+        assert note.fermata.shape == expected
+
+
+def test_musicxml_note_without_fermata_has_none():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.append(music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    assert score.staves[0].measures[0].notes[0].fermata is None

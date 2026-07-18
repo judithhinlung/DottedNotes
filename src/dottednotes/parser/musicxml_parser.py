@@ -10,7 +10,7 @@ from dottednotes.models import (
     Articulation, ArticulationType, Ornament, OrnamentType,
     GraceNote, Clef, ClefType, KeySignature, TimeSignature,
     TextMarking, TextMarkingType, Tuplet, InAccord,
-    ChordSymbol, ChordNamesTrack,
+    ChordSymbol, ChordNamesTrack, Fermata, FermataShape,
 )
 from dottednotes.models.fingering import Fingering
 from dottednotes.models.duration import TICKS_PER_QUARTER
@@ -48,6 +48,16 @@ M21_ARTICULATION_MAP = {
     music21.articulations.UpBow: ArticulationType.UP_BOW,
     music21.articulations.Stopped: ArticulationType.STOPPED,
     music21.articulations.OpenString: ArticulationType.OPEN,
+}
+
+# music21.expressions.Fermata.shape values (confirmed against its source:
+# only 'normal'/'angled'/'square' are modeled) -> BANA Table 22(B) variant
+# (S10b-4). 'angled' -> TENT and 'square' -> SQUARED per the same
+# Henze-fermata cross-reference documented in models/fermata.py.
+_M21_FERMATA_SHAPE_TO_MODEL = {
+    'normal': FermataShape.NORMAL,
+    'angled': FermataShape.TENT,
+    'square': FermataShape.SQUARED,
 }
 
 
@@ -686,7 +696,16 @@ class MusicXMLTranslator:
                 note.ornaments.append(Ornament(type=OrnamentType.TURN))
             elif isinstance(expr, music21.expressions.InvertedTurn):
                 note.ornaments.append(Ornament(type=OrnamentType.INVERTED_TURN))
-                
+            elif isinstance(expr, music21.expressions.Fermata):
+                # music21's Fermata.shape is 'normal'/'angled'/'square'
+                # (confirmed against its source -- these are the only 3
+                # values it models). BANA Table 22(B) doesn't distinguish
+                # "over" vs. "under" the staff with a separate sign (unlike
+                # music21's separate .type='upright'/'inverted'), so .type
+                # is intentionally not consulted here (S10b-4).
+                shape = _M21_FERMATA_SHAPE_TO_MODEL.get(expr.shape, FermataShape.NORMAL)
+                note.fermata = Fermata(shape=shape)
+
         m21_fingerings = [art for art in m21_note.articulations if isinstance(art, music21.articulations.Fingering)]
         for m21_f in m21_fingerings:
             val_str = str(m21_f.fingerNumber)
