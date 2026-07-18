@@ -418,6 +418,25 @@ class MusicXMLTranslator:
         reverse = clef_name not in ("bass", "tenor")
         return sorted(voice_items, key=avg_pitch, reverse=reverse)
 
+    def _ottava_semitone_shift(self, el) -> int:
+        """Return the signed semitone shift from an active `music21.spanner.
+        Ottava` (8va/8vb/15ma/15mb) bracket around `el`, or 0 if none (S10b-8).
+
+        Confirmed against music21 10.5.0 by parsing hand-written MusicXML
+        resembling real notation-software output (not just round-tripping
+        through music21's own exporter, which gave a misleadingly-already-
+        correct result): `music21.converter.parse()` leaves `Note.pitch` at
+        the *printed* staff position under an `<octave-shift>` bracket, not
+        the sounding pitch. BANA Par. 3.3 requires the opposite -- "the
+        words '8va,' '15ma,' 'loco'... are represented by transcribing the
+        pitches in the octave in which they are to be performed without
+        noting the expressions" -- so the importer has to apply this shift
+        itself rather than trusting music21's parsed pitch as-is.
+        """
+        for sp in el.getSpannerSites(music21.spanner.Ottava):
+            return sp.interval().semitones
+        return 0
+
     def _translate_note_stream(self, elements, clef_name: str, dynamic_offsets: dict) -> list:
         """Translate one flat sequence of music21 notes/rests/chords (a whole
         single-voice measure, or one voice of a multi-voice measure) into
@@ -445,9 +464,10 @@ class MusicXMLTranslator:
                 continue
 
             duration = self.map_duration(el.duration)
+            ottava_shift = self._ottava_semitone_shift(el)
 
             if isinstance(el, music21.note.Note):
-                note_obj = self.translate_note_obj(el, duration)
+                note_obj = self.translate_note_obj(el, duration, ottava_shift)
                 if el.duration.isGrace:
                     current_grace_notes.append(note_obj)
                     current_grace_unslashed.append(not getattr(el.duration, 'slash', True))
@@ -463,7 +483,7 @@ class MusicXMLTranslator:
                     dn_item = note_obj
                     
             elif isinstance(el, music21.chord.Chord):
-                chord_notes = [self.translate_note_obj(n, duration) for n in el.notes]
+                chord_notes = [self.translate_note_obj(n, duration, ottava_shift) for n in el.notes]
                 chord_notes.sort(key=lambda n: n._midi_pitch() if hasattr(n, '_midi_pitch') else 60, reverse=not (clef_name in ("bass", "tenor")))
                 
                 written_note = chord_notes[0]
@@ -610,15 +630,16 @@ class MusicXMLTranslator:
 
         return Duration(value=val, dots=dots, is_triplet=is_triplet)
 
-    def translate_note_obj(self, m21_note, duration: Duration) -> Note:
-        note_name = m21_note.pitch.step
-        octave = m21_note.pitch.octave
+    def translate_note_obj(self, m21_note, duration: Duration, ottava_shift: int = 0) -> Note:
+        pitch = m21_note.pitch.transpose(ottava_shift) if ottava_shift else m21_note.pitch
+        note_name = pitch.step
+        octave = pitch.octave
         if octave is None:
             octave = 4
-            
+
         acc = None
-        if m21_note.pitch.accidental is not None:
-            m21_acc = m21_note.pitch.accidental
+        if pitch.accidental is not None:
+            m21_acc = pitch.accidental
             acc_type = None
             name = m21_acc.name
             if name == 'sharp': acc_type = AccidentalType.SHARP

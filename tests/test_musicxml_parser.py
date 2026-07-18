@@ -313,3 +313,61 @@ def test_musicxml_unrecognized_chord_kind_raises():
 
     with pytest.raises(DottedNotesError):
         MusicXMLTranslator().translate(m21_score)
+
+def _measure_with_octave_shift(pitch_octave: int, shift_type: str) -> str:
+    """A minimal single-note, single-measure MusicXML document with an
+    <octave-shift> bracket around the note, matching what real notation
+    software emits. `shift_type` is the MusicXML type attribute -- "down"
+    is the real-world encoding for a bracket meaning "sounds an octave
+    HIGHER than written" (confirmed by round-tripping music21's own
+    Ottava(type='8va') through its exporter during S10b-8's investigation);
+    "up" means "sounds an octave LOWER than written".
+    """
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+      <direction placement="above"><direction-type><octave-shift type="{shift_type}" size="8" number="1"/></direction-type></direction>
+      <note><pitch><step>C</step><octave>{pitch_octave}</octave></pitch><duration>4</duration><type>whole</type></note>
+      <direction><direction-type><octave-shift type="stop" size="8" number="1"/></direction-type></direction>
+    </measure>
+  </part>
+</score-partwise>
+'''
+
+
+def test_musicxml_ottava_up_imports_at_sounding_octave():
+    # Printed C5 under an "8va" (sounds higher) bracket must import at the
+    # true sounding octave, C6, per BANA Par. 3.3 -- braille has no
+    # equivalent of an 8va bracket; it just writes the octave actually
+    # performed (S10b-8).
+    m21_score = music21.converter.parse(_measure_with_octave_shift(5, 'down'), format='musicxml')
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.note_name == 'C'
+    assert note.octave == 6
+
+
+def test_musicxml_ottava_down_imports_at_sounding_octave():
+    # Printed C5 under an "8vb" (sounds lower) bracket must import at C4.
+    m21_score = music21.converter.parse(_measure_with_octave_shift(5, 'up'), format='musicxml')
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.note_name == 'C'
+    assert note.octave == 4
+
+
+def test_musicxml_note_without_ottava_is_unaffected():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.append(music21.note.Note('C5', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.octave == 5
