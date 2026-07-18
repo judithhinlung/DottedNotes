@@ -420,3 +420,50 @@ def test_musicxml_note_without_fermata_has_none():
 
     score = MusicXMLTranslator().translate(m21_score)
     assert score.staves[0].measures[0].notes[0].fermata is None
+
+def test_musicxml_breath_mark_imports_as_half_breath():
+    from dottednotes.models import BreathMarkVariant
+
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    n = music21.note.Note('C4', quarterLength=4)
+    n.articulations.append(music21.articulations.BreathMark())
+    measure.append(n)
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.breath_mark is not None
+    assert note.breath_mark.variant == BreathMarkVariant.HALF
+
+
+def test_musicxml_caesura_imports_as_full_breath():
+    from dottednotes.models import BreathMarkVariant
+
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    n = music21.note.Note('C4', quarterLength=4)
+    n.articulations.append(music21.articulations.Caesura())
+    measure.append(n)
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.breath_mark is not None
+    assert note.breath_mark.variant == BreathMarkVariant.FULL
+
+
+def test_musicxml_note_without_breath_mark_has_none():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.append(music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    assert score.staves[0].measures[0].notes[0].breath_mark is None

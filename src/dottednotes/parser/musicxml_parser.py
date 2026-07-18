@@ -11,6 +11,7 @@ from dottednotes.models import (
     GraceNote, Clef, ClefType, KeySignature, TimeSignature,
     TextMarking, TextMarkingType, Tuplet, InAccord,
     ChordSymbol, ChordNamesTrack, Fermata, FermataShape,
+    BreathMark, BreathMarkVariant,
 )
 from dottednotes.models.fingering import Fingering
 from dottednotes.models.duration import TICKS_PER_QUARTER
@@ -681,7 +682,15 @@ class MusicXMLTranslator:
             art_type = M21_ARTICULATION_MAP.get(type(art))
             if art_type is not None:
                 note.articulations.append(Articulation(type=art_type))
-                
+            elif isinstance(art, music21.articulations.BreathMark):
+                # BANA Table 22(B) sign (a), "Half breath" (Table 31) --
+                # mapping confirmed with the developer, see
+                # models/breath_mark.py (S10b-6).
+                note.breath_mark = BreathMark(variant=BreathMarkVariant.HALF)
+            elif isinstance(art, music21.articulations.Caesura):
+                # BANA Table 22(B) sign (b), "Full breath" (Table 31).
+                note.breath_mark = BreathMark(variant=BreathMarkVariant.FULL)
+
         for expr in m21_note.expressions:
             if isinstance(expr, music21.expressions.Trill):
                 note.ornaments.append(Ornament(type=OrnamentType.TRILL))
