@@ -62,6 +62,36 @@ _M21_FERMATA_SHAPE_TO_MODEL = {
 }
 
 
+def _repeat_bracket_numbers(rb: "music21.spanner.RepeatBracket") -> list[int]:
+    """Return a RepeatBracket's ending number(s) as a list of ints (S10b-5).
+
+    Prefers `.numberRange` (music21 10.5.0's own pre-parsed list, e.g.
+    [1, 2] for a "1,2" bracket) when present, but that attribute isn't on
+    every music21 version -- CI hit `AttributeError: 'RepeatBracket' object
+    has no attribute 'numberRange'` on a version where it's missing, even
+    though `pyproject.toml` only pins `music21>=8.3.0` with no upper bound.
+    Falls back to parsing `.number` directly, which the class docstring
+    (and this project's own empirical check) confirms is always normalized
+    to a string like "1", "1, 2", or a hyphenated range like "1-3",
+    regardless of music21 version.
+    """
+    number_range = getattr(rb, 'numberRange', None)
+    if number_range:
+        return list(number_range)
+
+    numbers: list[int] = []
+    for part in str(rb.number).split(','):
+        part = part.strip()
+        if not part:
+            continue
+        if '-' in part:
+            start_str, _, end_str = part.partition('-')
+            numbers.extend(range(int(start_str), int(end_str) + 1))
+        else:
+            numbers.append(int(part))
+    return numbers
+
+
 class MusicXMLTranslator:
     def translate(self, m21_score: music21.stream.Score) -> Score:
         score = Score()
@@ -277,13 +307,16 @@ class MusicXMLTranslator:
         measure.bar_line_type = bar_line
 
         # First/second (or later) endings (BANA Chapter 17, Par. 17.1.1,
-        # S10b-5). Confirmed against music21 10.5.0: a measure spanned by a
-        # RepeatBracket exposes it via getSpannerSites, and
-        # RepeatBracket.numberRange already gives the combined/ranged
-        # ending numbers as a plain list (e.g. [1, 2] for a "1,2" bracket).
+        # S10b-5). A measure spanned by a RepeatBracket exposes it via
+        # getSpannerSites; _repeat_bracket_numbers() below reads the ending
+        # number(s) off it without depending on the `numberRange` attribute,
+        # which isn't present on every music21 version (confirmed missing
+        # on at least one CI-resolved version -- AttributeError there,
+        # despite being present and correct in this project's dev
+        # environment, music21 10.5.0).
         repeat_brackets = m21_measure.getSpannerSites(music21.spanner.RepeatBracket)
         if repeat_brackets:
-            measure.ending_numbers = list(repeat_brackets[0].numberRange)
+            measure.ending_numbers = _repeat_bracket_numbers(repeat_brackets[0])
 
 
         # Text markings & Metronome marks

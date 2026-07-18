@@ -552,3 +552,27 @@ def test_musicxml_forward_repeat_at_first_measure_has_no_preceding_marker():
     # No preceding measure to attach the sign to -- shouldn't error, and
     # the (only) measure keeps its default bar_line_type.
     assert score.staves[0].measures[0].bar_line_type == 'measure_separator'
+
+
+def test_repeat_bracket_numbers_uses_number_range_when_present():
+    from dottednotes.parser.musicxml_parser import _repeat_bracket_numbers
+    rb = music21.spanner.RepeatBracket(number='1,2')
+    assert _repeat_bracket_numbers(rb) == [1, 2]
+
+
+def test_repeat_bracket_numbers_falls_back_when_number_range_missing():
+    # Some music21 versions don't have the `numberRange` attribute at all
+    # (confirmed on CI: AttributeError even though pyproject.toml only
+    # pins music21>=8.3.0 with no upper bound) -- _repeat_bracket_numbers()
+    # must fall back to parsing `.number` directly rather than assuming
+    # numberRange always exists.
+    from dottednotes.parser.musicxml_parser import _repeat_bracket_numbers
+
+    class FakeOldRepeatBracket:
+        def __init__(self, number):
+            self.number = number
+
+    assert _repeat_bracket_numbers(FakeOldRepeatBracket('1')) == [1]
+    assert _repeat_bracket_numbers(FakeOldRepeatBracket('1, 2')) == [1, 2]
+    assert _repeat_bracket_numbers(FakeOldRepeatBracket('1-3')) == [1, 2, 3]
+    assert _repeat_bracket_numbers(FakeOldRepeatBracket('1, 2, 3, 7')) == [1, 2, 3, 7]

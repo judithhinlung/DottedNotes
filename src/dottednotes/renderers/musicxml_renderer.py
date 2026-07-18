@@ -243,8 +243,9 @@ class MusicXMLRenderer:
 
             # First/second endings (S10c-4). RepeatBracket's `number` takes
             # a comma-joined string for combined endings ("1,2") -- the
-            # exact form confirmed to round-trip back to numberRange == the
-            # matching list of ints during S10b-5's import-side investigation.
+            # exact form confirmed to round-trip back to the matching list
+            # of ints via musicxml_parser.py's `_repeat_bracket_numbers()`
+            # on the import side.
             if measure_model.ending_numbers:
                 number_str = ','.join(str(n) for n in measure_model.ending_numbers)
                 volta_spanners.append(music21.spanner.RepeatBracket(m21_measure, number=number_str))
