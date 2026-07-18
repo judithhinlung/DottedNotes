@@ -287,8 +287,8 @@ The following page layout and formatting rules govern the overall design and str
 * **Citation**: *Music Braille Code (2015)*, Part IV, Section 32.1.
 
 #### 5. Parallel Separation Spacing
-* **Description**: Consecutive parallels (systems of music) must be separated by at least 1 blank line for solo music, and 2 blank lines for keyboard/organ music.
-* **Citation**: *Music Braille Code (2015)*, Part IV, Section 32.3.
+* **Description**: Consecutive parallels (systems of music) must be separated by at least 1 blank line for solo and ensemble music. Keyboard/organ bar-over-bar parallels have no blank-line requirement at all — each new parallel is introduced solely by its own measure-number margin marker, directly following the previous one.
+* **Citation**: *Music Braille Code (2015)*, Sec. 33.4.6 (ensemble); no blank-line rule appears in Sec. 28 (bar-over-bar general principles) or Sec. 29 (keyboard instruments) for keyboard/organ parallels. (The prior "Part IV, Section 32.3" citation here does not exist in the manual — there is no Part IV.)
 
 #### 6. Layout-Specific Line Indentation
 * **Description**: Line indents and run-overs must conform to the specific layout format:

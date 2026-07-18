@@ -224,9 +224,6 @@ class BrailleRenderer:
             else:
                 fit_size = group_size - 1
                 
-            if idx > 0:
-                lines.append("")
-                lines.append("")
             lines.append(best_rh_lines)
             lines.append(best_lh_lines)
             prev_note_rh = best_prev_rh

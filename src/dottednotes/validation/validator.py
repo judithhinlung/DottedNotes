@@ -77,7 +77,7 @@ RULE_REGISTRY: dict[str, Rule] = {
         rule_id="S11c-2",
         name="Page Layout Validation",
         description="Verify centering of title, formatting of running heads, indentation of signature lines, heading spacing and parallel blank lines.",
-        citation="MBC 2015 Part IV, Sections 32 & 33; Part I, Section 1"
+        citation="MBC 2015, see docs/bana_reference.md for per-rule section citations"
     ),
 }
 
@@ -765,23 +765,7 @@ class BANAValidator:
         global_line_offset = 1
         for p_idx, page in enumerate(pages):
             p_lines = page.splitlines()
-            if is_piano:
-                lh_indices = [idx for idx, line in enumerate(p_lines) if '⠸⠜' in line]
-                rh_indices = [idx for idx, line in enumerate(p_lines) if '⠨⠜' in line]
-                for k in range(min(len(lh_indices), len(rh_indices) - 1)):
-                    lh_idx = lh_indices[k]
-                    rh_idx = rh_indices[k+1]
-                    actual_blanks = sum(1 for line_idx in range(lh_idx + 1, rh_idx) if p_lines[line_idx].strip() == "")
-                    if actual_blanks < 2:
-                        corrections.append(Correction(
-                            line_number=global_line_offset + lh_idx + 1,
-                            measure_number=0,
-                            message=f"BANA Parallel Spacing Violation: Keyboard parallels must be separated by at least 2 blank lines (found {actual_blanks}).",
-                            severity="warning",
-                            rule_id="S11c-2",
-                            proposed_fix="Ensure at least 2 blank lines between parallels."
-                        ))
-            elif is_ensemble:
+            if is_ensemble:
                 from dottednotes.parser.ensemble_parser import extract_measure_number
                 heading_indices = []
                 for idx, line in enumerate(p_lines):

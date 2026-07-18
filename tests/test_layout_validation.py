@@ -89,45 +89,38 @@ def test_layout_running_head_centering():
     assert pages[1].splitlines()[0] == expected_header
 
 
-def test_layout_piano_parallel_spacing():
-    # Keyboard music with only 1 blank line between parallels
+def test_layout_piano_parallels_have_no_blank_lines():
+    # BANA chapters 28 (bar-over-bar general principles) and 29 (keyboard
+    # instruments) never mention blank-line separation between parallels --
+    # unlike solo/ensemble/figured-bass formats, which do. Each new
+    # keyboard parallel is introduced solely by its own measure-number
+    # margin marker (29.3(b)), directly following the previous one.
     brf_text = "⠁⠀⠨⠜⠐⠹\n⠀⠀⠸⠜⠐⠹\n\n⠃⠀⠨⠜⠐⠹\n⠀⠀⠸⠜⠐⠹"
-    
+
     score = parse_brf(brf_text)
     score.staves[0].name = "piano right hand"
     score.staves[1].name = "piano left hand"
-    
-    validator = BANAValidator(enabled_rules=["S11c-2"])
-    result = validator.validate(score, raw_brl_text=brf_text)
-    
-    piano_warns = [c for c in result.corrections if "Keyboard parallels must be separated by at least 2 blank lines" in c.message]
-    assert len(piano_warns) == 1
 
-    # Exporting should format it with exactly 2 blank lines between parallels
+    # Force each measure into its own parallel (narrow line width) so
+    # there's an inter-parallel boundary to check.
     rendered = BrailleRenderer(line_width=8, compression_level="none").render(score)
-    assert "\n\n\n" in rendered
+    assert "\n\n" not in rendered
 
 
-def test_layout_organ_parallel_spacing():
-    # Same violation as test_layout_piano_parallel_spacing (only 1 blank line
-    # between parallels), but with staff names that don't literally contain
-    # "piano"/"harp" -- regression test for the keyboard-family detection
-    # bug where "Organ"/"Harpsichord"/etc. staves fell through to the solo
-    # layout, which has no parallel-spacing check at all.
+def test_layout_organ_parallels_have_no_blank_lines():
+    # Same check as test_layout_piano_parallels_have_no_blank_lines, but
+    # with staff names that don't literally contain "piano"/"harp" --
+    # regression test for the keyboard-family detection bug where
+    # "Organ"/"Harpsichord"/etc. staves fell through to the solo layout.
     brf_text = "⠁⠀⠨⠜⠐⠹\n⠀⠀⠸⠜⠐⠹\n\n⠃⠀⠨⠜⠐⠹\n⠀⠀⠸⠜⠐⠹"
 
     score = parse_brf(brf_text)
     score.staves[0].name = "Organ right hand"
     score.staves[1].name = "Organ left hand"
 
-    validator = BANAValidator(enabled_rules=["S11c-2"])
-    result = validator.validate(score, raw_brl_text=brf_text)
-
-    organ_warns = [c for c in result.corrections if "Keyboard parallels must be separated by at least 2 blank lines" in c.message]
-    assert len(organ_warns) == 1
-
-    # Exporting must not silently drop the left-hand staff either.
     rendered = BrailleRenderer(line_width=8, compression_level="none").render(score)
+    assert "\n\n" not in rendered
+    # Exporting must not silently drop the left-hand staff either.
     assert "⠨⠜" in rendered and "⠸⠜" in rendered
 
 
