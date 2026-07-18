@@ -11,6 +11,7 @@ from dottednotes.models import (
     Fermata, FermataShape, BreathMark, BreathMarkVariant,
 )
 from dottednotes.renderers.musicxml_renderer import MusicXMLRenderer, export_musicxml
+from dottednotes.parser.musicxml_parser import _repeat_bracket_numbers
 
 def test_musicxml_export_notes_and_chords():
     score = Score(title="Export Test", composer="Test Composer", copyright="2026 Test")
@@ -171,8 +172,8 @@ def test_musicxml_export_volta_ending():
 
     brackets_1 = measures[0].getSpannerSites(music21.spanner.RepeatBracket)
     brackets_2 = measures[1].getSpannerSites(music21.spanner.RepeatBracket)
-    assert len(brackets_1) == 1 and brackets_1[0].numberRange == [1]
-    assert len(brackets_2) == 1 and brackets_2[0].numberRange == [2]
+    assert len(brackets_1) == 1 and _repeat_bracket_numbers(brackets_1[0]) == [1]
+    assert len(brackets_2) == 1 and _repeat_bracket_numbers(brackets_2[0]) == [2]
 
 def test_musicxml_export_combined_volta_ending():
     score = Score()
@@ -186,7 +187,7 @@ def test_musicxml_export_combined_volta_ending():
     measure = m21_score.parts[0].getElementsByClass(music21.stream.Measure)[0]
     brackets = measure.getSpannerSites(music21.spanner.RepeatBracket)
     assert len(brackets) == 1
-    assert brackets[0].numberRange == [1, 2]
+    assert _repeat_bracket_numbers(brackets[0]) == [1, 2]
 
 def test_musicxml_export_forward_repeat_on_next_measure_leftbarline():
     # bar_line_type='forward_repeat' on measure N means "repeat starts at
