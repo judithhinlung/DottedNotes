@@ -187,3 +187,27 @@ def test_musicxml_export_combined_volta_ending():
     brackets = measure.getSpannerSites(music21.spanner.RepeatBracket)
     assert len(brackets) == 1
     assert brackets[0].numberRange == [1, 2]
+
+def test_musicxml_export_forward_repeat_on_next_measure_leftbarline():
+    # bar_line_type='forward_repeat' on measure N means "repeat starts at
+    # measure N+1" (this codebase's tested convention) -- must export as
+    # measure N+1's leftBarline, not measure N's, and NOT as measure N's
+    # rightBarline either (confirmed empirically: a Repeat on rightBarline
+    # gets reinterpreted as a backward/end repeat regardless of its
+    # .direction attribute).
+    score = Score()
+    staff = Staff(name="Melody")
+    m1 = Measure(number=1, bar_line_type='forward_repeat')
+    m1.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=Duration(value=4)))
+    m2 = Measure(number=2)
+    m2.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='D', octave=4, duration=Duration(value=4)))
+    staff.add_measure(m1)
+    staff.add_measure(m2)
+    score.add_staff(staff)
+
+    m21_score = MusicXMLRenderer().render(score)
+    measures = m21_score.parts[0].getElementsByClass(music21.stream.Measure)
+    assert measures[0].rightBarline is None
+    assert measures[0].leftBarline is None
+    assert isinstance(measures[1].leftBarline, music21.bar.Repeat)
+    assert measures[1].leftBarline.direction == 'start'

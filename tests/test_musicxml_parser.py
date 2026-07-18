@@ -509,3 +509,46 @@ def test_musicxml_combined_volta_ending_numbers_import():
 
     score = MusicXMLTranslator().translate(m21_score)
     assert score.staves[0].measures[0].ending_numbers == [1, 2]
+
+def test_musicxml_forward_repeat_attaches_to_previous_measure():
+    # music21/MusicXML mark a forward repeat on the FIRST measure of the
+    # repeated section (leftBarline) -- but this codebase's tested
+    # convention (braille_parser.py, test_forward_repeat_sets_bar_line_type)
+    # attaches bar_line_type='forward_repeat' to the LAST measure BEFORE
+    # the repeated section instead. Found and fixed while implementing
+    # volta LilyPond output, which depends on correctly locating where a
+    # repeated section starts.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    m1 = music21.stream.Measure(number=1)
+    m1.append(music21.note.Note('C4', quarterLength=4))
+    m2 = music21.stream.Measure(number=2)
+    m2.append(music21.note.Note('D4', quarterLength=4))
+    m2.leftBarline = music21.bar.Repeat(direction='start')
+    m3 = music21.stream.Measure(number=3)
+    m3.append(music21.note.Note('E4', quarterLength=4))
+    part.append(m1)
+    part.append(m2)
+    part.append(m3)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    measures = score.staves[0].measures
+    assert measures[0].bar_line_type == 'forward_repeat'
+    assert measures[1].bar_line_type == 'measure_separator'
+    assert measures[2].bar_line_type == 'measure_separator'
+
+
+def test_musicxml_forward_repeat_at_first_measure_has_no_preceding_marker():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    m1 = music21.stream.Measure(number=1)
+    m1.append(music21.note.Note('C4', quarterLength=4))
+    m1.leftBarline = music21.bar.Repeat(direction='start')
+    part.append(m1)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    # No preceding measure to attach the sign to -- shouldn't error, and
+    # the (only) measure keeps its default bar_line_type.
+    assert score.staves[0].measures[0].bar_line_type == 'measure_separator'

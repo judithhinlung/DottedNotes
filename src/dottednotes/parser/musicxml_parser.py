@@ -153,7 +153,40 @@ class MusicXMLTranslator:
                     if current_clef == "alto": ct = ClefType.ALTO
                     elif current_clef == "tenor": ct = ClefType.TENOR
                     staff.clef = Clef(dots=frozenset(), category=None, raw_brl="", clef_type=ct)
-            
+
+            # Forward repeat (BANA Par. 17.1's "double bar followed by
+            # dots"). MusicXML/music21 mark a forward repeat on the FIRST
+            # measure of the repeated section (leftBarline) -- but this
+            # codebase's tested convention (braille_parser.py +
+            # tests/test_parser.py::test_forward_repeat_sets_bar_line_type)
+            # attaches bar_line_type='forward_repeat' to the LAST measure
+            # BEFORE the repeated section instead (Measure.to_lilypond()
+            # always renders the bar-line sign at *this* measure's right
+            # edge, which BANA/print convention reads as "repeat starts at
+            # the next measure"). Apply it one measure back so MusicXML
+            # import matches the same, already-tested convention rather
+            # than introducing a second, inconsistent one -- found while
+            # implementing S10c-3's volta LilyPond output, which depends on
+            # correctly locating where a repeated section starts.
+            if (
+                m21_measure.leftBarline
+                and isinstance(m21_measure.leftBarline, music21.bar.Repeat)
+                and m21_measure.leftBarline.direction == 'start'
+                and staff.measures
+                and staff.measures[-1].bar_line_type == 'measure_separator'
+            ):
+                # The "and ... == 'measure_separator'" guard avoids
+                # clobbering a more specific marking the previous measure
+                # already has from its own rightBarline (e.g. a combined
+                # ":|.|:" end-and-forward-repeat barline) -- a rare case
+                # this model has no combined bar_line_type for, so the
+                # existing marking wins rather than being silently lost.
+                staff.measures[-1].bar_line_type = 'forward_repeat'
+            # (If staff.measures is empty, the repeat starts at the very
+            # first measure of the piece -- there's no preceding measure to
+            # attach a trailing sign to, matching how the braille
+            # convention has no sign to write in that case either.)
+
             staff.add_measure(measure)
             
             # Collect lyrics from notes/chords in this measure
@@ -236,10 +269,11 @@ class MusicXMLTranslator:
                 bar_line = 'final_double_bar'
             elif rb.type == 'double':
                 bar_line = 'section_double_bar'
-        if m21_measure.leftBarline:
-            lb = m21_measure.leftBarline
-            if isinstance(lb, music21.bar.Repeat) and lb.direction == 'start':
-                bar_line = 'forward_repeat'
+        # NOTE: a leftBarline repeat-start is deliberately NOT handled here --
+        # see translate_part(), which retroactively attaches
+        # bar_line_type='forward_repeat' to the *previous* measure instead
+        # (bug found and fixed while implementing S10c-3's volta LilyPond
+        # output; see that commit for the full explanation).
         measure.bar_line_type = bar_line
 
         # First/second (or later) endings (BANA Chapter 17, Par. 17.1.1,

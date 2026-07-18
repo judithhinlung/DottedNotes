@@ -108,13 +108,30 @@ class MusicXMLRenderer:
         volta_spanners: list[music21.spanner.RepeatBracket] = []
 
         model_to_m21: dict[int, music21.base.Music21Object] = {}
-        
+
         # Collect pitched items for lyrics alignment later
         pitched_items: list[Note | Chord] = []
-        
+
+        # bar_line_type='forward_repeat' means "repeat starts at the NEXT
+        # measure" (see the matching comment in musicxml_parser.py's
+        # translate_part -- this codebase's tested convention attaches the
+        # sign to the last measure before the repeat, not the first measure
+        # of it). music21/MusicXML instead marks the repeat on the FIRST
+        # measure's leftBarline, confirmed empirically: setting a repeat on
+        # a measure's rightBarline gets exported/reinterpreted as a
+        # *backward* (end) repeat regardless of the Repeat object's own
+        # .direction, so the only correct way to emit a forward repeat is
+        # on the following measure's leftBarline -- tracked here and
+        # applied one iteration later.
+        pending_forward_repeat = False
+
         for measure_model in staff.measures:
             m21_measure = music21.stream.Measure(number=measure_model.number)
             measure_ql = measure_model.time_signature[0] * 4.0 / measure_model.time_signature[1]
+
+            if pending_forward_repeat:
+                m21_measure.leftBarline = music21.bar.Repeat(direction='start')
+                pending_forward_repeat = False
 
             # Key signature
             if measure_model.key_signature != active_key_val:
@@ -149,8 +166,9 @@ class MusicXMLRenderer:
             elif measure_model.bar_line_type == 'end_repeat':
                 m21_measure.rightBarline = music21.bar.Repeat(direction='end')
             elif measure_model.bar_line_type == 'forward_repeat':
-                m21_measure.leftBarline = music21.bar.Repeat(direction='start')
-                
+                pending_forward_repeat = True
+
+
             # Text markings
             for tm in measure_model.text_markings:
                 if tm.type == TextMarkingType.TEMPO:
