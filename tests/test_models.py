@@ -582,6 +582,43 @@ def test_fermata_and_breath_mark_survive_measure_to_lilypond():
     assert "\\set breathMarkType = #'caesura \\breathe" in ly
 
 
+def test_measure_volta_single_ending_to_braille():
+    m = Measure(number=5, ending_numbers=[1])
+    m.add_note(_make_note('C', 4, 4))
+    brl, _ = m.to_braille()
+    # NUMBER_SIGN + digit 1, then the octave mark (dot 5 only -- never
+    # dots 1/2/3, so no dot-3 separator here) forced by is_measure_start.
+    assert brl.startswith('⠼⠂')
+    assert '⠄' not in brl[:3]  # no spurious separator before an octave mark
+
+
+def test_measure_volta_combined_ending_gets_own_indicator_per_number():
+    m = Measure(number=5, ending_numbers=[1, 2])
+    m.add_note(Rest(dots=frozenset(), category=SymbolCategory.REST, raw_brl='', duration=Duration(value=4)))
+    brl, _ = m.to_braille()
+    # Rest cells don't go through octave-mark logic, so the volta sign is
+    # immediately followed by the rest cell, which contains dots 1-3 --
+    # Par. 17.1.1's dot-3 separator must appear.
+    assert brl == '⠼⠂⠼⠆⠄⠧⠀'
+
+
+def test_measure_volta_to_lilypond_warns_and_comments_rather_than_guessing():
+    m = Measure(number=5, ending_numbers=[1])
+    m.add_note(_make_note('C', 4, 4))
+    with pytest.warns(UserWarning, match="repeat volta"):
+        ly, _ = m.to_lilypond()
+    assert ly.startswith('% ending 1')
+
+
+def test_measure_without_ending_numbers_unaffected():
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    brl, _ = m.to_braille()
+    assert not brl.startswith('⠼')
+    ly, _ = m.to_lilypond()
+    assert '%' not in ly
+
+
 def test_chord_with_fermata_and_breath_mark_to_lilypond():
     from dottednotes.models import Chord
     written = _make_note('E', 4, 4, fermata=Fermata(shape=FermataShape.SQUARED), breath_mark=BreathMark())

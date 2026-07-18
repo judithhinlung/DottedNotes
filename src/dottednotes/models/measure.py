@@ -27,6 +27,31 @@ _BAR_LINE_TO_LY: dict[str, str] = {
 }
 
 
+def _ending_numbers_to_braille(numbers: list[int]) -> str:
+    """Render volta ending numbers per BANA Chapter 17, Par. 17.1.1, Table
+    17 -- prima/seconda volta = NUMBER_SIGN + a lower-cell digit (`#1`/`#2`
+    decode to the already-confirmed cells reused here; see TICKETS.md's
+    S10c-3 notes on that reuse).
+
+    Par. 17.1.1(b): combined endings (e.g. printed "1,2") each get their
+    own numeric indicator, with no space and no comma cell between them
+    (a comma would collide with a lower-cell numeral). A hyphenated range
+    in print (e.g. "1-3") instead gets a single numeric indicator followed
+    by a literary hyphen and the final number with no second indicator --
+    NOT implemented here, since `ending_numbers` is a flat list with no
+    record of whether the source used a range or a list, so every case is
+    rendered the safe "combined" way (each number gets its own indicator),
+    which Par. 17.1.1(b) also allows, just not as compact as the
+    hyphen-range shorthand for a long consecutive run.
+    """
+    from dottednotes.bana_symbols import NUMBER_SIGN, LOWER_DIGIT_CELLS
+    digit_to_cell = {v: k for k, v in LOWER_DIGIT_CELLS.items()}
+    parts = []
+    for n in numbers:
+        parts.append(NUMBER_SIGN + ''.join(digit_to_cell[int(d)] for d in str(n)))
+    return ''.join(parts)
+
+
 def _item_ticks(item: MeasureItem) -> int:
     """Duration, in ticks, of a single measure item -- Note/Rest/Chord read
     `.duration` directly; a Tuplet sums its own items recursively.
@@ -213,6 +238,12 @@ class Measure:
     # (plain bar line / sectional double bar / final double bar) -- see
     # to_braille() below.
     bar_line_fermata: bool = False
+    # First/second (or later) ending number(s) this measure belongs to
+    # (BANA Chapter 17, Par. 17.1.1, Table 17 -- "voltas"), e.g. [1] for a
+    # plain first ending, [1, 2] for a combined "1,2" ending printed over
+    # one bracket, or a list built from a hyphenated range like "1-3"
+    # ([1, 2, 3]). None means this measure isn't part of any ending.
+    ending_numbers: list[int] | None = None
 
     def add_note(self, note: MeasureItem) -> None:
         self.notes.append(note)
@@ -267,7 +298,35 @@ class Measure:
                 "the LilyPond output; the braille output still has it.",
                 stacklevel=2,
             )
-        return ' '.join(parts) + ' ' + bar_ly, cur_midi
+        result = ' '.join(parts) + ' ' + bar_ly
+        if self.ending_numbers:
+            # LilyPond represents first/second endings with \repeat volta
+            # N { ... } \alternative { \volta numberlist {...} ... }
+            # wrapped around a whole *range* of measures (Notation
+            # Reference Sec. 4.1.3), not a per-measure marking -- that
+            # restructuring needs to happen at the Staff level (which
+            # measures share a \repeat block, where it starts/ends), not
+            # here, and \relative's pitch-chaining behavior across
+            # \alternative isn't documented (this project has been burned
+            # once already by assuming undocumented \relative chaining
+            # instead of checking the real binary -- see CLAUDE.md's Known
+            # Issues). Rather than guess either, emit an informative
+            # comment and warn that the real \repeat volta/\alternative
+            # structure isn't generated -- the braille output has full
+            # support (see to_braille() below).
+            import warnings
+            numbers_str = ",".join(str(n) for n in self.ending_numbers)
+            warnings.warn(
+                f"Measure {self.number} is ending(s) {numbers_str}, but "
+                "generating a real LilyPond \\repeat volta/\\alternative "
+                "structure needs Staff-level measure-range grouping and "
+                "unverified \\relative-across-\\alternative semantics -- "
+                "not yet implemented. Emitting a plain comment instead; "
+                "the braille output is unaffected.",
+                stacklevel=2,
+            )
+            result = f"% ending {numbers_str}\n    " + result
+        return result, cur_midi
 
     def to_braille(
         self,
@@ -357,7 +416,21 @@ class Measure:
                             break
                     break
 
-        return marking_strs + notes_str + bar_cell, last_note
+        volta_str = ""
+        if self.ending_numbers:
+            volta_str = _ending_numbers_to_braille(self.ending_numbers)
+            # Par. 17.1.1: "If the sign following the volta sign contains a
+            # dot 1, 2, or 3, the volta sign must be followed by a dot 3 as
+            # a separator." The first note of this measure already gets a
+            # fresh octave mark from the normal is_measure_start machinery
+            # (a volta always starts a measure), which independently
+            # satisfies 17.1.1's "first note...requires a special octave
+            # mark" -- no extra octave-forcing needed here.
+            following = marking_strs or notes_str
+            if following and (ord(following[0]) - 0x2800) & 0x07 != 0:
+                volta_str += '⠄'
+
+        return volta_str + marking_strs + notes_str + bar_cell, last_note
 
     def musical_equals(self, other: Any) -> bool:
         if not isinstance(other, Measure):
