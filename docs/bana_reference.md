@@ -179,6 +179,96 @@ sequence is a prefix of the 3-cell one.
 
 ---
 
+## Fermatas, Breath Marks, and First/Second Endings (Sprint 10c)
+
+All cells below are **derived, not yet developer-confirmed against a real
+fixture** -- decoded mechanically from the BANA Music Braille Code 2015
+manual's own ASCII transcriptions, cross-referenced against this repo's
+`ASCII_TO_DOTS` table (`parser/input_pipeline.py`), per CLAUDE.md's rule for
+new BANA symbols. Implemented in `models/fermata.py`, `models/breath_mark.py`,
+and `Measure.ending_numbers`/`to_braille()` (`models/measure.py`).
+
+### Fermatas (Par. 22.2, Table 22(B))
+
+Placement: follows the affected note, after any value dot, fingering, or
+interval sign already on it.
+
+| Symbol | Dots                        | Variant                          | LilyPond              |
+|--------|------------------------------|-----------------------------------|------------------------|
+| ⠣⠇     | 1,2,6 + 1,2,3                | over or under a note              | `\fermata`             |
+| ⠐⠣⠇    | 5 + (above)                  | between notes                     | `\fermata`             |
+| ⠸⠣⠇    | 4,5,6 + (above)              | above/below a plain bar line      | not implemented (no confirmed LilyPond syntax) |
+| ⠣⠅⠄⠣⠇ | (section double bar) + (above) | above/below a sectional double bar | not implemented |
+| ⠣⠅⠣⠇   | (final double bar) + (above)   | above/below a final double bar     | not implemented |
+| ⠰⠣⠇    | 5,6 + (above)                | squared shape                     | `\henzelongfermata`   |
+| ⠘⠣⠇    | 4,5 + (above)                | tent-shaped                       | `\henzeshortfermata`  |
+
+The squared/tent-shaped LilyPond mapping isn't documented by the LilyPond
+manual itself; it's cross-referenced from the Fermata Wikipedia article and
+the MEI encoding guidelines (Henze's square fermata = longer hold,
+triangular = shorter hold) and visually confirmed by compiling both through
+a real `lilypond` 2.24.4 binary.
+
+### Breath/Break Marks (Par. 22.2, Table 22(B); named in Table 31)
+
+Same placement rule as fermatas. Table 22(B) itself doesn't say which print
+glyph is sign (a) vs (b) -- resolved via Table 31 ("Signs in Music Lines",
+vocal chapter), which names the same two ASCII codes "Half breath" and
+"Full breath", cross-referenced with the standard comma-vs-caesura
+pause-length convention. Confirmed with the developer before implementing.
+
+| Symbol | Dots            | Table 31 name | music21 source                | LilyPond |
+|--------|------------------|----------------|--------------------------------|----------|
+| ⠨⠂     | 3,4,5 + 2       | Half breath (a) | `articulations.BreathMark`   | `\set breathMarkType = #'comma \breathe`   |
+| ⠠⠌     | 6 + 3,4         | Full breath (b) | `articulations.Caesura`      | `\set breathMarkType = #'caesura \breathe` |
+
+`\breathe` is a standalone music event (not a postfix articulation) per the
+LilyPond Notation Reference -- visually confirmed via a real compile that
+`'comma'` renders the ordinary tick and `'caesura'` the double-slash mark.
+
+### First/Second Endings (Chapter 17, Par. 17.1.1, Table 17)
+
+Prima volta = `#1`, seconda volta = `#2` -- `#` is `NUMBER_SIGN` (⠼, dots
+3,4,5,6) and the digit is a `LOWER_DIGIT_CELLS` entry (⠂/⠆ for 1/2), both
+**already confirmed** elsewhere in `bana_symbols.py` for measure numbers;
+only this *usage* (numeral after `NUMBER_SIGN` meaning "ending number"
+rather than "measure number") is new/unconfirmed.
+
+Placement: immediately before the first sign of the measure, no space; a
+dot-3 separator (⠄) only if that following sign contains dots 1/2/3
+(verified both ways -- octave marks never trigger it, rest cells do).
+Combined endings ("1,2" in print) get each numeral its own `NUMBER_SIGN`,
+e.g. `⠼⠂⠼⠆`. The Par. 17.1.1(b) hyphen-range shorthand for a printed range
+like "1-3" (one indicator + a literary hyphen instead of one indicator per
+number) is **not implemented** -- `Measure.ending_numbers` is a flat list
+with no record of whether the source printed a range or a comma list, so
+every case renders the safe per-numeral form instead.
+
+LilyPond's real `\repeat volta N { ... } \alternative { \volta numberlist
+{...} ... }` structure (Notation Reference Sec. 4.1.3) is **not
+implemented** -- it wraps a whole range of measures (Staff-level
+restructuring, not something a single `Measure.to_lilypond()` call can do),
+and the manual doesn't document `\relative` pitch-chaining across
+`\alternative` (this project was burned once already assuming undocumented
+`\relative` semantics instead of checking the real binary -- see "Known
+Issues" in CLAUDE.md). `to_lilypond()` emits a `% ending N` comment and
+warns instead of guessing either the structure or the pitch semantics.
+
+### Known scope gap: BRF (typed-braille) import isn't wired up
+
+All three signs above import from **MusicXML only** (`parser/
+musicxml_parser.py`). `BraileTokenizer`/`braille_parser.py` don't recognize
+any of these cells yet, so a `.brf` file containing them today either fails
+to parse or silently loses the sign -- and `BANAValidator`'s sign-ordering
+rule (`validation/validator.py`) can't be extended to cover them either,
+since that rule validates `Note.parsed_tokens`, which only the BRF
+tokenizer populates. Teaching the tokenizer/parser to recognize these three
+new cell families (checking for collisions with existing overloaded cells,
+per this file's usual caution) is unscoped follow-up work, not covered by
+Sprint 10b/10c.
+
+---
+
 ## BANA Formatting, Validation & Compression Rules (Sprint 9c)
 
 DottedNotes enforces standard BANA formatting rules via its validation library (`BANAValidator`) and supports variable compression settings during Braille rendering.
@@ -224,6 +314,10 @@ DottedNotes enforces standard BANA formatting rules via its validation library (
   12. **Ties / Slurs** (e.g. `⠉` / index 11)
   13. **Pedal Up** (`⠡⠉` / index 12)
 * **Citation**: MBC 2015 Appendix A, Section A.1.
+* **Known gap**: fermatas and breath/break marks (Sprint 10c, Par. 22.2)
+  aren't covered by this rule -- see "Fermatas, Breath Marks, and
+  First/Second Endings" above for why (they aren't recognized by the BRF
+  tokenizer yet, so `Note.parsed_tokens` never contains them).
 
 #### 4. Measure Beat-Count Mismatch (MBC 2015 Part I, Section 2)
 * **Rule ID**: `S9c-beat-count`

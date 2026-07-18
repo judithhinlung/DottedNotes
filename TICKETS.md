@@ -7145,31 +7145,37 @@ MusicXML round trip, not just BRF ↔ LilyPond.
 
 ---
 
-### [ ] S10c-5: BANAValidator and braille-renderer test coverage for all three signs
+### [ ] S10c-5: ~~BANAValidator~~ docs and test coverage for all three signs -- BANAValidator wiring found infeasible without BRF tokenizer support
 
-**Why:** Every other BANA sign category in this project (octave marks,
-articulation shorthand, sign ordering, line length) has BANAValidator
-coverage and dedicated `test_compression.py`/`test_validation.py`-style
-tests; fermatas, breath marks, and voltas should get the same treatment
-rather than being an under-tested bolt-on.
+**Correction (found during implementation):** step 1's premise doesn't
+hold. `BANAValidator._validate_sign_order` (`validation/validator.py`)
+validates `Note.parsed_tokens` — the `BrailleToken`s the BRF
+tokenizer/parser produced for that note — not the model's `to_braille()`
+output. Fermatas, breath marks, and voltas are only wired up on the
+MusicXML import path (S10b-4/5/6); `tokenizer.py`/`braille_parser.py` don't
+recognize any of these three cell families at all, so a MusicXML-imported
+note's `Note.fermata`/`.breath_mark` never has a corresponding
+`parsed_tokens` entry to validate the order of. Extending the rule would
+mean adding real BRF-side tokenization/parsing for three new cell
+families first (checking for collisions with the existing heavily-overloaded
+cell space, per this project's usual caution) — unscoped work belonging to
+its own ticket, not a one-step addition here. Step 2 (volta placement) has
+the same problem: `Measure.ending_numbers` is a data field with no record
+of *where* in a source file a volta sign appeared, so there's nothing
+position-based to validate against once it's already in the model.
 
-**Steps:**
-1. Extend the BANAValidator's existing sign-ordering rule (S9b) to cover
-   fermata/breath-mark placement relative to value dots, fingerings, and
-   intervals (Par. 22.2).
-2. Add a validation rule (or extend an existing one) for volta placement —
-   e.g. flag a volta sign that isn't immediately before the first sign of its
-   measure, per Par. 17.1.1.
-3. Add `docs/bana_reference.md` entries for all three signs, citing the same
-   Table/Par. numbers used in S10c-1/2/3, so this doesn't have to be
-   re-derived from the manual next time.
-4. Full test pass: `pytest tests/`.
+Steps 3 and 4 (docs, full test pass) are unaffected and completed as
+written — see `docs/bana_reference.md`'s new "Fermatas, Breath Marks, and
+First/Second Endings (Sprint 10c)" section, which also documents this same
+BRF-import gap in its own "Known scope gap" subsection so it doesn't have
+to be rediscovered.
 
 **Definition of Done:**
-- [ ] BANAValidator covers fermata/breath-mark sign ordering and volta
-      placement.
-- [ ] `docs/bana_reference.md` updated.
-- [ ] `pytest tests/` passes.
+- [x] `docs/bana_reference.md` updated with citations for all three signs.
+- [x] BANAValidator sign-order wiring confirmed infeasible without BRF
+      tokenizer support; gap documented in both TICKETS.md and
+      `docs/bana_reference.md` rather than silently skipped.
+- [x] `pytest tests/` passes (936 tests as of this ticket).
 
 ---
 
