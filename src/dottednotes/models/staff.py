@@ -135,8 +135,17 @@ class Staff:
         prev_midi = start_midi
         measure_lines: list[str] = []
 
+        volta_groups_by_start = {g['shared_start']: g for g in self._find_volta_groups()}
+
         i = 0
         while i < len(self.measures):
+            if i in volta_groups_by_start:
+                group = volta_groups_by_start[i]
+                group_lines, prev_midi = self._render_volta_group(group, prev_midi, measure_numbers)
+                measure_lines.extend(group_lines)
+                i = group['group_end']
+                continue
+
             # Look ahead to see if we can start/continue a run of rests
             run = []
             j = i
@@ -194,6 +203,114 @@ class Staff:
                 i += 1
 
         return '\n'.join(header + measure_lines)
+
+    def _find_volta_groups(self) -> list[dict]:
+        """Scan `self.measures` for BANA/print first-second-ending repeat
+        sections (Chapter 17, Par. 17.1.1) and return them as structured
+        groups for `to_lilypond()`'s `\\repeat volta`/`\\alternative`
+        rendering.
+
+        Each group is a dict:
+            {'shared_start': int, 'shared_end': int,
+             'branches': [(start, end, ending_numbers), ...],
+             'group_end': int}
+        where all indices are into `self.measures`, `shared_end` is where
+        the first \\volta branch begins, and `group_end` is one past the
+        last measure of the last branch.
+
+        The shared (repeated) section's start is found by looking
+        backward from the first ending-numbered measure for the nearest
+        `bar_line_type == 'forward_repeat'` measure -- that type means
+        "the repeat starts at the NEXT measure" (this codebase's tested
+        convention; see the fix alongside this feature in
+        `parser/musicxml_parser.py`/`renderers/musicxml_renderer.py` for
+        why it's not the measure carrying the marking itself). If none is
+        found since the end of the previous volta group (or the start of
+        the staff), every measure back that far is treated as shared --
+        a reasonable default, but one that could pull in unrelated earlier
+        material for a piece where the shared section doesn't begin with
+        an explicit forward-repeat bar line.
+        """
+        groups: list[dict] = []
+        n = len(self.measures)
+        i = 0
+        consumed_up_to = 0
+        while i < n:
+            if self.measures[i].ending_numbers:
+                first_ending_idx = i
+                shared_start = consumed_up_to
+                for k in range(first_ending_idx - 1, consumed_up_to - 1, -1):
+                    if self.measures[k].bar_line_type == 'forward_repeat':
+                        shared_start = k + 1
+                        break
+
+                branches: list[tuple[int, int, list[int]]] = []
+                j = first_ending_idx
+                while j < n and self.measures[j].ending_numbers:
+                    numbers = self.measures[j].ending_numbers
+                    branch_start = j
+                    while j < n and self.measures[j].ending_numbers == numbers:
+                        j += 1
+                    branches.append((branch_start, j, numbers))
+
+                groups.append({
+                    'shared_start': shared_start,
+                    'shared_end': first_ending_idx,
+                    'branches': branches,
+                    'group_end': j,
+                })
+                consumed_up_to = j
+                i = j
+            else:
+                i += 1
+        return groups
+
+    def _render_volta_group(
+        self, group: dict, prev_midi: int, measure_numbers: bool
+    ) -> tuple[list[str], int]:
+        """Render one `_find_volta_groups()` entry as
+        `\\repeat volta N { ... } \\alternative { \\volta k { ... } ... }`
+        (LilyPond Notation Reference Sec. 4.1.3).
+
+        `\\repeat volta`, `\\alternative`, and `\\volta k` are complete
+        no-ops for `\\relative` pitch tracking -- verified against the real
+        `lilypond` 2.24.4 binary's `\\displayLilyMusic` output, the same way
+        this project verified `<< \\\\ >>`'s sequential (not per-voice)
+        chaining (see CLAUDE.md's Known Issues and
+        `InAccord.to_relative_lilypond()`). So `prev_midi` threads straight
+        through the shared section into the first `\\volta` branch, from
+        that branch's last note into the next branch, and so on -- the
+        value returned here is the LAST branch's ending pitch, matching
+        what a real `lilypond` run continues from after the `\\alternative`
+        block closes.
+        """
+        lines: list[str] = []
+        cur_midi = prev_midi
+
+        repeat_count = len(group['branches'])
+        lines.append(f'    \\repeat volta {repeat_count} {{')
+        for idx in range(group['shared_start'], group['shared_end']):
+            m = self.measures[idx]
+            ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi)
+            if measure_numbers:
+                lines.append(f'        % {m.number}')
+            lines.append('        ' + ly_str)
+        lines.append('    }')
+
+        lines.append('    \\alternative {')
+        for branch_start, branch_end, numbers in group['branches']:
+            numbers_str = ','.join(str(n) for n in numbers)
+            lines.append(f'        \\volta {numbers_str} {{')
+            for idx in range(branch_start, branch_end):
+                m = self.measures[idx]
+                ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi)
+                if measure_numbers:
+                    lines.append(f'            % {m.number}')
+                lines.append('            ' + ly_str)
+            lines.append('        }')
+        lines.append('    }')
+
+        return lines, cur_midi
 
     def resolve_clef(self) -> str | None:
         """Public accessor for this staff's resolved \\clef directive (S5b-8),

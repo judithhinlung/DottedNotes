@@ -454,6 +454,128 @@ def test_staff_to_lilypond_measure_numbers_rest_run_shows_range():
     assert not any(line.strip() == '% 2' for line in lines)
 
 
+def test_staff_generates_real_volta_repeat_structure():
+    # BANA Chapter 17/Par. 17.1.1 first/second endings -> LilyPond's real
+    # \repeat volta N { ... } \alternative { \volta k {...} ... } structure
+    # (Notation Reference Sec. 4.1.3), not the placeholder "% ending N"
+    # comment. bar_line_type='forward_repeat' on measure 1 means (this
+    # codebase's tested convention) "the repeat starts at measure 2".
+    staff = Staff(name="right hand")
+    m1 = Measure(number=1, bar_line_type='forward_repeat')
+    m1.add_note(_make_note('C', 4, 4))
+    m2 = Measure(number=2)
+    m2.add_note(_make_note('D', 4, 4))
+    m3 = Measure(number=3, ending_numbers=[1])
+    m3.add_note(_make_note('E', 4, 4))
+    m4 = Measure(number=4, ending_numbers=[2])
+    m4.add_note(_make_note('F', 4, 4))
+    m5 = Measure(number=5)
+    m5.add_note(_make_note('G', 4, 4))
+    for m in (m1, m2, m3, m4, m5):
+        staff.add_measure(m)
+
+    ly = staff.to_lilypond()
+
+    assert 'c4 \\bar ".|:"' in ly  # forward repeat still on measure 1
+    assert '\\repeat volta 2 {' in ly
+    assert 'd4 |' in ly  # the shared measure, inside the \repeat volta block
+    assert '\\alternative {' in ly
+    assert '\\volta 1 {' in ly
+    assert '\\volta 2 {' in ly
+    assert 'e4 |' in ly
+    assert 'f4 |' in ly
+    assert 'g4 |' in ly  # material after the alternative block, unaffected
+    # The shared measure must appear inside \repeat volta, not duplicated
+    # or dropped.
+    assert ly.count('d4 |') == 1
+
+
+def test_staff_volta_combined_ending_uses_volta_numberlist():
+    staff = Staff(name="right hand")
+    m1 = Measure(number=1, bar_line_type='forward_repeat')
+    m1.add_note(_make_note('C', 4, 4))
+    m2 = Measure(number=2, ending_numbers=[1, 2])
+    m2.add_note(_make_note('D', 4, 4))
+    staff.add_measure(m1)
+    staff.add_measure(m2)
+
+    ly = staff.to_lilypond()
+    assert '\\repeat volta 1 {' in ly  # one combined branch, not two
+    assert '\\volta 1,2 {' in ly
+
+
+def test_staff_volta_pitch_chaining_is_sequential_not_reset():
+    # Verified against the real lilypond 2.24.4 binary's \displayLilyMusic
+    # output: \repeat volta, \alternative, and \volta k are all no-ops for
+    # \relative pitch tracking -- pure sequential chaining through the
+    # token stream, same as << \\ >> elsewhere in this codebase. So
+    # \volta 2's first note must be spelled relative to \volta 1's LAST
+    # note (B4, MIDI 71), not relative to the shared section's last note
+    # (C4, MIDI 60) independently.
+    staff = Staff(name="right hand")
+    m1 = Measure(number=1, bar_line_type='forward_repeat')
+    m1.add_note(_make_note('C', 4, 4))
+    m2 = Measure(number=2)
+    m2.add_note(_make_note('C', 4, 4))  # shared section's last note: C4
+    m3 = Measure(number=3, ending_numbers=[1])
+    m3.add_note(_make_note('B', 4, 4))  # \volta 1's last note: B4
+    m4 = Measure(number=4, ending_numbers=[2])
+    m4.add_note(_make_note('G', 5, 4))
+    for m in (m1, m2, m3, m4):
+        staff.add_measure(m)
+
+    ly = staff.to_lilypond()
+    # G5 relative to B4 (up a minor 6th) resolves to a single octave mark
+    # (g'4). Relative to C4 instead (an incorrect reset to the shared
+    # section) it would resolve to two (g''4) -- confirms which reference
+    # point is actually used.
+    assert "g'4" in ly
+    assert "g''4" not in ly
+
+
+def test_staff_volta_without_forward_repeat_treats_everything_before_as_shared():
+    # No bar_line_type='forward_repeat' anywhere -- falls back to treating
+    # every measure since the start of the staff (or the end of a previous
+    # volta group) as the shared section, per _find_volta_groups()'s
+    # documented fallback.
+    staff = Staff(name="right hand")
+    m1 = Measure(number=1)
+    m1.add_note(_make_note('C', 4, 4))
+    m2 = Measure(number=2, ending_numbers=[1])
+    m2.add_note(_make_note('D', 4, 4))
+    m3 = Measure(number=3, ending_numbers=[2])
+    m3.add_note(_make_note('E', 4, 4))
+    for m in (m1, m2, m3):
+        staff.add_measure(m)
+
+    ly = staff.to_lilypond()
+    assert '\\repeat volta 2 {' in ly
+    assert 'c4 |' in ly
+    # c4 must be inside \repeat volta, not before it.
+    assert ly.index('\\repeat volta 2 {') < ly.index('c4 |')
+
+
+def test_staff_multiple_volta_groups_in_one_staff():
+    staff = Staff(name="right hand")
+    m1 = Measure(number=1, ending_numbers=[1])
+    m1.add_note(_make_note('C', 4, 4))
+    m2 = Measure(number=2, ending_numbers=[2])
+    m2.add_note(_make_note('D', 4, 4))
+    m3 = Measure(number=3)
+    m3.add_note(_make_note('E', 4, 4))
+    m4 = Measure(number=4, ending_numbers=[1])
+    m4.add_note(_make_note('F', 4, 4))
+    m5 = Measure(number=5, ending_numbers=[2])
+    m5.add_note(_make_note('G', 4, 4))
+    for m in (m1, m2, m3, m4, m5):
+        staff.add_measure(m)
+
+    ly = staff.to_lilypond()
+    assert ly.count('\\repeat volta 2 {') == 2
+    assert ly.count('\\alternative {') == 2
+    assert 'e4 |' in ly  # the standalone measure between the two groups
+
+
 def test_score_add_staff():
     score = Score(title="Ode to Joy", composer="Beethoven")
     score.add_staff(Staff(name="right hand"))
@@ -602,12 +724,17 @@ def test_measure_volta_combined_ending_gets_own_indicator_per_number():
     assert brl == '⠼⠂⠼⠆⠄⠧⠀'
 
 
-def test_measure_volta_to_lilypond_warns_and_comments_rather_than_guessing():
+def test_measure_to_lilypond_ignores_ending_numbers():
+    # Measure.to_lilypond() deliberately does not special-case
+    # ending_numbers -- \repeat volta/\alternative wraps a whole *range* of
+    # measures, which only Staff.to_lilypond() (the sole production caller)
+    # can see. See test_staff_generates_real_volta_repeat_structure in this
+    # file for the real behavior.
     m = Measure(number=5, ending_numbers=[1])
     m.add_note(_make_note('C', 4, 4))
-    with pytest.warns(UserWarning, match="repeat volta"):
-        ly, _ = m.to_lilypond()
-    assert ly.startswith('% ending 1')
+    ly, _ = m.to_lilypond()
+    assert '%' not in ly
+    assert ly.strip() == "c4 |"
 
 
 def test_measure_without_ending_numbers_unaffected():

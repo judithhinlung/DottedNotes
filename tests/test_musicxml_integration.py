@@ -1,5 +1,7 @@
 import pytest
 import os
+import shutil
+import subprocess
 import tempfile
 import pathlib
 import music21
@@ -102,3 +104,54 @@ def test_integration_fermata_breath_mark_volta_round_trip():
     assert note1.breath_mark.variant == BreathMarkVariant.FULL
     assert reimported_measures[0].ending_numbers == [1]
     assert reimported_measures[1].ending_numbers == [2]
+
+
+def test_integration_musicxml_volta_to_lilypond_compiles(tmp_path):
+    # Full pipeline: a MusicXML file with a forward repeat + first/second
+    # endings -> Score.to_lilypond() -> the real lilypond binary, end to
+    # end. Guards against a regression silently reverting to the old
+    # "% ending N" comment placeholder.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    m1 = music21.stream.Measure(number=1)
+    m1.append(music21.note.Note('C4', quarterLength=4))
+    m2 = music21.stream.Measure(number=2)
+    m2.append(music21.note.Note('D4', quarterLength=4))
+    m2.leftBarline = music21.bar.Repeat(direction='start')
+    m3 = music21.stream.Measure(number=3)
+    m3.append(music21.note.Note('E4', quarterLength=4))
+    m4 = music21.stream.Measure(number=4)
+    m4.append(music21.note.Note('F4', quarterLength=4))
+    part.append(m1)
+    part.append(m2)
+    part.append(m3)
+    part.append(m4)
+
+    rb1 = music21.spanner.RepeatBracket(m3, number='1')
+    rb2 = music21.spanner.RepeatBracket(m4, number='2')
+    part.insert(0, rb1)
+    part.insert(0, rb2)
+    m21_score.append(part)
+
+    from dottednotes.parser.musicxml_parser import MusicXMLTranslator
+    score = MusicXMLTranslator().translate(m21_score)
+    ly = score.to_lilypond()
+
+    assert r'\repeat volta 2 {' in ly
+    assert r'\alternative {' in ly
+    assert '% ending' not in ly
+
+    if not shutil.which("lilypond"):
+        pytest.skip("lilypond binary not found; skipping compile test")
+
+    ly_file = tmp_path / "volta.ly"
+    ly_file.write_text(ly, encoding="utf-8")
+    result = subprocess.run(
+        ["lilypond", "-o", str(tmp_path / "volta"), str(ly_file)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, f"LilyPond compilation failed:\n{result.stderr}"
+    assert "warning" not in (result.stdout + result.stderr).lower(), (
+        f"LilyPond reported a warning during compilation:\n{result.stdout}\n{result.stderr}"
+    )
+    assert (tmp_path / "volta.pdf").exists()

@@ -6672,7 +6672,7 @@ into yet.
 
 ---
 
-### [ ] S10b-1: Import multi-voice single-staff writing as `InAccord`
+### [x] S10b-1: Import multi-voice single-staff writing as `InAccord`
 
 **Why:** `InAccord` (`models/in_accord.py`, BANA Chapter 11) is imported into
 `musicxml_parser.py` (line 12) but never instantiated anywhere in the file.
@@ -6704,13 +6704,13 @@ not a corner case.
    correct order — not an empty measure.
 
 **Definition of Done:**
-- [ ] Multi-voice measures import as `InAccord` instead of importing empty.
-- [ ] Voice ordering matches BANA 11's clef-dependent convention.
-- [ ] New tests pass; existing single-voice tests still pass.
+- [x] Multi-voice measures import as `InAccord` instead of importing empty.
+- [x] Voice ordering matches BANA 11's clef-dependent convention.
+- [x] New tests pass; existing single-voice tests still pass.
 
 ---
 
-### [ ] S10b-2: Normalize instrument names so transposition lookup actually fires
+### [x] S10b-2: Normalize instrument names so transposition lookup actually fires
 
 **Why:** `get_transposition()` (`models/transposition.py:52`) only matches
 strings shaped exactly `"<instrument> in <key>"` against a 6-entry table
@@ -6742,14 +6742,14 @@ pitch — with no error, just wrong output.
    input does today.
 
 **Definition of Done:**
-- [ ] Transposing instruments imported from MusicXML get correct `\transpose`
+- [x] Transposing instruments imported from MusicXML get correct `\transpose`
       wrapping regardless of exact part-name spelling.
-- [ ] Any newly-added transposition intervals are developer-confirmed.
-- [ ] New tests pass.
+- [x] Any newly-added transposition intervals are developer-confirmed.
+- [x] New tests pass.
 
 ---
 
-### [ ] S10b-3: Import lead-sheet chord symbols, and stop mis-importing them as played chords
+### [x] S10b-3: Import lead-sheet chord symbols, and stop mis-importing them as played chords
 
 **Why:** DottedNotes has `ChordSymbol`/`ChordNamesTrack` models built
 specifically for BANA §23/§27 lead-sheet chord symbols, but
@@ -6781,13 +6781,13 @@ formatting.
    played chord in the `Measure`.
 
 **Definition of Done:**
-- [ ] Chord symbols import as `ChordSymbol`/`ChordNamesTrack` entries.
-- [ ] A `ChordSymbol` in the source XML no longer imports as a played chord.
-- [ ] New tests pass.
+- [x] Chord symbols import as `ChordSymbol`/`ChordNamesTrack` entries.
+- [x] A `ChordSymbol` in the source XML no longer imports as a played chord.
+- [x] New tests pass.
 
 ---
 
-### [ ] S10b-4: Import fermatas
+### [x] S10b-4: Import fermatas
 
 **Why:** `translate_note_obj`'s expression-mapping loop
 (musicxml_parser.py:448-461) handles Trill/Mordent/InvertedMordent/Turn/
@@ -6808,12 +6808,12 @@ exists).
 2. Add a test importing a MusicXML fixture with a fermata over a note.
 
 **Definition of Done:**
-- [ ] Fermatas import instead of silently disappearing.
-- [ ] New tests pass.
+- [x] Fermatas import instead of silently disappearing.
+- [x] New tests pass.
 
 ---
 
-### [ ] S10b-5: Import first/second endings (voltas)
+### [x] S10b-5: Import first/second endings (voltas)
 
 **Why:** `translate_measure` only reads `m21_measure.rightBarline`/
 `leftBarline` for simple repeat bar lines (lines 191-203);
@@ -6832,12 +6832,12 @@ ticket adds).
    asserting correct ending numbers land on the right measures.
 
 **Definition of Done:**
-- [ ] Voltas import with correct ending numbers per measure.
-- [ ] New tests pass.
+- [x] Voltas import with correct ending numbers per measure.
+- [x] New tests pass.
 
 ---
 
-### [ ] S10b-6: Import breath marks and caesuras
+### [x] S10b-6: Import breath marks and caesuras
 
 **Why:** No reference to `music21.articulations.BreathMark` or
 `music21.articulations.Caesura` (confirmed those are the correct classes —
@@ -6856,12 +6856,12 @@ both live in `music21.articulations`, not `music21.expressions`) anywhere in
 2. Add a test importing a MusicXML fixture with a breath mark and a caesura.
 
 **Definition of Done:**
-- [ ] Breath marks and caesuras import instead of silently disappearing.
-- [ ] New tests pass.
+- [x] Breath marks and caesuras import instead of silently disappearing.
+- [x] New tests pass.
 
 ---
 
-### [ ] S10b-7: ~~Consolidate consecutive full-measure rests into multi-measure rests~~ -- superseded, see below
+### [x] S10b-7: ~~Consolidate consecutive full-measure rests into multi-measure rests~~ -- superseded, see below
 
 **Correction (found during implementation):** this ticket's original premise
 was wrong. `translate_measure` does always set `multi_measure_count=1` on
@@ -7116,6 +7116,20 @@ existing confirmation carries over.
 - [ ] `to_lilypond()` verified against the real LilyPond Notation Reference
       and, if `\relative` is involved, the real `lilypond` binary.
 - [ ] Unit tests pass.
+
+**Follow-up completed:** `to_lilypond()`'s real `\repeat volta N { ... }
+\alternative { \volta k {...} ... }` generation, initially deferred to a
+`% ending N` comment pending `\relative`-across-`\alternative` verification,
+was implemented as a follow-up once that verification was done (compiled
+`\repeat volta`/`\alternative`/`\volta k` through the real `lilypond` 2.24.4
+binary and dumped `\displayLilyMusic`: all three are no-ops for `\relative`
+pitch tracking, pure sequential chaining, same as `<< \\ >>`). Lives in
+`Staff.to_lilypond()` (`_find_volta_groups()`/`_render_volta_group()`), not
+`Measure.to_lilypond()`, since the structure wraps a whole measure range.
+Doing this also surfaced and fixed a real bug: MusicXML import/export had
+`forward_repeat` on the wrong measure relative to this codebase's own
+tested convention (see the "Fix MusicXML forward_repeat attachment..."
+commit).
 
 ---
 

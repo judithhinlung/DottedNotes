@@ -245,14 +245,26 @@ with no record of whether the source printed a range or a comma list, so
 every case renders the safe per-numeral form instead.
 
 LilyPond's real `\repeat volta N { ... } \alternative { \volta numberlist
-{...} ... }` structure (Notation Reference Sec. 4.1.3) is **not
-implemented** -- it wraps a whole range of measures (Staff-level
-restructuring, not something a single `Measure.to_lilypond()` call can do),
-and the manual doesn't document `\relative` pitch-chaining across
-`\alternative` (this project was burned once already assuming undocumented
-`\relative` semantics instead of checking the real binary -- see "Known
-Issues" in CLAUDE.md). `to_lilypond()` emits a `% ending N` comment and
-warns instead of guessing either the structure or the pitch semantics.
+{...} ... }` structure (Notation Reference Sec. 4.1.3) **is implemented**,
+in `Staff.to_lilypond()` (`_find_volta_groups()`/`_render_volta_group()`) --
+not `Measure.to_lilypond()`, since the structure wraps a whole range of
+measures. `Measure.bar_line_type == 'forward_repeat'` on measure N marks
+where the repeated section starts (at measure N+1 -- this codebase's
+tested convention, see `test_forward_repeat_sets_bar_line_type`); if none
+is found since the previous volta group (or the start of the staff), every
+measure back that far is treated as shared. `\repeat volta`, `\alternative`,
+and `\volta k` are all no-ops for `\relative` pitch tracking -- confirmed
+against the real `lilypond` 2.24.4 binary's `\displayLilyMusic` output (the
+same way this project resolved `<< \\ >>`'s sequential-not-per-voice
+chaining, see "Known Issues" in CLAUDE.md) -- so pitch tracking threads
+straight through shared → branch 1 → branch 2 → ... sequentially, continuing
+after the block from the *last* branch's last note.
+
+Fixing this also surfaced and fixed a real, previously-untested bug: the
+MusicXML import/export path attached `forward_repeat` to the wrong measure
+(the first measure of the repeat, mirroring music21's own `leftBarline`
+placement, rather than the last measure before it) -- see the "Fix
+MusicXML forward_repeat attachment..." commit for the full explanation.
 
 ### Known scope gap: BRF (typed-braille) import isn't wired up
 

@@ -299,33 +299,17 @@ class Measure:
                 stacklevel=2,
             )
         result = ' '.join(parts) + ' ' + bar_ly
-        if self.ending_numbers:
-            # LilyPond represents first/second endings with \repeat volta
-            # N { ... } \alternative { \volta numberlist {...} ... }
-            # wrapped around a whole *range* of measures (Notation
-            # Reference Sec. 4.1.3), not a per-measure marking -- that
-            # restructuring needs to happen at the Staff level (which
-            # measures share a \repeat block, where it starts/ends), not
-            # here, and \relative's pitch-chaining behavior across
-            # \alternative isn't documented (this project has been burned
-            # once already by assuming undocumented \relative chaining
-            # instead of checking the real binary -- see CLAUDE.md's Known
-            # Issues). Rather than guess either, emit an informative
-            # comment and warn that the real \repeat volta/\alternative
-            # structure isn't generated -- the braille output has full
-            # support (see to_braille() below).
-            import warnings
-            numbers_str = ",".join(str(n) for n in self.ending_numbers)
-            warnings.warn(
-                f"Measure {self.number} is ending(s) {numbers_str}, but "
-                "generating a real LilyPond \\repeat volta/\\alternative "
-                "structure needs Staff-level measure-range grouping and "
-                "unverified \\relative-across-\\alternative semantics -- "
-                "not yet implemented. Emitting a plain comment instead; "
-                "the braille output is unaffected.",
-                stacklevel=2,
-            )
-            result = f"% ending {numbers_str}\n    " + result
+        # NOTE: `ending_numbers` (first/second endings) is deliberately not
+        # consulted here. LilyPond represents them with \repeat volta N
+        # { ... } \alternative { \volta numberlist {...} ... } wrapped
+        # around a whole *range* of measures (Notation Reference Sec.
+        # 4.1.3), not a per-measure marking, so that structure has to be
+        # built by the caller that sees the whole measure range --
+        # `Staff.to_lilypond()`, the only production caller of this method
+        # (confirmed by grep before removing the old per-measure fallback
+        # here) -- see its `_group_voltas`/volta-rendering code for the
+        # real implementation, including the \relative pitch-chaining
+        # verified against the real lilypond binary.
         return result, cur_midi
 
     def to_braille(
