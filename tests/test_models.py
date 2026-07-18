@@ -10,6 +10,8 @@ from dottednotes.models import (
     Clef,
     ClefType,
     CLEF_TO_LILYPOND,
+    BreathMark,
+    BreathMarkVariant,
     Duration,
     Dynamic,
     DynamicLevel,
@@ -133,7 +135,7 @@ def test_duration_in_ticks_triplet_sixteenth():
 
 
 def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None,
-               ornaments=None, fermata=None):
+               ornaments=None, fermata=None, breath_mark=None):
     return Note(
         dots=frozenset(),
         category=SymbolCategory.NOTE,
@@ -145,6 +147,7 @@ def _make_note(note_name, octave, duration_value, dots=0, accidental=None, artic
         articulations=articulations or [],
         ornaments=ornaments or [],
         fermata=fermata,
+        breath_mark=breath_mark,
     )
 
 
@@ -536,6 +539,60 @@ def test_measure_bar_line_fermata_on_final_double_bar():
     m = Measure(number=1, bar_line_type='final_double_bar', bar_line_fermata=True)
     brl, _ = m.to_braille()
     assert brl == '⠣⠅' + Fermata().to_braille()
+
+
+def test_breath_mark_half_to_lilypond_and_braille():
+    bm = BreathMark(variant=BreathMarkVariant.HALF)
+    assert bm.to_lilypond() == "\\set breathMarkType = #'comma \\breathe"
+    assert bm.to_braille() == '⠨⠂'
+
+
+def test_breath_mark_full_to_lilypond_and_braille():
+    bm = BreathMark(variant=BreathMarkVariant.FULL)
+    assert bm.to_lilypond() == "\\set breathMarkType = #'caesura \\breathe"
+    assert bm.to_braille() == '⠠⠌'
+
+
+def test_note_with_breath_mark_to_lilypond_is_a_separate_trailing_event():
+    note = _make_note('C', 4, 4, breath_mark=BreathMark())
+    ly = note.to_lilypond()
+    # \breathe is a standalone event, not glued to the note like an
+    # articulation -- must be space-separated so it tokenizes as its own
+    # music event when placed in a measure alongside the following note.
+    assert ly == "c'4 \\set breathMarkType = #'comma \\breathe"
+
+
+def test_note_with_fermata_and_breath_mark_to_braille_order():
+    note = _make_note('C', 4, 4, fermata=Fermata(), breath_mark=BreathMark())
+    brl = note.to_braille(is_measure_start=True)
+    assert brl.index(Fermata().to_braille()) < brl.index(BreathMark().to_braille())
+
+
+def test_fermata_and_breath_mark_survive_measure_to_lilypond():
+    # Note.to_relative_lilypond() -- the method Measure.to_lilypond() (and
+    # therefore Score.to_lilypond(), the actual production path) calls --
+    # duplicates to_lilypond()'s string-building rather than reusing it.
+    # Testing only note.to_lilypond() directly (as the tests above do) would
+    # miss a fermata/breath mark that was added to one method but not the
+    # other; this locks in the real Measure-level path.
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4, fermata=Fermata(), breath_mark=BreathMark(variant=BreathMarkVariant.FULL)))
+    ly, _ = m.to_lilypond()
+    assert '\\fermata' in ly
+    assert "\\set breathMarkType = #'caesura \\breathe" in ly
+
+
+def test_chord_with_fermata_and_breath_mark_to_lilypond():
+    from dottednotes.models import Chord
+    written = _make_note('E', 4, 4, fermata=Fermata(shape=FermataShape.SQUARED), breath_mark=BreathMark())
+    other = _make_note('C', 4, 4)
+    chord = Chord(notes=[written, other])
+    ly = chord.to_lilypond()
+    assert '\\henzelongfermata' in ly
+    assert "\\set breathMarkType = #'comma \\breathe" in ly
+    ly_rel, _ = chord.to_relative_lilypond(60)
+    assert '\\henzelongfermata' in ly_rel
+    assert "\\set breathMarkType = #'comma \\breathe" in ly_rel
 
 
 def test_note_with_accent():

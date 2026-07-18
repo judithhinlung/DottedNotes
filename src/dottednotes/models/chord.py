@@ -153,9 +153,11 @@ def NOTE_PITCH_ONLY(note: Note) -> str:
 
 
 def _chord_extras(written: Note) -> str:
-    """Return articulation, ornament, tie, dynamic, and slur strings from the written note."""
+    """Return articulation, ornament, fermata, tie, dynamic, slur, and
+    breath-mark strings from the written note."""
     art_str = ''.join(a.to_lilypond() for a in written.articulations)
     orn_str = ''.join(o.to_lilypond() for o in written.ornaments)
+    fermata_str = written.fermata.to_lilypond() if written.fermata else ''
     tie_str = '~' if written.tie else ''
     dyn_str = ''.join(d.to_lilypond() for d in written.dynamics)
     slur_str = (
@@ -173,4 +175,8 @@ def _chord_extras(written: Note) -> str:
         pedal_str = r"\sustainOff\sustainOn"
     elif written.pedal_sustain == "on_off":
         pedal_str = r"\sustainOn\sustainOff"
-    return f"{art_str}{orn_str}{tie_str}{dyn_str}{slur_str}{pedal_str}"
+    # \breathe is a standalone event (see models/breath_mark.py), not glued
+    # to the chord like an articulation -- needs its own leading space,
+    # same as the plain-Note case in note.py.
+    breath_mark_str = (' ' + written.breath_mark.to_lilypond()) if written.breath_mark else ''
+    return f"{art_str}{orn_str}{fermata_str}{tie_str}{dyn_str}{slur_str}{pedal_str}{breath_mark_str}"

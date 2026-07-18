@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 from .accidental import Accidental
 from .base import BrailleSymbol
+from .breath_mark import BreathMark
 from .duration import Duration
 from .dynamic import Dynamic
 from .fermata import Fermata
@@ -67,6 +68,7 @@ class Note(BrailleSymbol):
     parsed_tokens: list = field(default_factory=list)
     after_numeric_indicator: bool = False
     fermata: Optional[Fermata] = None
+    breath_mark: Optional[BreathMark] = None
 
     def __post_init__(self):
         if self.note_name not in NOTE_NAME_TO_LILYPOND:
@@ -97,6 +99,12 @@ class Note(BrailleSymbol):
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         ornament_str = ''.join(o.to_lilypond() for o in self.ornaments)
         fermata_str = self.fermata.to_lilypond() if self.fermata else ''
+        # \breathe is a standalone music event, not a postfix articulation
+        # (LilyPond Notation Reference Sec. 3.2.3, "Breath marks" -- "any
+        # expressive marks pertaining to the preceding note... must be
+        # placed before \breathe"), so it needs its own leading space
+        # rather than gluing directly onto the duration like \fermata does.
+        breath_mark_str = (' ' + self.breath_mark.to_lilypond()) if self.breath_mark else ''
         tie_str = '~' if self.tie else ''
         dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
         slur_str = (
@@ -115,7 +123,7 @@ class Note(BrailleSymbol):
         elif self.pedal_sustain == "on_off":
             pedal_str = r"\sustainOn\sustainOff"
         return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
-                f"{articulation_str}{ornament_str}{fermata_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}")
+                f"{articulation_str}{ornament_str}{fermata_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}{breath_mark_str}")
 
     def to_braille(
         self,
@@ -284,13 +292,20 @@ class Note(BrailleSymbol):
         # already on that note -- placed here, after fingering_str/
         # intervals_str/dots_str, and before the tie/slur suffix.
         fermata_str = self.fermata.to_braille() if self.fermata else ''
+        # Same placement rule as fermata (Par. 22.2 groups breath/break
+        # marks and fermatas together as "follows the note...precedes the
+        # breath/break mark or fermata" for any value dot/fingering/
+        # interval) -- placed directly after fermata_str since Par. 22.2
+        # doesn't give a combined ordering rule for when both signs occur
+        # on the same note (a rare combination).
+        breath_mark_str = self.breath_mark.to_braille() if self.breath_mark else ''
         tie_str = '⠨⠉' if getattr(self, '_is_chord_written_note', False) and self.tie else ('⠈⠉' if self.tie else '')
         slur_start_str = '⠉' if self.slur_start else ''
 
         end_dyn_str = "".join(d.to_braille() for d in end_dynamics)
 
         prefix = grace_str + pedal_down_str + slur_bracket_open_str + start_dyn_str + art_str + orn_str + accidental_str + octave_str
-        suffix = dots_str + gliss_str + intervals_str + tremolo_str + fingering_str + fermata_str + tie_str + slur_start_str + slur_bracket_close_str + end_dyn_str + pedal_up_str
+        suffix = dots_str + gliss_str + intervals_str + tremolo_str + fingering_str + fermata_str + breath_mark_str + tie_str + slur_start_str + slur_bracket_close_str + end_dyn_str + pedal_up_str
 
         return prefix + note_cell + suffix
 
@@ -315,7 +330,8 @@ class Note(BrailleSymbol):
             self.tremolo == other.tremolo and
             self.pedal_sustain == other.pedal_sustain and
             self.after_numeric_indicator == other.after_numeric_indicator and
-            self.fermata == other.fermata
+            self.fermata == other.fermata and
+            self.breath_mark == other.breath_mark
         )
 
     def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
@@ -406,6 +422,8 @@ class Note(BrailleSymbol):
         fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
         articulation_str = ''.join(a.to_lilypond() for a in self.articulations)
         ornament_str = ''.join(o.to_lilypond() for o in self.ornaments)
+        fermata_str = self.fermata.to_lilypond() if self.fermata else ''
+        breath_mark_str = (' ' + self.breath_mark.to_lilypond()) if self.breath_mark else ''
         tie_str = '~' if self.tie else ''
         dynamic_str = ''.join(d.to_lilypond() for d in self.dynamics)
         slur_str = (
@@ -424,7 +442,7 @@ class Note(BrailleSymbol):
         elif self.pedal_sustain == "on_off":
             pedal_str = r"\sustainOn\sustainOff"
         result = (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
-                  f"{articulation_str}{ornament_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}")
+                  f"{articulation_str}{ornament_str}{fermata_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}{breath_mark_str}")
         return result, target_midi
 
 

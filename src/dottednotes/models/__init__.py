@@ -1,4 +1,5 @@
 from .accidental import Accidental, AccidentalType
+from .breath_mark import BreathMark, BreathMarkVariant
 from .chord import Chord
 from .chord_symbol import ChordSymbol
 from .chord_names import ChordNamesTrack
@@ -26,6 +27,8 @@ from .tuplet import Tuplet
 
 __all__ = [
     "Accidental",
+    "BreathMark",
+    "BreathMarkVariant",
     "Chord",
     "ChordSymbol",
     "ChordNamesTrack",
