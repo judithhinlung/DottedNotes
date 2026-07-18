@@ -6861,26 +6861,42 @@ both live in `music21.articulations`, not `music21.expressions`) anywhere in
 
 ---
 
-### [ ] S10b-7: Consolidate consecutive full-measure rests into multi-measure rests
+### [ ] S10b-7: ~~Consolidate consecutive full-measure rests into multi-measure rests~~ -- superseded, see below
 
-**Why:** `translate_measure`'s rest-handling (lines 318-327) always sets
-`multi_measure_count=1`, even when `is_full_measure` is `True`. Consecutive
-full-measure rests come through as N separate single-measure rests instead
-of one multi-measure rest, even though the `Rest` model already supports the
-count and both the BANA renderer and validator key off it (see CLAUDE.md's
-note on numeric-indicator octave resets after "a multi-measure rest").
+**Correction (found during implementation):** this ticket's original premise
+was wrong. `translate_measure` does always set `multi_measure_count=1` on
+import, but that's *correct*, not a bug -- every parser in this codebase
+(BRF's `braille_parser.py`, the reverse `lilypond_parser.py`, and now
+MusicXML) represents a run of full-measure rests as N separate one-measure
+`Measure`/`Rest` objects, never as a single pre-merged `Rest`. Consolidation
+into `R1*N` happens as a render-time lookahead pass already present in
+`Staff.to_lilypond()` (`models/staff.py`), which runs over `staff.measures`
+regardless of which parser produced them -- confirmed empirically: a
+MusicXML import of 3 consecutive whole-measure rests already renders as
+`R1*3`, no code change needed. So there is nothing to fix on the MusicXML
+*import* side, and this ticket does not belong in an import-hardening sprint.
 
-**Steps:**
-1. After the per-measure translation loop, post-process each `Staff`'s
-   measures to merge runs of consecutive full-measure rests into a single
-   `Rest` with `multi_measure_count` set to the run length (matching however
-   the BRF parser already represents multi-measure rests, for consistency).
-2. Add a test importing a MusicXML fixture with several consecutive whole-
-   measure rests, asserting they collapse into one multi-measure `Rest`.
+**A real, separate gap does exist, just not here:** `BrailleRenderer`
+(`renderers/braille_renderer.py`) and `Rest.to_braille()` (`models/note.py`)
+have no equivalent consolidation pass at all -- `Rest.to_braille()` never
+branches on `multi_measure_count`, so BANA's compact multi-measure-rest sign
+(Table 18: `⠍⠍` for 2 measures, `⠍⠍⠍` for 3, `⠼<digits>⠍` for 4+ -- the same
+cells `braille_parser.py`'s `MULTI_MEASURE_REST` token already parses on the
+way in) is never produced on the way out. This affects every source (BRF
+round-trip, LilyPond import, MusicXML import) equally -- it isn't
+MusicXML-specific, and fixing it means teaching `BrailleRenderer` a new
+compression pass (alongside `_compress_articulations`/
+`_compress_measure_repeats`) plus deciding how a merged run interacts with
+per-measure line-packing and measure-number prefixing in `_render_solo`/
+`_render_piano`/`_render_ensemble`, which is real design work, not a
+one-line fix. Filed as **S11c-7** in the BRF-reformatting/robustness backlog
+below rather than folded into this sprint.
 
 **Definition of Done:**
-- [ ] Consecutive full-measure rests import as one multi-measure rest.
-- [ ] New tests pass.
+- [x] Confirmed no MusicXML-import-side fix is needed (LilyPond output
+      already correct via the existing `Staff.to_lilypond()` pass).
+- [x] The real gap (BrailleRenderer never emits the compact BANA sign) is
+      filed as its own correctly-scoped ticket (S11c-7) instead.
 
 ---
 
@@ -7183,6 +7199,7 @@ rather than being an under-tested bolt-on.
 **Sprint 11c: BRF Reformatting & Malformed Input Robustness (future sprint)**
 - [ ] S11c-1: Add test cases and validator rules for malformed .brf music files, such as having measure numbers or notes in the left margins when the score is an ensemble score.
 - [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
+- [ ] S11c-7: Teach `BrailleRenderer`/`Rest.to_braille()` to emit BANA's compact multi-measure-rest sign (Table 18) for a run of consecutive full-measure rests, instead of one whole-rest cell per measure -- found while working S10b-7; affects BRF round-trip, LilyPond import, and MusicXML import equally, not source-specific. Needs a design decision on how a merged run interacts with `_render_solo`/`_render_piano`/`_render_ensemble`'s per-measure line-packing and measure-number prefixing, alongside the existing `_compress_articulations`/`_compress_measure_repeats` passes.
 
 ---
 
