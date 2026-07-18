@@ -26,6 +26,13 @@ class Staff:
     lyrics: list[str] = field(default_factory=list)
     verses: list[list[str]] = field(default_factory=list)
     verse_prefixes: list[str | None] = field(default_factory=list)
+    # (written_pitch, concert_pitch) LilyPond absolute pitches, set by the
+    # MusicXML importer (S10b-2) when the source carries structured
+    # transposition data -- takes priority over the BRF path's name-string
+    # lookup (`get_transposition(staff.name)`) in Score._wrap_transpose,
+    # since it covers any instrument, not just the ones in transposition.py's
+    # hardcoded _TRANSPOSITIONS table.
+    resolved_transposition: tuple[str, str] | None = None
 
 
     def add_measure(self, measure: Measure) -> None:

@@ -13,6 +13,7 @@ from dottednotes.models import (
 )
 from dottednotes.models.fingering import Fingering
 from dottednotes.models.duration import TICKS_PER_QUARTER
+from dottednotes.models.transposition import transposition_from_interval
 
 def load_musicxml(source: str) -> Score:
     """Parse a MusicXML file path or string using music21 and return a DottedNotes Score."""
@@ -81,7 +82,21 @@ class MusicXMLTranslator:
                 name = f"{base} left hand"
 
         staff = Staff(name=name)
-        
+
+        # Prefer music21's own structured transposition data over matching
+        # `staff.name` against a fixed instrument-name table (S10b-2): real
+        # MusicXML part names vary too much ("Bb Clarinet", "Horn in F 1")
+        # to reliably match get_transposition()'s "<instrument> in <key>"
+        # pattern, but music21 exposes the actual <transpose> interval from
+        # the file directly, for any instrument, not just a hardcoded few.
+        instrument = part.getInstrument(returnDefault=False)
+        if instrument is not None and instrument.transposition is not None:
+            interval = instrument.transposition
+            staff.resolved_transposition = transposition_from_interval(
+                interval.diatonic.generic.staffDistance,
+                interval.chromatic.semitones,
+            )
+
         current_clef = "treble"
         current_key = 0
         current_time = (4, 4)

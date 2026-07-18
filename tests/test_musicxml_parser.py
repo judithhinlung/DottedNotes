@@ -196,3 +196,41 @@ def test_musicxml_multi_voice_single_staff_imports_as_in_accord():
     top_voice, bottom_voice = in_accord.parts
     assert [n.note_name for n in top_voice] == ['G', 'A']
     assert [n.note_name for n in bottom_voice] == ['C']
+
+def test_musicxml_transposing_instrument_resolved_from_structured_data():
+    # Real-world part names for transposing instruments vary a lot ("Bb
+    # Clarinet", "Clarinet in Bb 1", etc.) and won't reliably match
+    # get_transposition()'s "<instrument> in <key>" string pattern -- so the
+    # importer should resolve the \transpose wrapping from music21's own
+    # structured <transpose> data instead (S10b-2), independent of the part
+    # name string.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    inst = music21.instrument.Clarinet()
+    inst.partName = "Bb Clarinet"
+    inst.transposition = music21.interval.Interval('M-2')
+    part.insert(0, inst)
+    measure = music21.stream.Measure(number=1)
+    measure.append(music21.note.Note('D5', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    staff = score.staves[0]
+
+    assert staff.resolved_transposition == ("c'", "bes")
+
+def test_musicxml_non_transposing_instrument_has_no_resolved_transposition():
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    inst = music21.instrument.Flute()
+    part.insert(0, inst)
+    measure = music21.stream.Measure(number=1)
+    measure.append(music21.note.Note('D5', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    staff = score.staves[0]
+
+    assert staff.resolved_transposition is None

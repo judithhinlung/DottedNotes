@@ -101,10 +101,15 @@ class Score:
         is a recognized transposing-instrument key and concert_pitch is True.
         Returns relative_block unchanged otherwise (unknown/non-transposing
         instrument, or concert_pitch=False for written-pitch output).
+
+        `staff.resolved_transposition` (S10b-2), when set by the MusicXML
+        importer, takes priority over the name-string lookup -- it's derived
+        from the source's own structured transposition data and isn't
+        limited to `_TRANSPOSITIONS`' hardcoded instrument list.
         """
         if not concert_pitch:
             return relative_block
-        transposition = get_transposition(staff.name)
+        transposition = staff.resolved_transposition or get_transposition(staff.name)
         if transposition is None:
             return relative_block
         written, concert = transposition

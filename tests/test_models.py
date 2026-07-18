@@ -1097,6 +1097,32 @@ def test_get_transposition():
     assert get_transposition("Flute") is None
 
 
+def test_transposition_from_interval():
+    from dottednotes.models.transposition import transposition_from_interval
+
+    # Each expected result is cross-checked against get_transposition()'s
+    # matching hardcoded entry above (S10b-2) -- the generic interval-based
+    # formula must reproduce the same pitches as the name-string table for
+    # the instruments both cover, since it's meant to replace name-matching
+    # for MusicXML import, not disagree with it.
+
+    # Horn in F: perfect 5th down. music21 Interval('P-5') gives
+    # diatonic.generic.staffDistance=-4, chromatic.semitones=-7.
+    assert transposition_from_interval(-4, -7) == ("c'", 'f')
+
+    # Clarinet in Bb: major 2nd down. Interval('M-2') gives
+    # staffDistance=-1, semitones=-2. Spelled "bes", not the chromatically
+    # equivalent "ais" -- the diatonic step count is what picks the letter.
+    assert transposition_from_interval(-1, -2) == ("c'", 'bes')
+
+    # Clarinet in A: minor 3rd down. Interval('m-3') gives
+    # staffDistance=-2, semitones=-3.
+    assert transposition_from_interval(-2, -3) == ("c'", 'a')
+
+    # Zero interval (e.g. Trumpet in C) -- non-transposing, no wrapping needed.
+    assert transposition_from_interval(0, 0) is None
+
+
 def test_score_transposes_horn_to_concert_pitch_by_default():
     staff = Staff(name="Horn in F")
     m = Measure(number=1)
@@ -1127,6 +1153,23 @@ def test_score_transposes_clarinet_in_bflat_to_concert_pitch():
 
     written_ly = score.to_lilypond(concert_pitch=False)
     assert r'\transpose' not in written_ly
+
+
+def test_score_prefers_resolved_transposition_over_name_lookup():
+    # "Bb Clarinet" doesn't match get_transposition()'s "<instrument> in
+    # <key>" pattern -- this is exactly the real-world MusicXML part-name
+    # variance S10b-2 exists for. resolved_transposition (set directly here
+    # to isolate this from the MusicXML importer, tested separately in
+    # test_musicxml_parser.py) must still produce the \transpose wrapping.
+    staff = Staff(name="Bb Clarinet", resolved_transposition=("c'", "bes"))
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score()
+    score.add_staff(staff)
+
+    concert_ly = score.to_lilypond()
+    assert r"\transpose c' bes {" in concert_ly
 
 
 def test_score_does_not_transpose_non_transposing_staves():
