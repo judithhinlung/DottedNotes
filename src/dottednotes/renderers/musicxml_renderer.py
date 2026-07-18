@@ -8,7 +8,8 @@ from dottednotes.models import (
     Accidental, AccidentalType, Dynamic, DynamicLevel,
     Articulation, ArticulationType, Ornament, OrnamentType,
     GraceNote, Clef, ClefType, KeySignature, TimeSignature,
-    TextMarking, TextMarkingType, InAccord, Tuplet
+    TextMarking, TextMarkingType, InAccord, Tuplet,
+    FermataShape, BreathMarkVariant,
 )
 from dottednotes.models.duration import TICKS_PER_QUARTER
 from dottednotes.models.fingering import Fingering
@@ -56,6 +57,17 @@ ARTICULATION_TYPE_MAP = {
     ArticulationType.OPEN: music21.articulations.OpenString,
 }
 
+# Reverse of musicxml_parser.py's _M21_FERMATA_SHAPE_TO_MODEL (S10c-4).
+# BETWEEN_NOTES has no distinct MusicXML/music21 shape -- it's purely a
+# braille positional convention (see models/fermata.py) -- so it round-trips
+# to the same 'normal' shape as FermataShape.NORMAL.
+FERMATA_SHAPE_TO_M21 = {
+    FermataShape.NORMAL: 'normal',
+    FermataShape.BETWEEN_NOTES: 'normal',
+    FermataShape.SQUARED: 'square',
+    FermataShape.TENT: 'angled',
+}
+
 
 class MusicXMLRenderer:
     def render(self, score: Score) -> music21.stream.Score:
@@ -92,7 +104,9 @@ class MusicXMLRenderer:
         dyn_spanners: list[music21.spanner.Spanner] = []
         
         active_ties: set[tuple[str, int]] = set()
-        
+
+        volta_spanners: list[music21.spanner.RepeatBracket] = []
+
         model_to_m21: dict[int, music21.base.Music21Object] = {}
         
         # Collect pitched items for lyrics alignment later
@@ -208,11 +222,21 @@ class MusicXMLRenderer:
                         current_offset += _item_quarter_length(item)
                             
             m21_part.append(m21_measure)
-            
+
+            # First/second endings (S10c-4). RepeatBracket's `number` takes
+            # a comma-joined string for combined endings ("1,2") -- the
+            # exact form confirmed to round-trip back to numberRange == the
+            # matching list of ints during S10b-5's import-side investigation.
+            if measure_model.ending_numbers:
+                number_str = ','.join(str(n) for n in measure_model.ending_numbers)
+                volta_spanners.append(music21.spanner.RepeatBracket(m21_measure, number=number_str))
+
         # Add collected spanners
         for sp in slur_spanners:
             m21_part.insert(0, sp)
         for sp in dyn_spanners:
+            m21_part.insert(0, sp)
+        for sp in volta_spanners:
             m21_part.insert(0, sp)
             
         # Attach lyrics
@@ -315,6 +339,19 @@ class MusicXMLRenderer:
             elif o.type == OrnamentType.INVERTED_TURN:
                 m21_note.expressions.append(music21.expressions.InvertedTurn())
                 
+        # Fermata (S10c-4)
+        if note.fermata is not None:
+            m21_fermata = music21.expressions.Fermata()
+            m21_fermata.shape = FERMATA_SHAPE_TO_M21[note.fermata.shape]
+            m21_note.expressions.append(m21_fermata)
+
+        # Breath/break mark (S10c-4)
+        if note.breath_mark is not None:
+            if note.breath_mark.variant == BreathMarkVariant.HALF:
+                m21_note.articulations.append(music21.articulations.BreathMark())
+            else:
+                m21_note.articulations.append(music21.articulations.Caesura())
+
         # Fingerings
         for f in note.fingerings:
             val = ""

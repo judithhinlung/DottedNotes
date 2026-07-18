@@ -7,7 +7,8 @@ from dottednotes.models import (
     Score, Staff, Measure, Note, Rest, Chord, Duration,
     Accidental, AccidentalType, Dynamic, DynamicLevel,
     Articulation, ArticulationType, Ornament, OrnamentType,
-    Clef, ClefType, KeySignature, TimeSignature
+    Clef, ClefType, KeySignature, TimeSignature,
+    Fermata, FermataShape, BreathMark, BreathMarkVariant,
 )
 from dottednotes.renderers.musicxml_renderer import MusicXMLRenderer, export_musicxml
 
@@ -128,3 +129,61 @@ def test_export_musicxml_to_file():
         # Ensure it contains XML markup
         content = out_path.read_text(encoding="utf-8")
         assert "<score-partwise" in content
+
+def test_musicxml_export_fermata_and_breath_mark():
+    score = Score()
+    staff = Staff(name="Melody")
+    m = Measure(number=1)
+    dur = Duration(value=4)
+    n = Note(
+        dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=dur,
+        fermata=Fermata(shape=FermataShape.SQUARED),
+        breath_mark=BreathMark(variant=BreathMarkVariant.FULL),
+    )
+    m.add_note(n)
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    m21_score = MusicXMLRenderer().render(score)
+    m21_note = m21_score.parts[0].getElementsByClass(music21.stream.Measure)[0].notes[0]
+
+    fermatas = [e for e in m21_note.expressions if isinstance(e, music21.expressions.Fermata)]
+    assert len(fermatas) == 1
+    assert fermatas[0].shape == 'square'
+
+    caesuras = [a for a in m21_note.articulations if isinstance(a, music21.articulations.Caesura)]
+    assert len(caesuras) == 1
+
+def test_musicxml_export_volta_ending():
+    score = Score()
+    staff = Staff(name="Melody")
+    m1 = Measure(number=1, ending_numbers=[1])
+    m1.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=Duration(value=4)))
+    m2 = Measure(number=2, ending_numbers=[2])
+    m2.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='D', octave=4, duration=Duration(value=4)))
+    staff.add_measure(m1)
+    staff.add_measure(m2)
+    score.add_staff(staff)
+
+    m21_score = MusicXMLRenderer().render(score)
+    part = m21_score.parts[0]
+    measures = part.getElementsByClass(music21.stream.Measure)
+
+    brackets_1 = measures[0].getSpannerSites(music21.spanner.RepeatBracket)
+    brackets_2 = measures[1].getSpannerSites(music21.spanner.RepeatBracket)
+    assert len(brackets_1) == 1 and brackets_1[0].numberRange == [1]
+    assert len(brackets_2) == 1 and brackets_2[0].numberRange == [2]
+
+def test_musicxml_export_combined_volta_ending():
+    score = Score()
+    staff = Staff(name="Melody")
+    m = Measure(number=1, ending_numbers=[1, 2])
+    m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=Duration(value=4)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    m21_score = MusicXMLRenderer().render(score)
+    measure = m21_score.parts[0].getElementsByClass(music21.stream.Measure)[0]
+    brackets = measure.getSpannerSites(music21.spanner.RepeatBracket)
+    assert len(brackets) == 1
+    assert brackets[0].numberRange == [1, 2]
