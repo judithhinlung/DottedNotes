@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
 
+from .note import Rest
+
 if TYPE_CHECKING:
     from .note import Note
     from .time_signature import TimeSignature
@@ -62,13 +64,20 @@ class Tuplet:
         for item in self.items:
             # Pass all appropriate context args
             # Some items (like Note/Chord) accept is_16th_run_continuation etc. which will be default
-            kwargs = {
-                'prev_note': curr_prev,
-                'is_measure_start': curr_measure_start,
-                'time_signature': time_signature,
-            }
+            if isinstance(item, Rest):
+                kwargs = {}
+            else:
+                kwargs = {
+                    'prev_note': curr_prev,
+                    'is_measure_start': curr_measure_start,
+                    'time_signature': time_signature,
+                }
             rendered_items.append(item.to_braille(**kwargs))
-            curr_prev = item.notes[0] if hasattr(item, 'notes') else item
+            if not isinstance(item, Rest):
+                # A rest carries no pitch, so it must not become the octave-mark
+                # reference for the next note (matching Measure's own item loop,
+                # which likewise leaves curr_prev unchanged across a Rest).
+                curr_prev = item.notes[0] if hasattr(item, 'notes') else item
             curr_measure_start = False
 
         if rendered_items:

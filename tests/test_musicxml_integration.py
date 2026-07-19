@@ -40,6 +40,33 @@ def test_integration_dichterliebe_musicxml_to_brf():
     # Checks that it contains braille Unicode cells
     assert any(ord(c) >= 0x2800 and ord(c) <= 0x28FF for c in brf_content)
 
+def test_bartok_orchestral_musicxml_smoke_converts_without_crashing():
+    """Smoke test only, like test_bartok_smoke_parses_without_crashing in
+    test_ensemble_integration.py -- this real-world orchestral export (9
+    instrument parts) is not developer-verified ground truth, so this
+    checks the full load_musicxml -> to_braille pipeline runs end to end
+    and produces non-empty braille, not exact pitches/rhythms.
+
+    Found the crash this guards against: Tuplet.to_braille()
+    (models/tuplet.py) passed prev_note/is_measure_start/time_signature to
+    every item in the tuplet uniformly, but Rest.to_braille() takes no
+    arguments at all -- Measure's own item-rendering loop already
+    special-cases Rest for exactly this reason (see
+    test_tuplet_with_rest_to_braille_does_not_raise in
+    test_to_braille.py), Tuplet's did not. An eighth-note triplet with a
+    rest in one of its three slots -- common in this orchestral score --
+    triggered it.
+    """
+    fixture_path = "tests/fixtures/Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.xml"
+    assert os.path.exists(fixture_path)
+
+    score = load_musicxml(fixture_path)
+    assert len(score.staves) == 9
+
+    brf_content = score.to_braille(compression_level="full")
+    assert len(brf_content) > 0
+    assert any(0x2800 <= ord(c) <= 0x28FF for c in brf_content)
+
 def test_integration_brf_to_musicxml():
     # 1. Parse simple_melody.brf
     brf_path = "tests/fixtures/simple_melody.brf"

@@ -119,6 +119,23 @@ def test_measure_with_chord_to_braille_does_not_raise():
     assert brl
 
 
+def test_tuplet_with_rest_to_braille_does_not_raise():
+    # Regression test: a triplet containing a rest (e.g. an eighth-note
+    # triplet with a rest for one of its three slots, common in orchestral
+    # scores) crashed Tuplet.to_braille() because it passed prev_note/
+    # is_measure_start/time_signature to every item uniformly, but
+    # Rest.to_braille() takes no arguments at all -- Measure's own
+    # item-rendering loop already special-cases Rest for this reason,
+    # Tuplet's did not.
+    n1 = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(value=8, dots=0))
+    r = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=8, dots=0))
+    n2 = Note(dots=frozenset(), category=None, raw_brl="", note_name="E", octave=4, duration=Duration(value=8, dots=0))
+    t = Tuplet(items=[n1, r, n2])
+    m = Measure(number=1, notes=[t])
+    brl, _ = m.to_braille(is_measure_start=True)
+    assert brl
+
+
 def test_measure_with_measure_repeat_to_braille_does_not_raise():
     mr = MeasureRepeat(count=2, line=0)
     m = Measure(number=1, notes=[mr])
