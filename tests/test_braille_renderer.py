@@ -193,7 +193,11 @@ def test_ensemble_renderer_measure_numbers_alignment():
     # above it (so a leading octave mark gets skipped, landing on the
     # note; with no octave mark, the offset still applies).
     slice_strs, _ = render_measure_slice(s1.measures, 0, len(s1.measures), None, s1.time_signature, "none")
-    col = len(ensemble_abbrev_prefixes([s1.name])[0])
+    # Violin and Viola tie for widest abbreviation, but both still get a
+    # dot 3 since real music (an octave-marked note) follows -- pass the
+    # real music_str here too, matching what render_candidate actually does,
+    # so this recomputed column lines up with the real rendered output.
+    col = len(ensemble_abbrev_prefixes([s1.name], ["".join(slice_strs)])[0])
     # Each interior measure boundary is a fixed table column: the widest
     # rendering of that measure across staves, plus a 2-cell gap (BANA
     # 33.4) -- both staves render identically here, so that's just this
@@ -262,16 +266,24 @@ def test_ensemble_abbrev_prefixes_adds_dot_3_only_where_a_gap_remains():
     assert tied_prefixes == ['⠜' + abbrev_to_brl('fl'), '⠜' + abbrev_to_brl('vi')]
 
 
-def test_ensemble_abbrev_prefixes_widest_still_gets_dot_3_on_collision():
+def test_ensemble_abbrev_prefixes_widest_still_gets_dot_3_for_any_real_music():
     # A staff at the widest abbreviation has no padding gap to fill, but
-    # if its own music's first cell sets dot 1, 2, or 3, it would read as
-    # a continuation of the abbreviation's letters rather than the start
-    # of the music -- so it still gets a dot 3 even with no gap.
-    colliding_music = '⠍⠀'  # whole rest: dots 1,3,4 -- sets dot 1 and 3
-    plain_music = '⠨⠹'      # octave mark: dots 4,6 only -- no collision
-    prefixes = ensemble_abbrev_prefixes(["Flute", "Violin"], [colliding_music, plain_music])
+    # real music run right up against the abbreviation with no dot 3 --
+    # whether the very next cell sets dots 1-3 (e.g. a note/rest) or only
+    # dots 4-6 (e.g. a bare octave mark, found missing this dot 3 in the
+    # real Bartok fixture's string parts at measure 10), it still gets a
+    # dot 3. Every worked BANA example (33.4/33.4.1/33.4.2/33.4.4/33.4.6)
+    # shows dot 3 present regardless of which sign follows.
+    rest_dots1and3 = '⠍⠀'    # whole rest: dots 1,3,4
+    octave_mark_only = '⠨⠹'  # octave mark: dots 4,6 only
+    prefixes = ensemble_abbrev_prefixes(["Flute", "Violin"], [rest_dots1and3, octave_mark_only])
     assert prefixes[0] == '⠜' + abbrev_to_brl('fl') + '⠄'
-    assert prefixes[1] == '⠜' + abbrev_to_brl('vi')
+    assert prefixes[1] == '⠜' + abbrev_to_brl('vi') + '⠄'
+
+    # Only when the caller has no music info at all (omitted, or an empty
+    # string for a given staff) does a zero-gap staff get no dot 3 --
+    # there's nothing to confirm real content follows.
+    assert ensemble_abbrev_prefixes(["Flute", "Violin"])[1] == '⠜' + abbrev_to_brl('vi')
 
 
 def test_ensemble_instrument_header_has_no_trailing_period_and_spaced_guide_dots():
@@ -487,6 +499,40 @@ def test_measure_repeat_compression_never_applies_to_whole_measure_rests():
     assert '⠶' not in rendered
     # Every measure still shows the whole-rest sign (⠍), not a repeat sign.
     assert rendered.count('⠍') == 3
+
+
+def test_measure_repeat_not_used_across_a_system_break():
+    # BANA Par. 33.4.3: "Very obvious measure or part-measure repeats may
+    # be used when they occur on the same braille line as the original
+    # passage." Three identical measures, with a line_width narrow enough
+    # to force measure 3 onto a new system: measure 2 stays a repeat sign
+    # (same line as measure 1), but measure 3 must braille out in full,
+    # even though it's musically identical -- its "original" is on the
+    # previous (different) braille line.
+    score = OrchestraScore(title="Test")
+    violin = Staff(name="Violin")
+    viola = Staff(name="Viola")
+    for n in [1, 2, 3]:
+        for staff in (violin, viola):
+            m = Measure(number=n)
+            for note_name in ["C", "D", "E", "F"]:
+                m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name=note_name, octave=5, duration=Duration(value=4, dots=0)))
+            staff.add_measure(m)
+    score.add_staff(violin)
+    score.add_staff(viola)
+
+    rendered = BrailleRenderer(line_width=16, compression_level="full").render(score)
+    systems = [s for s in rendered.split("\n\n") if s.strip()]
+    assert len(systems) == 2, "line_width=16 should force measure 3 onto its own system"
+
+    first_system_lines = systems[0].splitlines()
+    second_system_lines = systems[1].splitlines()
+
+    # Measure 2 (same line as measure 1's real content) is a repeat sign.
+    assert any('⠶' in l for l in first_system_lines if l.startswith('⠜'))
+    # Measure 3 (first of a new system) is NOT a repeat sign -- full content.
+    assert not any('⠶' in l for l in second_system_lines if l.startswith('⠜'))
+    assert any('⠨⠹⠱⠫⠻' in l for l in second_system_lines if l.startswith('⠜'))
 
 
 def test_ensemble_renderer_all_staves_tacet_falls_back_to_showing_everything():

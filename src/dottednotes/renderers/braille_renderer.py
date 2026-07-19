@@ -249,11 +249,15 @@ def ensemble_abbrev_prefixes(staff_names: list[str], music_strs: Optional[list[s
     one, so every staff's music still starts at the same column.
 
     The staff(s) already at the widest abbreviation have no gap to fill,
-    so they normally get no dot 3 -- except when the very next cell (the
-    first cell of that staff's own music, from `music_strs`) sets dot 1,
-    2, or 3, which would otherwise read as a continuation of the
-    abbreviation's letters rather than the start of the music; that
-    staff still gets a dot 3 to disambiguate, even with no gap to fill."""
+    but still get a dot 3 whenever the caller knows what comes next
+    (`music_strs`): a real music cell -- whether it sets dots 1-3 (e.g. a
+    note/rest/accidental) or only dots 4-6 (e.g. an octave mark) -- is
+    never blank, and every worked example in BANA 33.4/33.4.1/33.4.2/
+    33.4.4/33.4.6 shows dot 3 present regardless of which sign follows;
+    none of them show a bare abbreviation running straight into music.
+    Only a caller with no music info at all (`music_strs` omitted, or an
+    empty string for a given staff) gets no dot 3 for a zero-gap staff,
+    since there's nothing to confirm real content follows."""
     bare_prefixes = ['⠜' + abbrev_to_brl(staff_abbreviation(name)) for name in staff_names]
     max_len = max((len(p) for p in bare_prefixes), default=0)
     if music_strs is None:
@@ -263,7 +267,7 @@ def ensemble_abbrev_prefixes(staff_names: list[str], music_strs: Optional[list[s
         gap = max_len - len(bare)
         if gap > 0:
             prefixes.append(bare + '⠄' + chr(0x2800) * (gap - 1))
-        elif music_str and (ord(music_str[0]) - 0x2800) & 0x07 != 0:
+        elif music_str:
             prefixes.append(bare + '⠄')
         else:
             prefixes.append(bare)
@@ -348,9 +352,10 @@ class BrailleRenderer:
             for staff in score.staves
         ]
 
+        measure_repeat_originals: dict[tuple[int, int], list] = {}
         if self.compression_level != "none":
             # Pass 2: Measure repeat compression pass
-            self._compress_measure_repeats(score)
+            measure_repeat_originals = self._compress_measure_repeats(score)
 
         # Determine layout type. is_piano is computed first and independent of
         # isinstance(score, OrchestraScore): LilypondParser tags any parsed
@@ -363,7 +368,7 @@ class BrailleRenderer:
         is_ensemble = not is_piano and (isinstance(score, OrchestraScore) or len(score.staves) > 2)
 
         if is_ensemble:
-            return self._render_ensemble(score, rest_only_grid)
+            return self._render_ensemble(score, rest_only_grid, measure_repeat_originals)
         elif is_piano:
             return self._render_piano(score)
         else:
@@ -510,7 +515,12 @@ class BrailleRenderer:
         else:
             return " " * len(prefix) + hand_sign + music_str
 
-    def _render_ensemble(self, score: Score, rest_only_grid: list[list[bool]]) -> str:
+    def _render_ensemble(
+        self,
+        score: Score,
+        rest_only_grid: list[list[bool]],
+        measure_repeat_originals: dict[tuple[int, int], list],
+    ) -> str:
         lines = []
         # Title
         if score.title:
@@ -641,6 +651,21 @@ class BrailleRenderer:
             return staff_lines, prevs, max_prefix_len, measure_widths
 
         while idx < n_measures:
+            # BANA 33.4.3: "Very obvious measure or part-measure repeats
+            # may be used when they occur on the same braille line as the
+            # original passage." `_compress_measure_repeats` ran before
+            # line-breaking was known, so any measure it compressed purely
+            # on musical identity must be restored to its real content
+            # here if it's about to start a new system -- its "original"
+            # is, by construction, always in the previously-committed
+            # system, i.e. a different braille line (the very first
+            # system, idx == 0, has no earlier line to violate this).
+            if idx > 0:
+                for s_idx, staff in enumerate(score.staves):
+                    original = measure_repeat_originals.get((s_idx, idx))
+                    if original is not None:
+                        staff.measures[idx].notes = original
+
             group_size = 1
             best = None
 
@@ -779,7 +804,14 @@ class BrailleRenderer:
                 flat.extend(self._flatten_items_raw(item.items))
         return flat
 
-    def _compress_measure_repeats(self, score: Score) -> None:
+    def _compress_measure_repeats(self, score: Score) -> dict[tuple[int, int], list]:
+        """Replace musically-identical repeated measures with a
+        `MeasureRepeat` sign. Returns a `(staff_index, measure_index) ->
+        original notes` map for every measure this compresses, so a later
+        layout pass (`_render_ensemble`, per BANA 33.4.3) can restore a
+        measure's real content if it turns out to start a new braille
+        line -- this pass runs before line-breaking is known, so it can't
+        make that call itself."""
         import copy
         from dottednotes.models.measure_repeat import MeasureRepeat
 
@@ -790,7 +822,8 @@ class BrailleRenderer:
                 and measure.notes[0].is_full_measure
             )
 
-        for staff in score.staves:
+        original_notes: dict[tuple[int, int], list] = {}
+        for staff_idx, staff in enumerate(score.staves):
             if not staff.measures:
                 continue
             i = 1
@@ -803,7 +836,9 @@ class BrailleRenderer:
                 # rest into a repeat sign, even when it repeats an
                 # identical whole-measure rest.
                 if curr_m.musical_equals(last_non_repeat_measure) and not is_whole_measure_rest(curr_m):
+                    original_notes[(staff_idx, i)] = curr_m.notes
                     curr_m.notes = [MeasureRepeat(count=1, line=1)]
                 else:
                     last_non_repeat_measure = copy.deepcopy(curr_m)
                 i += 1
+        return original_notes
