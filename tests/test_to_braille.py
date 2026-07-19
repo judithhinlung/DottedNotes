@@ -69,6 +69,48 @@ def test_note_and_rest_to_braille():
     assert r.to_braille() == '⠧'
 
 
+def test_full_measure_rest_always_uses_whole_rest_sign_regardless_of_time_signature():
+    # BANA Music Braille Code 2015, Par. 5.1: "A measure of silence is
+    # indicated in the print by a whole rest, whatever the time signature
+    # may be, except that in 4/2 time the double whole rest may sometimes
+    # be found." A full-measure rest in 2/4 time has duration.value == 2
+    # (the "half rest" value musically), but must still braille as the
+    # whole-rest sign (⠍, dots 1,3,4), not the half-rest sign (⠥).
+    for value in (1, 2, 4, 8, 16, 32, 64):
+        r = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=value, dots=0), is_full_measure=True)
+        assert r.to_braille() == '⠍', f"duration.value={value} should still be the whole-rest sign"
+
+    # A non-full-measure rest of the same values is unaffected -- only
+    # is_full_measure changes the rule.
+    assert Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=2, dots=0)).to_braille() == '⠥'
+
+
+def test_full_measure_rest_drops_augmentation_dots():
+    # A full-measure rest's own `duration` (value/dots) only exists to
+    # satisfy the beat count a full measure of that time signature adds
+    # up to -- e.g. a 3/4 measure of rest computes internally to
+    # value=2, dots=1 (a "dotted half", matching LilyPond's R2.), found
+    # via a real 3/4 passage in the Bartok fixture. Since Par. 5.1 fixes
+    # the braille sign regardless of that value, the augmentation dot(s)
+    # must not be added either -- otherwise the rest would still
+    # (wrongly) look like a specific dotted note value.
+    r = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=2, dots=1), is_full_measure=True)
+    assert r.to_braille() == '⠍'
+
+    # A non-full-measure dotted rest is unaffected -- only is_full_measure
+    # suppresses the dot.
+    assert Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=2, dots=1)).to_braille() == '⠥⠄'
+
+
+def test_full_measure_breve_rest_keeps_double_whole_rest_sign():
+    # BANA Par. 5.1's narrow exception: "in 4/2 time the double whole
+    # rest may sometimes be found" -- a genuine breve (duration.value=0)
+    # full-measure rest keeps its own double-whole-rest sign (⠍⠅) rather
+    # than being forced to the plain whole-rest sign.
+    r = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=0, dots=0), is_full_measure=True)
+    assert r.to_braille() == '⠍⠅'
+
+
 def test_chord_to_braille():
     n1 = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(value=4, dots=0))
     n2 = Note(dots=frozenset(), category=None, raw_brl="", note_name="E", octave=4, duration=Duration(value=4, dots=0))

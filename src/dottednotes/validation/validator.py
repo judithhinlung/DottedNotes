@@ -530,7 +530,16 @@ class BANAValidator:
         for i in range(1, n_measures):
             m_prev = staff.measures[i - 1]
             m_curr = staff.measures[i]
-            if m_curr.musical_equals(m_prev):
+            is_whole_measure_rest = (
+                len(m_curr.notes) == 1
+                and isinstance(m_curr.notes[0], Rest)
+                and m_curr.notes[0].is_full_measure
+            )
+            # BANA Par. 18.2: "It is never, however, used to represent a
+            # full measure of rest; the measure rest sign must be used" --
+            # don't suggest a repeat sign for an identical whole-measure
+            # rest, since the renderer will never use one there either.
+            if m_curr.musical_equals(m_prev) and not is_whole_measure_rest:
                 line_num = m_curr.line if m_curr.line > 0 else 1
                 for item in m_curr.notes:
                     note = item.notes[0] if isinstance(item, Chord) else item

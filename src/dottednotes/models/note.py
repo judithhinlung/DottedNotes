@@ -477,7 +477,17 @@ class Rest(BrailleSymbol):
         return self.to_lilypond(), prev_midi
 
     def to_braille(self) -> str:
-        if self.duration.value == 0:
+        if self.is_full_measure:
+            # BANA Music Braille Code 2015, Par. 5.1: "A measure of
+            # silence is indicated in the print by a whole rest, whatever
+            # the time signature may be, except that in 4/2 time the
+            # double whole rest may sometimes be found." The rest sign
+            # for a full measure never varies with that measure's actual
+            # beat count/time signature (e.g. a 2/4 measure of rest is
+            # NOT the half-rest sign) -- only a genuine breve (double
+            # whole) rest in the source keeps its own sign.
+            cell = '⠍⠅' if self.duration.value == 0 else '⠍'
+        elif self.duration.value == 0:
             cell = '⠍⠅'
         elif self.duration.value in (1, 16):
             cell = '⠍'
@@ -489,7 +499,13 @@ class Rest(BrailleSymbol):
             cell = '⠭'
         else:
             raise ValueError(f"Unsupported rest duration: {self.duration.value}")
-        dots = '⠄' * self.duration.dots
+        # A full-measure rest's `duration` (value/dots) only exists to
+        # satisfy the *value* a full measure of that time signature adds
+        # up to (e.g. a 3/4 measure computes to value=2, dots=1 -- a
+        # "dotted half" -- to keep LilyPond's R2. correct); per Par. 5.1
+        # the braille sign is fixed regardless of that value, so no
+        # augmentation dot is added either.
+        dots = '' if self.is_full_measure else '⠄' * self.duration.dots
 
         # Sustain Pedal
         pedal_down_str = ""

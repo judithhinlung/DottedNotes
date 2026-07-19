@@ -782,6 +782,14 @@ class BrailleRenderer:
     def _compress_measure_repeats(self, score: Score) -> None:
         import copy
         from dottednotes.models.measure_repeat import MeasureRepeat
+
+        def is_whole_measure_rest(measure: Measure) -> bool:
+            return (
+                len(measure.notes) == 1
+                and isinstance(measure.notes[0], Rest)
+                and measure.notes[0].is_full_measure
+            )
+
         for staff in score.staves:
             if not staff.measures:
                 continue
@@ -789,7 +797,12 @@ class BrailleRenderer:
             last_non_repeat_measure = copy.deepcopy(staff.measures[0])
             while i < len(staff.measures):
                 curr_m = staff.measures[i]
-                if curr_m.musical_equals(last_non_repeat_measure):
+                # BANA Par. 18.2: "It is never, however, used to
+                # represent a full measure of rest; the measure rest
+                # sign must be used" -- never collapse a whole-measure
+                # rest into a repeat sign, even when it repeats an
+                # identical whole-measure rest.
+                if curr_m.musical_equals(last_non_repeat_measure) and not is_whole_measure_rest(curr_m):
                     curr_m.notes = [MeasureRepeat(count=1, line=1)]
                 else:
                     last_non_repeat_measure = copy.deepcopy(curr_m)

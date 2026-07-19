@@ -431,12 +431,15 @@ def test_ensemble_renderer_omits_staff_tacet_for_an_entire_system():
 
 def test_ensemble_renderer_omits_tacet_staff_even_when_repeated_rests_are_compressed():
     # A staff resting for an entire system's measures is still tacet even
-    # when `compression_level="full"`'s measure-repeat pass has collapsed
-    # those repeated rest measures into MeasureRepeat signs -- which are
-    # not Rest instances, so active_staff_indices must check the
-    # pre-compression rest_only_grid, not the (by-then-compressed)
-    # measure content, or a resting staff whose rests happen to repeat
-    # would wrongly be kept.
+    # under `compression_level="full"`. Full-measure rests are themselves
+    # now precluded from ever compressing to a MeasureRepeat sign (BANA
+    # Par. 18.2 -- see test_measure_repeat_compression_never_applies_to_
+    # whole_measure_rests below), so Flute's rests here stay plain Rest
+    # instances throughout. Violin's identical repeating measures, by
+    # contrast, DO compress to MeasureRepeat signs -- confirming that
+    # active_staff_indices's pre-compression rest_only_grid still
+    # correctly treats a MeasureRepeat (not a Rest instance) as "active"
+    # music, not tacet, for a staff that actually has notes.
     score = OrchestraScore(title="Test")
 
     flute = Staff(name="Flute")
@@ -461,6 +464,29 @@ def test_ensemble_renderer_omits_tacet_staff_even_when_repeated_rests_are_compre
     violin_prefix = '⠜' + abbrev_to_brl('vi')
     assert not any(l.startswith(flute_prefix) for l in lines)
     assert any(l.startswith(violin_prefix) for l in lines)
+    # Violin's measures 2 and 3 are identical to measure 1, so they
+    # compress to the measure-repeat sign (⠶) -- confirming this test
+    # still exercises real post-compression content, not just rests.
+    assert any('⠶' in l for l in lines if l.startswith(violin_prefix))
+
+
+def test_measure_repeat_compression_never_applies_to_whole_measure_rests():
+    # BANA Par. 18.2: "It is never, however, used to represent a full
+    # measure of rest; the measure rest sign must be used." Two
+    # consecutive identical whole-measure rests must never collapse into
+    # a MeasureRepeat sign, unlike identical note measures.
+    score = OrchestraScore(title="Test")
+    staff = Staff(name="Violin")
+    for n in [1, 2, 3]:
+        m = Measure(number=n)
+        m.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+        staff.add_measure(m)
+    score.add_staff(staff)
+
+    rendered = BrailleRenderer(line_width=40, compression_level="full").render(score)
+    assert '⠶' not in rendered
+    # Every measure still shows the whole-rest sign (⠍), not a repeat sign.
+    assert rendered.count('⠍') == 3
 
 
 def test_ensemble_renderer_all_staves_tacet_falls_back_to_showing_everything():

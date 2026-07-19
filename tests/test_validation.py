@@ -5,7 +5,7 @@ from dottednotes.validation.validator import BANAValidator, Correction
 from dottednotes.models.score import Score
 from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
-from dottednotes.models.note import Note
+from dottednotes.models.note import Note, Rest
 from dottednotes.models.duration import Duration
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
 
@@ -219,6 +219,25 @@ def test_validation_measure_repeat():
     repeats = [c for c in result.corrections if c.rule_id == "S9c-measure-repeat"]
     assert len(repeats) == 1
     assert "Measure 2 is identical to measure 1" in repeats[0].message
+
+
+def test_validation_measure_repeat_not_suggested_for_whole_measure_rests():
+    # BANA Par. 18.2: "It is never, however, used to represent a full
+    # measure of rest; the measure rest sign must be used." Two
+    # identical whole-measure rests must not trigger the "consider a
+    # measure repeat sign" suggestion.
+    staff = Staff(name="Violin")
+    for n in [1, 2]:
+        m = Measure(number=n)
+        m.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+        staff.add_measure(m)
+    score = Score(title="T")
+    score.add_staff(staff)
+
+    validator = BANAValidator(profile="strict")
+    result = validator.validate(score)
+    repeats = [c for c in result.corrections if c.rule_id == "S9c-measure-repeat"]
+    assert len(repeats) == 0
 
 
 def _hairpin_note(name, octave, dynamics=None):
