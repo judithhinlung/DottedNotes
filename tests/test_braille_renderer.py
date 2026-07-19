@@ -274,6 +274,50 @@ def test_ensemble_abbrev_prefixes_widest_still_gets_dot_3_on_collision():
     assert prefixes[1] == '⠜' + abbrev_to_brl('vi')
 
 
+def test_ensemble_instrument_header_has_no_trailing_period_and_spaced_guide_dots():
+    # BANA 33.2: instrument names in the header take no trailing period
+    # (unlike the title line, which does) -- and 33.2(d): "Two or more
+    # dot-5 guide dots are inserted to fill out the width of a column
+    # when an instrument name ends three or more cells before the end of
+    # the longest name. One space separates the end of the name and the
+    # beginning of the guide dots." A smaller deficit (here Bassoon,
+    # exactly 1 cell short) is plain blank fill instead. All abbreviation
+    # columns still line up to the same place regardless.
+    #
+    # Encoded name lengths (via encode_literary_braille, minus its
+    # trailing period): "Clarinet"=9 (longest), "Bassoon"=8 (deficit 1),
+    # "Flute"=6 (deficit 3).
+    score = OrchestraScore(title="Trio")
+    for name in ["Clarinet", "Bassoon", "Flute"]:
+        staff = Staff(name=name)
+        m = Measure(number=1)
+        m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=5, duration=Duration(value=4, dots=0)))
+        staff.add_measure(m)
+        score.add_staff(staff)
+
+    rendered = BrailleRenderer(line_width=40, compression_level="none").render(score)
+    lines = rendered.splitlines()
+
+    blank = chr(0x2800)
+    clarinet_line = next(l for l in lines if l.startswith(encode_literary_braille("Clarinet")[:-1]))
+    bassoon_line = next(l for l in lines if l.startswith(encode_literary_braille("Bassoon")[:-1]))
+    flute_line = next(l for l in lines if l.startswith(encode_literary_braille("Flute")[:-1]))
+
+    # No trailing period directly after any name.
+    assert '⠲' not in clarinet_line.split("  ")[0]
+    assert '⠲' not in bassoon_line.split("  ")[0]
+    assert '⠲' not in flute_line.split("  ")[0]
+
+    # Clarinet is the longest: no padding at all before the fixed 2-cell gap.
+    assert clarinet_line == encode_literary_braille("Clarinet")[:-1] + "  " + '⠜' + abbrev_to_brl('cl') + '⠄'
+
+    # Bassoon: deficit of 1 cell -- plain blank, no guide dots.
+    assert bassoon_line == encode_literary_braille("Bassoon")[:-1] + blank + "  " + '⠜' + abbrev_to_brl('b') + '⠄'
+
+    # Flute: deficit of 3 cells -- one blank, then 2 guide dots (dot 5).
+    assert flute_line == encode_literary_braille("Flute")[:-1] + blank + '⠐⠐' + "  " + '⠜' + abbrev_to_brl('fl') + '⠄'
+
+
 def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
     # BANA 33.4: "the first signs of the measures are vertically aligned
     # in all parts" -- a resting staff's short measure must be padded to

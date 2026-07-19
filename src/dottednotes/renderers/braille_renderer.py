@@ -516,16 +516,36 @@ class BrailleRenderer:
         if score.title:
             lines.append(center_line(encode_literary_braille(score.title), self.line_width))
 
-        # Instrument list
-        for staff in score.staves:
+        # Instrument list. BANA 33.2: instrument names take no trailing
+        # period (unlike the title line above, which does) -- strip the
+        # one `encode_literary_braille` always appends, exactly one
+        # trailing character (not `.rstrip('⠲')`: the digit '4' encodes
+        # to that same dots-2,5,6 cell, so an instrument name that
+        # actually ends in "4" -- e.g. "Horn 4" -- would lose that digit
+        # too). The abbreviation column is "left-aligned beginning two
+        # cells beyond the last cell of the longest of the names",
+        # computed here from this score's actual instrument list, not a
+        # fixed width.
+        name_brls = [encode_literary_braille(staff.name)[:-1] for staff in score.staves]
+        max_name_len = max((len(n) for n in name_brls), default=0)
+        blank_cell = chr(0x2800)
+        for staff, name_brl in zip(score.staves, name_brls):
             abbrev = staff_abbreviation(staff.name)
 
-            name_brl = encode_literary_braille(staff.name)
-            if len(name_brl) < 12:
-                padding = '⠐' * (12 - len(name_brl))
+            # BANA 33.2(d): "Two or more dot-5 guide dots are inserted to
+            # fill out the width of a column when an instrument name ends
+            # three or more cells before the end of the longest name. One
+            # space separates the end of the name and the beginning of
+            # the guide dots." A smaller deficit (1-2 cells) is plain
+            # blank fill instead -- not "two or more" guide dots' worth --
+            # but the abbreviation column still lands in the same place
+            # either way.
+            deficit = max_name_len - len(name_brl)
+            if deficit >= 3:
+                padding = blank_cell + '⠐' * (deficit - 1)
             else:
-                padding = ""
-            
+                padding = blank_cell * deficit
+
             abbrev_brl = '⠜' + abbrev_to_brl(abbrev) + '⠄'
             lines.append(name_brl + padding + "  " + abbrev_brl)
 

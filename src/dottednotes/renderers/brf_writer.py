@@ -61,8 +61,12 @@ class BRFWriter:
 
         title_brl = ""
         if score.title:
-            # Strip period terminator for header use
-            title_brl = encode_literary_braille(score.title).rstrip('⠲')
+            # Strip the one trailing period `encode_literary_braille`
+            # always appends, for header use -- exactly one trailing
+            # character, not `.rstrip('⠲')`: the digit '4' encodes to
+            # that same dots-2,5,6 cell, so a title actually ending in
+            # "4" (e.g. "Symphony No. 4") would lose that digit too.
+            title_brl = encode_literary_braille(score.title)[:-1]
 
         # We will iterate through lines and paginate
         # If the page height is exceeded, start a new page
