@@ -7,6 +7,7 @@ from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
 from dottednotes.models.note import Note
 from dottednotes.models.duration import Duration
+from dottednotes.models.dynamic import Dynamic, DynamicLevel
 
 
 def parse_brf(brf_text: str) -> Score:
@@ -218,4 +219,55 @@ def test_validation_measure_repeat():
     repeats = [c for c in result.corrections if c.rule_id == "S9c-measure-repeat"]
     assert len(repeats) == 1
     assert "Measure 2 is identical to measure 1" in repeats[0].message
+
+
+def _hairpin_note(name, octave, dynamics=None):
+    n = Note(dots=frozenset(), category=None, raw_brl="", note_name=name, octave=octave,
+              duration=Duration(value=4))
+    if dynamics:
+        n.dynamics.extend(dynamics)
+    return n
+
+
+def test_validation_hairpin_terminator_omission_reports_reason():
+    # "hairpin-terminator-omission" is informational (severity "info"),
+    # reporting the same decision BrailleRenderer acts on -- confirmed
+    # against MBC-2015 Par. 22.3.3(b)/Table 22(C).
+    staff = Staff(name="Violin")
+    m = Measure(number=1, bar_line_type='final_double_bar')
+    m.add_note(_hairpin_note("C", 5, [Dynamic(level=DynamicLevel.CRESCENDO_START)]))
+    m.add_note(_hairpin_note("D", 5, [Dynamic(level=DynamicLevel.CRESCENDO_END)]))
+    staff.add_measure(m)
+    score = Score(title="T")
+    score.add_staff(staff)
+
+    validator = BANAValidator()
+    result = validator.validate(score)
+    hairpin_corrections = [c for c in result.corrections if c.rule_id == "hairpin-terminator-omission"]
+    assert len(hairpin_corrections) == 1
+    assert hairpin_corrections[0].severity == "info"
+    assert "omitted" in hairpin_corrections[0].message
+    assert "final double bar" in hairpin_corrections[0].message
+
+
+def test_validation_hairpin_terminator_kept_reports_explicit():
+    staff = Staff(name="Violin")
+    m = Measure(number=1, bar_line_type='measure_separator')
+    m.add_note(_hairpin_note("C", 5, [Dynamic(level=DynamicLevel.CRESCENDO_START)]))
+    m.add_note(_hairpin_note("D", 5, [Dynamic(level=DynamicLevel.CRESCENDO_END)]))
+    m.add_note(_hairpin_note("E", 5))
+    staff.add_measure(m)
+    score = Score(title="T")
+    score.add_staff(staff)
+
+    validator = BANAValidator()
+    result = validator.validate(score)
+    hairpin_corrections = [c for c in result.corrections if c.rule_id == "hairpin-terminator-omission"]
+    assert len(hairpin_corrections) == 1
+    assert "brailled explicitly" in hairpin_corrections[0].message
+
+
+def test_validation_hairpin_terminator_omission_in_both_profiles():
+    assert "hairpin-terminator-omission" in BANAValidator(profile="standard").enabled_rules
+    assert "hairpin-terminator-omission" in BANAValidator(profile="strict").enabled_rules
 

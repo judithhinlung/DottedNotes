@@ -13,6 +13,8 @@ from dottednotes.models.in_accord import InAccord
 from dottednotes.models.tremolo import RepeatedTremolo
 from dottednotes.models.tuplet import Tuplet
 from dottednotes.models.accidental import AccidentalType
+from dottednotes.models.dynamic import DynamicLevel
+from dottednotes.renderers.braille_renderer import hairpin_terminator_decisions
 
 
 @dataclass
@@ -79,11 +81,25 @@ RULE_REGISTRY: dict[str, Rule] = {
         description="Verify centering of title, formatting of running heads, indentation of signature lines, heading spacing and parallel blank lines.",
         citation="MBC 2015, see docs/bana_reference.md for per-rule section citations"
     ),
+    "hairpin-terminator-omission": Rule(
+        rule_id="hairpin-terminator-omission",
+        name="Hairpin Terminator Omission",
+        description=(
+            "Reports, for each crescendo/decrescendo hairpin, whether its "
+            "terminating sign was omitted by BrailleRenderer and why "
+            "(another dynamic, an extensive rest, or a final double bar "
+            "immediately follows) -- informational, not a correction; "
+            "confirmed directly against the MBC-2015 PDF text of Par. "
+            "22.3.3(b) and Table 22(C), not just a secondary source."
+        ),
+        citation="MBC 2015 Par. 22.3.3(b), Table 22(C)",
+        default_severity="info",
+    ),
 }
 
 VALIDATION_PROFILES: dict[str, list[str]] = {
-    "standard": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S11c-2"],
-    "strict": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S9c-redundant-accidental", "S9c-measure-repeat", "S11c-2"],
+    "standard": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S11c-2", "hairpin-terminator-omission"],
+    "strict": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S9c-redundant-accidental", "S9c-measure-repeat", "S11c-2", "hairpin-terminator-omission"],
 }
 
 
@@ -160,6 +176,10 @@ class BANAValidator:
             # Rule S9c-measure-repeat
             if "S9c-measure-repeat" in self.enabled_rules:
                 corrections.extend(self._validate_measure_repeats(staff))
+
+            # Rule hairpin-terminator-omission
+            if "hairpin-terminator-omission" in self.enabled_rules:
+                corrections.extend(self._validate_hairpin_terminator_omission(staff))
 
             voices = self._get_staff_voices(staff)
             for voice in voices:
@@ -524,6 +544,37 @@ class BANAValidator:
                     severity="warning",
                     rule_id="S9c-measure-repeat"
                 ))
+        return corrections
+
+    def _validate_hairpin_terminator_omission(self, staff: Staff) -> list[Correction]:
+        """Informational report of `hairpin_terminator_decisions()`'s
+        findings for this staff -- not a correction to make, just
+        transparency about which hairpin terminators `BrailleRenderer`
+        will drop (and why) versus braille explicitly. See that function's
+        docstring for the MBC-2015 Par. 22.3.3(b) citation."""
+        corrections = []
+        reason_text = {
+            "another_dynamic": "another dynamic immediately follows",
+            "extensive_rest": "an extensive rest immediately follows",
+            "final_double_bar": "a final double bar immediately follows",
+        }
+        for decision in hairpin_terminator_decisions(staff):
+            line_num = decision.note.parsed_tokens[0].line if decision.note.parsed_tokens else 0
+            kind = "crescendo" if decision.dynamic.level == DynamicLevel.CRESCENDO_END else "decrescendo"
+            if decision.omit:
+                message = (
+                    f"Hairpin terminator for this {kind} omitted: "
+                    f"{reason_text[decision.reason]}."
+                )
+            else:
+                message = f"Hairpin terminator for this {kind} will be brailled explicitly."
+            corrections.append(Correction(
+                line_number=line_num,
+                measure_number=decision.measure_number,
+                message=message,
+                severity="info",
+                rule_id="hairpin-terminator-omission",
+            ))
         return corrections
 
     def _validate_slur_matching(self, voice: list[tuple[Any, int]]) -> list[Correction]:

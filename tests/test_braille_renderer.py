@@ -5,7 +5,17 @@ from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
 from dottednotes.models.note import Note, Rest
 from dottednotes.models.duration import Duration
-from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefix, encode_literary_braille, abbrev_to_brl, wrap_run_over_line, pad_to_boundary, staff_abbreviation
+from dottednotes.models.dynamic import Dynamic, DynamicLevel
+from dottednotes.models.fingering import Fingering
+from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefixes, encode_literary_braille, abbrev_to_brl, wrap_run_over_line, pad_to_boundary, staff_abbreviation, hairpin_terminator_decisions
+
+
+def _hairpin_note(name, octave, dynamics=None, **kwargs):
+    n = Note(dots=frozenset(), category=None, raw_brl="", note_name=name, octave=octave,
+              duration=Duration(value=4), **kwargs)
+    if dynamics:
+        n.dynamics.extend(dynamics)
+    return n
 
 
 def test_solo_renderer():
@@ -183,8 +193,7 @@ def test_ensemble_renderer_measure_numbers_alignment():
     # above it (so a leading octave mark gets skipped, landing on the
     # note; with no octave mark, the offset still applies).
     slice_strs, _ = render_measure_slice(s1.measures, 0, len(s1.measures), None, s1.time_signature, "none")
-    music_str = "".join(slice_strs)
-    col = len(ensemble_abbrev_prefix(s1.name, music_str))
+    col = len(ensemble_abbrev_prefixes([s1.name])[0])
     # Each interior measure boundary is a fixed table column: the widest
     # rendering of that measure across staves, plus a 2-cell gap (BANA
     # 33.4) -- both staves render identically here, so that's just this
@@ -234,6 +243,37 @@ def test_staff_abbreviation_resolves_plural_section_names_to_table_29():
     assert staff_abbreviation("Horns in F I/II") == "ho"
 
 
+def test_ensemble_abbrev_prefixes_adds_dot_3_only_where_a_gap_remains():
+    # BANA 33.4: "the music of each line begins one space beyond the end
+    # of the longest abbreviation"; BANA 33.4.1: "the signature
+    # immediately follows the dot 3 that terminates the abbreviation" --
+    # a shorter abbreviation gets a dot 3 right after its own letters,
+    # marking where it ends before the blank filler that aligns it with
+    # the widest abbreviation in the system. The staff already at that
+    # widest length has no gap to fill, so it gets no dot 3 at all.
+    prefixes = ensemble_abbrev_prefixes(["Flute", "Bass clarinet"])
+    assert prefixes == ['⠜' + abbrev_to_brl('fl') + '⠄', '⠜' + abbrev_to_brl('bcl')]
+    # Both prefixes end up the same width, so music still starts aligned.
+    assert len(prefixes[0]) == len(prefixes[1])
+
+    # Two abbreviations of equal length: neither has a gap, so neither
+    # gets a dot 3 -- there's nothing for it to terminate before.
+    tied_prefixes = ensemble_abbrev_prefixes(["Flute", "Violin"])
+    assert tied_prefixes == ['⠜' + abbrev_to_brl('fl'), '⠜' + abbrev_to_brl('vi')]
+
+
+def test_ensemble_abbrev_prefixes_widest_still_gets_dot_3_on_collision():
+    # A staff at the widest abbreviation has no padding gap to fill, but
+    # if its own music's first cell sets dot 1, 2, or 3, it would read as
+    # a continuation of the abbreviation's letters rather than the start
+    # of the music -- so it still gets a dot 3 even with no gap.
+    colliding_music = '⠍⠀'  # whole rest: dots 1,3,4 -- sets dot 1 and 3
+    plain_music = '⠨⠹'      # octave mark: dots 4,6 only -- no collision
+    prefixes = ensemble_abbrev_prefixes(["Flute", "Violin"], [colliding_music, plain_music])
+    assert prefixes[0] == '⠜' + abbrev_to_brl('fl') + '⠄'
+    assert prefixes[1] == '⠜' + abbrev_to_brl('vi')
+
+
 def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
     # BANA 33.4: "the first signs of the measures are vertically aligned
     # in all parts" -- a resting staff's short measure must be padded to
@@ -268,9 +308,14 @@ def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
     rendered = BrailleRenderer(line_width=40, compression_level="none").render(score)
     lines = rendered.splitlines()
 
-    heading = next(l for l in lines if l.startswith('     ⠼'))
     flute_line = next(l for l in lines if l.startswith('⠜' + abbrev_to_brl('fl')))
     violin_line = next(l for l in lines if l.startswith('⠜' + abbrev_to_brl('vi')))
+    # The heading (measure-number free line) is the line directly above
+    # the top (Flute) staff line -- found this way rather than guessing
+    # its indent, since Flute's own abbreviation dot 3 (BANA 33.4.1) here
+    # depends on whether its first music cell (a whole-measure rest) sets
+    # dots 1-3, not just on the abbreviation-length comparison with Violin.
+    heading = lines[lines.index(flute_line) - 1]
 
     # Both staves' second measure must start at the same column. Flute's
     # own measure-2 content starts with its octave mark (⠨, dot 4-6 --
@@ -463,3 +508,164 @@ def test_ensemble_renderer_splits_overlong_measure_into_run_over_lines():
     assert all(len(l) <= 20 for l in lines)
     flute_lines = [l for l in lines if l.startswith('⠜' + abbrev_to_brl('fl')) or l.startswith("  ")]
     assert any(l.endswith('⠐') for l in flute_lines)
+
+
+# --- Hairpin (crescendo/decrescendo) terminator omission -------------------
+#
+# BANA Music Braille Code 2015, Par. 22.3.3(b) (confirmed directly against
+# the primary PDF text, not just a secondary source): the "lowered C"/
+# "lowered D" sign terminating a hairpin may be omitted when the marking
+# is immediately followed by another dynamic, an extensive rest, or a
+# *final* double bar -- narrower than "any barline", which is why (i)
+# below has two halves.
+
+def _one_measure_hairpin_staff(bar_line_type='measure_separator'):
+    """A single-measure Violin staff: a crescendo start on beat 1, its
+    end on beat 2 -- the minimal one-note-to-note-interval hairpin span
+    from the bug report."""
+    staff = Staff(name="Violin")
+    m = Measure(number=1, bar_line_type=bar_line_type)
+    m.add_note(_hairpin_note("C", 5, [Dynamic(level=DynamicLevel.CRESCENDO_START)]))
+    m.add_note(_hairpin_note("D", 5, [Dynamic(level=DynamicLevel.CRESCENDO_END)]))
+    staff.add_measure(m)
+    return staff, m
+
+
+def test_hairpin_terminator_kept_before_an_ordinary_barline():
+    # (i, part 1) An ordinary mid-piece barline is NOT one of Par.
+    # 22.3.3(b)'s three listed conditions -- only a *final* double bar
+    # is. More music follows in measure 2, so the terminator must stay.
+    staff, m1 = _one_measure_hairpin_staff(bar_line_type='measure_separator')
+    m2 = Measure(number=2)
+    m2.add_note(_hairpin_note("E", 5))
+    staff.add_measure(m2)
+
+    decisions = hairpin_terminator_decisions(staff)
+    assert len(decisions) == 1
+    assert decisions[0].omit is False
+    assert decisions[0].reason == ""
+
+
+def test_hairpin_terminator_omitted_before_a_final_double_bar():
+    # (i, part 2) The hairpin's last note is also the last note of the
+    # piece, in a measure whose bar line is a *final* double bar --
+    # exactly the "final double bar" condition in Par. 22.3.3(b).
+    staff, m1 = _one_measure_hairpin_staff(bar_line_type='final_double_bar')
+
+    decisions = hairpin_terminator_decisions(staff)
+    assert len(decisions) == 1
+    assert decisions[0].omit is True
+    assert decisions[0].reason == "final_double_bar"
+
+
+def test_hairpin_terminator_kept_when_more_notes_follow_in_the_same_phrase():
+    # (ii) Short hairpin followed by more plain notes in the same
+    # phrase -- none of Par. 22.3.3(b)'s three conditions apply, so the
+    # terminator must still be brailled.
+    staff, m1 = _one_measure_hairpin_staff(bar_line_type='measure_separator')
+    m1.add_note(_hairpin_note("E", 5))
+    m1.add_note(_hairpin_note("F", 5))
+
+    decisions = hairpin_terminator_decisions(staff)
+    assert len(decisions) == 1
+    assert decisions[0].omit is False
+    assert decisions[0].reason == ""
+
+
+def test_hairpin_terminator_omitted_before_another_dynamic():
+    staff, m1 = _one_measure_hairpin_staff(bar_line_type='measure_separator')
+    m1.add_note(_hairpin_note("E", 5, [Dynamic(level=DynamicLevel.MF)]))
+
+    decisions = hairpin_terminator_decisions(staff)
+    assert decisions[0].omit is True
+    assert decisions[0].reason == "another_dynamic"
+
+
+def test_hairpin_terminator_omitted_before_an_extensive_rest():
+    staff, m1 = _one_measure_hairpin_staff(bar_line_type='measure_separator')
+    m2 = Measure(number=2)
+    m2.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+    staff.add_measure(m2)
+
+    decisions = hairpin_terminator_decisions(staff)
+    assert decisions[0].omit is True
+    assert decisions[0].reason == "extensive_rest"
+
+    # A brief (non-"extensive") rest, by contrast, doesn't qualify.
+    staff2, _ = _one_measure_hairpin_staff(bar_line_type='measure_separator')
+    m2b = Measure(number=2)
+    m2b.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=8, dots=0)))
+    staff2.add_measure(m2b)
+    decisions2 = hairpin_terminator_decisions(staff2)
+    assert decisions2[0].omit is False
+
+
+def test_hairpin_decision_unaffected_by_a_coincident_tempo_word():
+    # (iii) A tempo word (e.g. "rit.") on the same measure as the hairpin
+    # is a free-standing TextMarking, not part of the note sequence
+    # `hairpin_terminator_decisions` walks -- it must not change the
+    # omission decision either way.
+    from dottednotes.models.text_marking import TextMarking, TextMarkingType
+
+    staff, m1 = _one_measure_hairpin_staff(bar_line_type='measure_separator')
+    m1.text_markings.append(TextMarking(text="rit.", type=TextMarkingType.TEMPO))
+    m1.add_note(_hairpin_note("E", 5))
+
+    decisions = hairpin_terminator_decisions(staff)
+    assert len(decisions) == 1
+    assert decisions[0].omit is False
+
+    # Rendering with the tempo word present must not crash and must still
+    # braille the terminator explicitly (kept, per the decision above).
+    score = Score(title="T")
+    score.add_staff(staff)
+    rendered = BrailleRenderer(line_width=40, compression_level="none").render(score)
+    assert '⠜⠒' in rendered  # crescendo-end ("lowered C") still present
+
+
+def test_hairpin_terminator_follows_tie_slur_and_fingering_when_kept():
+    # (iv) Par. 22.3.3(b): a hairpin terminator that IS brailled "is
+    # brailled after the last affected note and a fingering, interval
+    # mark, slur, or tie" -- confirm Note.to_braille()'s existing sign
+    # ordering still holds once a terminator survives the new omission
+    # pass (nothing here should reorder those signs).
+    staff = Staff(name="Violin")
+    m1 = Measure(number=1, bar_line_type='measure_separator')
+    m1.add_note(_hairpin_note("C", 5, [Dynamic(level=DynamicLevel.CRESCENDO_START)]))
+    terminating_note = _hairpin_note(
+        "D", 5, [Dynamic(level=DynamicLevel.CRESCENDO_END)],
+        tie=True, slur_start=True,
+        fingerings=[Fingering(dots=frozenset(), category=None, raw_brl="", finger=2)],
+    )
+    m1.add_note(terminating_note)
+    m2 = Measure(number=2)
+    m2.add_note(_hairpin_note("E", 5))  # keeps the terminator (no omission)
+    staff.add_measure(m1)
+    staff.add_measure(m2)
+
+    decisions = hairpin_terminator_decisions(staff)
+    assert decisions[0].omit is False
+
+    rendered_note = terminating_note.to_braille(prev_note=_hairpin_note("C", 5))
+    assert rendered_note == '⠱⠃⠈⠉⠉⠜⠒'  # note + finger 2 + tie + slur_start + terminator
+    fingering_pos = rendered_note.index('⠃')     # finger 2
+    tie_pos = rendered_note.index('⠈⠉')
+    slur_pos = rendered_note.rindex('⠉')          # slur_start cell ('⠉' alone)
+    terminator_pos = rendered_note.index('⠜⠒')
+    assert fingering_pos < tie_pos < terminator_pos
+    assert slur_pos < terminator_pos
+
+
+def test_hairpin_omission_override_flag_keeps_terminator_explicit():
+    # Config/override: a caller that wants every hairpin terminator
+    # brailled regardless of what follows can disable the pass entirely.
+    staff, m1 = _one_measure_hairpin_staff(bar_line_type='final_double_bar')
+    score = Score(title="T")
+    score.add_staff(staff)
+
+    omitted = BrailleRenderer(line_width=40, compression_level="none",
+                               omit_redundant_hairpin_terminators=True).render(score)
+    kept = BrailleRenderer(line_width=40, compression_level="none",
+                            omit_redundant_hairpin_terminators=False).render(score)
+    assert '⠜⠒' not in omitted
+    assert '⠜⠒' in kept

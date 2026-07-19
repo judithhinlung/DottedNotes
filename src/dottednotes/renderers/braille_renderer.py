@@ -1,11 +1,113 @@
 import re
+from dataclasses import dataclass
 from typing import Optional, Union, Any
 from dottednotes.models.score import Score
 from dottednotes.models.orchestra_score import OrchestraScore
 from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
 from dottednotes.models.note import Note, Rest
+from dottednotes.models.chord import Chord
+from dottednotes.models.tuplet import Tuplet
+from dottednotes.models.in_accord import InAccord
+from dottednotes.models.dynamic import Dynamic, DynamicLevel
 from dottednotes.bana_symbols import TABLE_29_ENGLISH
+
+_HAIRPIN_END_LEVELS = (DynamicLevel.CRESCENDO_END, DynamicLevel.DECRESCENDO_END)
+
+
+def _hairpin_effective_note(item: Any) -> Optional[Note]:
+    """The Note that dynamics attach to for a given measure item: the
+    item itself if it's a Note, or a Chord's written note (`notes[0]`,
+    where `musicxml_parser.translate_measure` puts a chord's dynamics).
+    Rests never carry dynamics (see braille_parser.py); anything else
+    (Tuplet, InAccord) is handled by the flattening step below, not here."""
+    if isinstance(item, Note):
+        return item
+    if isinstance(item, Chord) and item.notes:
+        return item.notes[0]
+    return None
+
+
+def _flatten_staff_for_hairpins(staff: Staff) -> list[tuple[Any, Measure]]:
+    """Flatten a staff's measures into a single ordered (item, measure)
+    sequence, drilling into Tuplet groups and (taking the first part of)
+    InAccord passages, so hairpin-termination decisions can look at
+    "the very next item" across tuplet/measure boundaries without
+    duplicating BANAValidator's own (differently-shaped) voice-flattening."""
+    flat: list[tuple[Any, Measure]] = []
+
+    def add_items(items: list, measure: Measure) -> None:
+        for item in items:
+            if isinstance(item, Tuplet):
+                add_items(item.items, measure)
+            elif isinstance(item, InAccord) and item.parts:
+                add_items(item.parts[0], measure)
+            else:
+                flat.append((item, measure))
+
+    for measure in staff.measures:
+        add_items(measure.notes, measure)
+    return flat
+
+
+@dataclass
+class HairpinTerminatorDecision:
+    """Whether one hairpin-end `Dynamic` (CRESCENDO_END/DECRESCENDO_END)
+    should be omitted, and why. Shared by `BrailleRenderer` (to actually
+    drop it) and `BANAValidator` (to report which reason applied) so the
+    two can't drift apart -- neither mutates the `staff` passed in."""
+    note: Note
+    dynamic: Dynamic
+    measure_number: int
+    omit: bool
+    reason: str  # "another_dynamic" | "extensive_rest" | "final_double_bar" | ""
+
+
+def hairpin_terminator_decisions(staff: Staff) -> list[HairpinTerminatorDecision]:
+    """BANA Music Braille Code 2015, Par. 22.3.3(b) -- confirmed directly
+    against the primary PDF text (Table 22(C)'s ">3"/">4" signs, which
+    decode letter-for-letter to this codebase's existing `crescendo_end`/
+    `decrescendo_end` cells): "A 'lowered C' >3 or 'lowered D' >4 sign
+    that indicates the termination of a hairpin may be omitted if the
+    marking is immediately followed by some definite mark of conclusion
+    or contradiction such as another dynamic, an extensive rest, or a
+    final double bar." Note this is narrower than an ordinary mid-piece
+    barline: only a *final* double bar (the actual end of the piece or a
+    major section) qualifies, not every measure separator.
+
+    Returns one decision per hairpin-end dynamic found in this staff, in
+    score order.
+    """
+    flat = _flatten_staff_for_hairpins(staff)
+    decisions: list[HairpinTerminatorDecision] = []
+
+    for idx, (item, measure) in enumerate(flat):
+        note = _hairpin_effective_note(item)
+        if note is None or not note.dynamics:
+            continue
+        for dyn in note.dynamics:
+            if dyn.level not in _HAIRPIN_END_LEVELS:
+                continue
+
+            omit = False
+            reason = ""
+            if idx + 1 < len(flat):
+                next_item, _next_measure = flat[idx + 1]
+                if isinstance(next_item, Rest) and (next_item.is_full_measure or next_item.multi_measure_count > 1):
+                    omit, reason = True, "extensive_rest"
+                else:
+                    next_note = _hairpin_effective_note(next_item)
+                    if next_note is not None and any(d.level not in _HAIRPIN_END_LEVELS for d in next_note.dynamics):
+                        omit, reason = True, "another_dynamic"
+            elif measure.bar_line_type == 'final_double_bar':
+                omit, reason = True, "final_double_bar"
+
+            decisions.append(HairpinTerminatorDecision(
+                note=note, dynamic=dyn, measure_number=measure.number,
+                omit=omit, reason=reason,
+            ))
+
+    return decisions
 
 _INT_TO_LITERARY_DIGIT = {
     1: '⠁', 2: '⠃', 3: '⠉', 4: '⠙', 5: '⠑', 6: '⠋', 7: '⠛', 8: '⠓', 9: '⠊', 0: '⠚'
@@ -136,15 +238,36 @@ def wrap_run_over_line(line: str, width: int) -> list[str]:
     return result
 
 
-def ensemble_abbrev_prefix(staff_name: str, music_str: str) -> str:
-    """Build the '⠜XX' staff-abbreviation prefix for an ensemble system
-    line, appending the ⠄ separator when the line's first cell would
-    otherwise run into the abbreviation (same rule as the instrument-list
-    header)."""
-    prefix = '⠜' + abbrev_to_brl(staff_abbreviation(staff_name))
-    if music_str and (ord(music_str[0]) - 0x2800) & 0x07 != 0:
-        prefix += '⠄'
-    return prefix
+def ensemble_abbrev_prefixes(staff_names: list[str], music_strs: Optional[list[str]] = None) -> list[str]:
+    """Build the '⠜XX' abbreviation prefixes for one system's staff lines,
+    aligned to a common column (BANA 33.4: "the music of each line begins
+    one space beyond the end of the longest abbreviation"). A staff whose
+    abbreviation is shorter than the widest one in this group gets a dot 3
+    (BANA 33.4.1: "the dot 3 that terminates the abbreviation") right
+    after its abbreviation, then blank cells for the rest of the gap --
+    the dot 3 takes up the first blank cell rather than adding an extra
+    one, so every staff's music still starts at the same column.
+
+    The staff(s) already at the widest abbreviation have no gap to fill,
+    so they normally get no dot 3 -- except when the very next cell (the
+    first cell of that staff's own music, from `music_strs`) sets dot 1,
+    2, or 3, which would otherwise read as a continuation of the
+    abbreviation's letters rather than the start of the music; that
+    staff still gets a dot 3 to disambiguate, even with no gap to fill."""
+    bare_prefixes = ['⠜' + abbrev_to_brl(staff_abbreviation(name)) for name in staff_names]
+    max_len = max((len(p) for p in bare_prefixes), default=0)
+    if music_strs is None:
+        music_strs = [""] * len(staff_names)
+    prefixes = []
+    for bare, music_str in zip(bare_prefixes, music_strs):
+        gap = max_len - len(bare)
+        if gap > 0:
+            prefixes.append(bare + '⠄' + chr(0x2800) * (gap - 1))
+        elif music_str and (ord(music_str[0]) - 0x2800) & 0x07 != 0:
+            prefixes.append(bare + '⠄')
+        else:
+            prefixes.append(bare)
+    return prefixes
 
 
 def pad_to_boundary(text: str, width: int) -> str:
@@ -184,10 +307,21 @@ def render_measure_slice(
 
 
 class BrailleRenderer:
-    def __init__(self, line_width: int = 40, show_measure_numbers: bool = True, compression_level: str = "full"):
+    def __init__(
+        self,
+        line_width: int = 40,
+        show_measure_numbers: bool = True,
+        compression_level: str = "full",
+        omit_redundant_hairpin_terminators: bool = True,
+    ):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
         self.compression_level = compression_level
+        # BANA 22.3.3(b): override/disable if a caller wants every hairpin
+        # terminator brailled explicitly regardless of what follows it --
+        # independent of `compression_level`, since this is a transcription
+        # rule rather than one of the optional space-saving passes below.
+        self.omit_redundant_hairpin_terminators = omit_redundant_hairpin_terminators
 
     def render(self, score: Score) -> str:
         if not score.staves:
@@ -195,6 +329,9 @@ class BrailleRenderer:
 
         import copy
         score = copy.deepcopy(score)
+
+        if self.omit_redundant_hairpin_terminators:
+            self._omit_redundant_hairpin_terminators(score)
 
         if self.compression_level != "none":
             # Pass 1: Articulation carry shorthand pass
@@ -452,10 +589,10 @@ class BrailleRenderer:
                 slices.append(slice_strs)
                 prevs.append(tmp_prev)
 
-            prefixes = [
-                ensemble_abbrev_prefix(score.staves[s].name, "".join(slices[k]))
-                for k, s in enumerate(active)
-            ]
+            prefixes = ensemble_abbrev_prefixes(
+                [score.staves[s].name for s in active],
+                ["".join(slice_strs) for slice_strs in slices],
+            )
             max_prefix_len = max(len(p) for p in prefixes)
 
             # Every measure but the last in the system is a fixed table
@@ -529,6 +666,18 @@ class BrailleRenderer:
             idx += fit_size
 
         return "\n".join(lines) + "\n"
+
+    def _omit_redundant_hairpin_terminators(self, score: Score) -> None:
+        """Apply `hairpin_terminator_decisions()` to the (already
+        deep-copied) score: drop each hairpin-end `Dynamic` it flags as
+        omittable. Mirrors the other rendering-time passes here (mutates
+        in place, doesn't touch the caller's original `score`)."""
+        for staff in score.staves:
+            for decision in hairpin_terminator_decisions(staff):
+                if decision.omit:
+                    decision.note.dynamics = [
+                        d for d in decision.note.dynamics if d is not decision.dynamic
+                    ]
 
     def _compress_articulations(self, score: Score) -> None:
         from dottednotes.models.note import Note, Rest
