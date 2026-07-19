@@ -199,6 +199,19 @@ class BrailleRenderer:
         if self.compression_level != "none":
             # Pass 1: Articulation carry shorthand pass
             self._compress_articulations(score)
+
+        # BANA 33.1's tacet-staff omission (see active_staff_indices in
+        # _render_ensemble) needs to know whether a measure's *real*
+        # content is a bare rest -- captured here, before the measure-repeat
+        # pass below overwrites a repeated rest measure's notes with a
+        # MeasureRepeat sign, which is not itself a Rest instance and would
+        # otherwise be mistaken for "has music to play".
+        rest_only_grid = [
+            [all(isinstance(item, Rest) for item in m.notes) for m in staff.measures]
+            for staff in score.staves
+        ]
+
+        if self.compression_level != "none":
             # Pass 2: Measure repeat compression pass
             self._compress_measure_repeats(score)
 
@@ -213,7 +226,7 @@ class BrailleRenderer:
         is_ensemble = not is_piano and (isinstance(score, OrchestraScore) or len(score.staves) > 2)
 
         if is_ensemble:
-            return self._render_ensemble(score)
+            return self._render_ensemble(score, rest_only_grid)
         elif is_piano:
             return self._render_piano(score)
         else:
@@ -360,7 +373,7 @@ class BrailleRenderer:
         else:
             return " " * len(prefix) + hand_sign + music_str
 
-    def _render_ensemble(self, score: Score) -> str:
+    def _render_ensemble(self, score: Score, rest_only_grid: list[list[bool]]) -> str:
         lines = []
         # Title
         if score.title:
@@ -411,12 +424,15 @@ class BrailleRenderer:
             # instrument that has only rests in those measures is omitted
             # from the parallel." A staff qualifies as active for this
             # candidate system only if at least one of its measures in the
-            # range has something other than a bare rest.
+            # range has something other than a bare rest -- checked against
+            # rest_only_grid (captured before measure-repeat compression),
+            # not the current score's notes, since a run of repeated rest
+            # measures is by then a MeasureRepeat sign, not a Rest.
             active = [
-                s_idx for s_idx, staff in enumerate(score.staves)
+                s_idx for s_idx in range(n_staves)
                 if any(
-                    any(not isinstance(item, Rest) for item in m.notes)
-                    for m in staff.measures[idx:idx + group_size]
+                    not rest_only_grid[s_idx][m_idx]
+                    for m_idx in range(idx, idx + group_size)
                 )
             ]
             # A measure range where every staff is tacet can't happen in

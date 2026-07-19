@@ -340,6 +340,40 @@ def test_ensemble_renderer_omits_staff_tacet_for_an_entire_system():
     assert any(l.startswith(violin_prefix) for l in second_system_lines)
 
 
+def test_ensemble_renderer_omits_tacet_staff_even_when_repeated_rests_are_compressed():
+    # A staff resting for an entire system's measures is still tacet even
+    # when `compression_level="full"`'s measure-repeat pass has collapsed
+    # those repeated rest measures into MeasureRepeat signs -- which are
+    # not Rest instances, so active_staff_indices must check the
+    # pre-compression rest_only_grid, not the (by-then-compressed)
+    # measure content, or a resting staff whose rests happen to repeat
+    # would wrongly be kept.
+    score = OrchestraScore(title="Test")
+
+    flute = Staff(name="Flute")
+    for n in [1, 2, 3]:
+        m = Measure(number=n)
+        m.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+        flute.add_measure(m)
+    score.add_staff(flute)
+
+    violin = Staff(name="Violin")
+    for n in [1, 2, 3]:
+        m = Measure(number=n)
+        for note_name in ["C", "D", "E", "F"]:
+            m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name=note_name, octave=5, duration=Duration(value=4, dots=0)))
+        violin.add_measure(m)
+    score.add_staff(violin)
+
+    rendered = BrailleRenderer(line_width=40, compression_level="full").render(score)
+    lines = rendered.splitlines()
+
+    flute_prefix = '⠜' + abbrev_to_brl('fl')
+    violin_prefix = '⠜' + abbrev_to_brl('vi')
+    assert not any(l.startswith(flute_prefix) for l in lines)
+    assert any(l.startswith(violin_prefix) for l in lines)
+
+
 def test_ensemble_renderer_all_staves_tacet_falls_back_to_showing_everything():
     # A measure range where every staff is tacet simultaneously can't
     # happen in real orchestral music (nothing would be there to
