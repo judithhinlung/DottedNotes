@@ -7221,6 +7221,10 @@ to be rediscovered.
 - [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
 - [ ] S11c-7: Teach `BrailleRenderer`/`Rest.to_braille()` to emit BANA's compact multi-measure-rest sign (Table 18) for a run of consecutive full-measure rests, instead of one whole-rest cell per measure -- found while working S10b-7; affects BRF round-trip, LilyPond import, and MusicXML import equally, not source-specific. Needs a design decision on how a merged run interacts with `_render_solo`/`_render_piano`/`_render_ensemble`'s per-measure line-packing and measure-number prefixing, alongside the existing `_compress_articulations`/`_compress_measure_repeats` passes.
 
+**Sprint 12: OMR Import via Audiveris (shelved 2026-07-19 -- see tickets)**
+- [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step (CLI + web backend)
+- [Shelved] S12-2: Surface an OMR/MusicXML quality report in the web UI, alongside the existing BANA and LilyPond compile reports
+
 ---
 
 ### [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
@@ -7370,6 +7374,72 @@ to be rediscovered.
 - [x] Consecutive piano parallel systems are not separated by blank lines.
 - [x] All unit and integration tests pass.
 
+---
+
+### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
+
+**Why shelved:** Audiveris is a JVM-based OMR engine with a much heavier runtime footprint than anything else this project shells out to (see the original ticket's point 2) -- running it in the hosted web UI would require upgrading Render past the Starter plan. Shelved 2026-07-19 to avoid that cost for now, not because the design is wrong. Revisit if/when a higher-tier plan is worth it, or if a lighter-weight OMR engine becomes viable (oemer was evaluated as an alternative the same day and rejected too -- no native PDF support, weak grand-staff/piano handling, no lyrics OCR, no confidence signal -- see chat history/session notes rather than a second shelved ticket here).
+
+<details>
+<summary>Original ticket text</summary>
+
+**Why:** Blind composers currently can't transcribe a score that only exists as a printed/scanned PDF -- they need a sighted collaborator to re-enter it by hand first. Audiveris (an open-source, actively maintained OMR engine) can recognize a PDF and export MusicXML, which this project's existing `musicxml_parser.py`/`load_musicxml()` already consumes unmodified, so this is an *import*-side addition, not a new transcription target. Audiveris was chosen over PlayScore 2 specifically because it has a real headless CLI (`-batch -export`), is free with no restriction on the output, and fits the subprocess pattern this codebase already uses for `lilypond` (`cli.py`'s `_compile_with_lilypond()` / `web.py`'s `compile_with_lilypond()`).
+
+Two things must not get lost in implementation:
+1. **Accuracy is the real risk, not the subprocess call.** Audiveris' own published error rate is ~3.9% of symbols on clean, digitally-typeset scores -- and that's the *best* case; scans, dense/orchestral writing, and unusual notation are worse. Unlike a sighted user, a blind composer cannot visually proofread the recognized MusicXML against the original PDF page. **S12-2 (the OMR quality report) is what makes this safe to ship and should land in the same release as this ticket, not be deferred as a follow-up "nice to have."**
+2. **This is a much heavier runtime dependency than `lilypond`.** Audiveris needs a JVM (the official distribution bundles its own JRE) and pulls in Tesseract OCR via bundled libraries for lyrics/text recognition (which still needs separately downloaded language-data files). `web.py`'s `MAX_UPLOAD_SIZE` comment already documents that Render Starter's 512MB is tight for the existing pure-Python pipeline alone -- running a JVM-based OMR engine needs its own explicit memory/CPU budget decision for the hosted web UI before this ships there, not just for local CLI use.
+
+**Steps:**
+1. Document how to install the `audiveris` CLI locally (README), matching how `lilypond` is documented today. Decide how/whether it's added to `Dockerfile` (currently `python:3.11-slim-bookworm` + `apt-get install lilypond`) given its far larger footprint -- likely a separate build stage or a documented "not available on the hosted demo" limitation rather than assuming it fits the same image.
+2. Add `AudiverisError(DottedNotesError)` to `exceptions.py`, mirroring `LilyPondCompileError`'s shape (`message`, optional `stderr`).
+3. Add a bridge helper (new `src/dottednotes/parser/audiveris_bridge.py`, parallel to how `musicxml_parser.py`/`lilypond_parser.py` are organized): `convert_pdf_to_musicxml(pdf_path: Path, output_dir: Path) -> Path`.
+   - Check `shutil.which("audiveris")` (or a configurable path/env var); raise `AudiverisError` with an actionable message if missing.
+   - Run `audiveris -batch -export -output <output_dir> <pdf_path>` via `subprocess.run(capture_output=True, timeout=...)`; raise `AudiverisError(stderr=...)` on non-zero exit or timeout -- mirror `_compile_with_lilypond()`'s exact error-handling shape in `cli.py`.
+   - Locate the resulting `.mxl`/`.musicxml` file(s) in `output_dir`. Audiveris exports one MusicXML file per "movement" it detects -- decide explicitly how a multi-movement PDF is handled (e.g. convert each separately and let the user pick, or require single-movement input for now) rather than silently taking "the first file."
+4. Wire `.pdf` as a new recognized input extension in `cli.py`'s `_run_convert()` (`is_pdf_input = input_path.suffix.lower() == ".pdf"`), calling the bridge helper first and handing its MusicXML output to the existing, unmodified `load_musicxml()` -- no changes needed inside `musicxml_parser.py` itself.
+5. Wire the same detection into `web.py`'s `/api/convert` (a new `input_type = "pdf"` alongside the existing `"braille"`/`"musicxml"`/`"lilypond"` values), calling the bridge helper before the existing `load_musicxml()` call.
+6. Update `static/index.html`'s upload-subtext/file-instructions to mention `.pdf`, and add a clear, prominent warning in the UI copy itself (not just README docs) that PDF import uses automated OMR and is not guaranteed accurate. This minimal warning must ship with this ticket even if S12-2's full report isn't ready yet.
+7. Add test fixtures covering both a clean digitally-typeset PDF *and* a lower-quality scanned PDF -- testing only the pristine case would hide the exact failure mode (unverifiable misreads) that matters most for this feature.
+8. Write tests: unit tests for `AudiverisError` handling (missing binary, non-zero exit, timeout) against a mocked/stubbed subprocess call, plus a real end-to-end conversion test gated on `shutil.which("audiveris")` (mirroring how LilyPond-compile tests are skipped in CI when the binary isn't installed).
+
+**Definition of Done:**
+- [ ] `dottednotes convert score.pdf output.brl` (and other target formats) works end to end when Audiveris is installed, producing the same output shape as an equivalent `.musicxml` input would.
+- [ ] A missing or failing Audiveris binary produces a plain-text `AudiverisError` message (CLI) / structured error response (web) -- never a raw traceback or silently wrong output.
+- [ ] Web UI accepts `.pdf` uploads, respects `MAX_UPLOAD_SIZE`, and visibly warns that PDF import is unverified OMR output before the user downloads anything.
+- [ ] Multi-movement PDF handling is an explicit, documented decision, not a silent "first file wins."
+- [ ] New tests (mocked-subprocess unit tests + a real-Audiveris-gated integration test) pass; existing test suite has no regressions.
+- [ ] README/Dockerfile document the new dependency and its resource cost.
+
+</details>
+
+---
+
+### [Shelved] S12-2: Surface an OMR/MusicXML quality report in the web UI
+
+**Why shelved:** Depends entirely on S12-1 landing first; shelved alongside it 2026-07-19 for the same hosting-cost reason. Revisit together with S12-1.
+
+<details>
+<summary>Original ticket text</summary>
+
+**Why:** Per S12-1's accuracy caveat: OMR misreads are the one place in this entire pipeline a blind composer cannot independently verify against the source, since they can't visually compare the recognized MusicXML/braille back to the original PDF page. The web UI already has a working precedent for exactly this kind of post-conversion trust signal: the "BANA Formatting Rule Report" (`validation_report`, backed by `BANAValidator`) and the LilyPond compile status/log (`compile_success`/`compile_error`) in `web.py`'s `/api/convert` response, rendered by `showResults()`/`updateSectionState()` in `static/app.js` and the `#validation-section`/`#result-section` markup in `static/index.html`. This ticket adds a third report of the same shape, specific to OMR-derived input, so a blind composer gets a clear signal of which measures an OMR engine itself was unsure about and should have a sighted collaborator double-check.
+
+**Steps:**
+1. Investigate what confidence/quality signals Audiveris actually exposes in batch/CLI mode (its own `.omr` project file, sheet-level log/warning output, or per-symbol confidence data) -- confirm this against Audiveris' own documentation/source before assuming a specific shape exists. Don't guess this the way this project never guesses BANA dot patterns without checking the primary source first.
+2. Design an `OMRFinding`/`OMRReport` shape analogous to `validation.validator.Correction` (`measure_number`, `severity`, `message`, and likely a `confidence` field) -- reuse `Correction`'s exact JSON shape if it fits well enough, so the frontend can mostly reuse `showResults()`'s existing per-row table rendering rather than duplicating it.
+3. Parse Audiveris' quality/confidence output (per step 1) into a list of these findings, run right after S12-1's bridge step, before handing off to `load_musicxml()`.
+4. Thread this through `cli.py` (e.g. extending the existing `--report` flag to also cover PDF input) and `web.py`'s `/api/convert` response as a new `omr_report` field (list of finding dicts), plus an `omr_success`/`omr_error` pair for when Audiveris fails outright (mirroring `compile_success`/`compile_error`'s existing shape).
+5. Add a third report section to `static/index.html` (an `#omr-section` card, "OMR Recognition Quality Report", following `#validation-section`'s existing markup pattern) and wire it into `app.js`'s `showResults()`/`updateSectionState()`, reusing the existing per-row table rendering rather than duplicating it.
+6. Make the UI copy explicit that this report reflects the OMR engine's own confidence signal, not a correctness guarantee -- an empty/clean report must not read to the user as "verified correct."
+7. Write tests: unit tests for the Audiveris-output-to-`OMRFinding`-list parsing (against recorded/fixture Audiveris output, not a live subprocess call), and a web/API test asserting the new response field's shape and the three report sections' independent state transitions (mirroring S11c-5's empty/present state-transition tests for the existing reports).
+
+**Definition of Done:**
+- [ ] Web UI shows a third "OMR Recognition Quality Report" section after a `.pdf` conversion, in the same accessible style (ARIA live regions, table, explicit state transitions) as the existing BANA and LilyPond compile reports.
+- [ ] The report is driven by Audiveris' own confidence/warning data, verified against its actual documented output format, not inferred/guessed.
+- [ ] The report section is empty/not-applicable for non-PDF input types, matching how the compile report is already "not_applicable" for non-LilyPond targets.
+- [ ] UI copy makes clear this is an automated confidence signal, not a correctness guarantee.
+- [ ] New tests pass; existing test suite has no regressions.
+
+</details>
 
 
 
