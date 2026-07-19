@@ -55,6 +55,58 @@ def test_musicxml_pitch_and_octave_translation():
     assert note2.accidental.type == AccidentalType.DOUBLE_FLAT
     assert note2.duration.value == 8
 
+def test_musicxml_accidental_display_status_suppresses_spurious_naturals():
+    # BANA-adjacent bug: music21's engraving pass attaches a non-None
+    # `pitch.accidental` to almost every note in a keyed piece as internal
+    # pitch-spelling bookkeeping, even when nothing should be printed.
+    # `displayStatus == False` is music21's own signal that the accidental
+    # is present but not meant to be shown -- only an explicit `<accidental>`
+    # tag (or a real, need-to-show case) gets `True`/`None`. Parsed via
+    # `music21.converter.parse` (not hand-built Accidental objects) since
+    # it's converter.parse's own engraving pass that sets displayStatus.
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1"><part-name>Test</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>2</fifths></key>
+        <time><beats>3</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>F</step><alter>0</alter><octave>5</octave></pitch>
+        <duration>1</duration><type>quarter</type>
+        <accidental>natural</accidental>
+      </note>
+      <note>
+        <pitch><step>F</step><alter>1</alter><octave>5</octave></pitch>
+        <duration>1</duration><type>quarter</type>
+      </note>
+      <note>
+        <pitch><step>G</step><alter>0</alter><octave>5</octave></pitch>
+        <duration>1</duration><type>quarter</type>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+    m21_score = music21.converter.parse(xml, format="musicxml")
+    score = MusicXMLTranslator().translate(m21_score)
+
+    notes = score.staves[0].measures[0].notes
+    assert len(notes) == 3
+
+    explicit_natural, implied_by_key, fully_diatonic = notes
+    assert explicit_natural.accidental is not None
+    assert explicit_natural.accidental.type == AccidentalType.NATURAL
+    assert implied_by_key.accidental is None
+    assert fully_diatonic.accidental is None
+
 def test_musicxml_tuplet_grouping():
     # Construct a music21 triplet measure: 3 eighth notes in a 3:2 tuplet
     m21_score = music21.stream.Score()

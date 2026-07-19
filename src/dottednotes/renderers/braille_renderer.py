@@ -1,9 +1,10 @@
+import re
 from typing import Optional, Union, Any
 from dottednotes.models.score import Score
 from dottednotes.models.orchestra_score import OrchestraScore
 from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
-from dottednotes.models.note import Note
+from dottednotes.models.note import Note, Rest
 from dottednotes.bana_symbols import TABLE_29_ENGLISH
 
 _INT_TO_LITERARY_DIGIT = {
@@ -57,10 +58,45 @@ def join_tempo_and_signature(tempo_brl: str, *signature_parts: str) -> str:
     return tempo_brl or combined
 
 
+def _table29_lookup(staff_name: str) -> Optional[str]:
+    """Resolve `staff_name` against BANA Table 29, tolerating the
+    plural/section-style part names real MusicXML exports use (e.g.
+    "Violins I", "Violas", "Double Basses") against the table's singular
+    solo-instrument keys ("Violin I", "Viola", "Double bass")."""
+    abbrev = TABLE_29_ENGLISH.get(staff_name)
+    if abbrev:
+        return abbrev
+
+    numeral_match = re.match(r'^(.+?)\s+([IVXLCDM]+)$', staff_name)
+    if numeral_match:
+        head, numeral_suffix = numeral_match.group(1), numeral_match.group(2)
+    else:
+        head, numeral_suffix = staff_name, None
+
+    words = head.split()
+    if not words:
+        return None
+    last_word = words[-1]
+    candidates = []
+    if last_word.endswith('es'):
+        candidates.append(last_word[:-2])
+    if last_word.endswith('s'):
+        candidates.append(last_word[:-1])
+
+    lower_table = {key.lower(): val for key, val in TABLE_29_ENGLISH.items()}
+    for candidate in candidates:
+        singular_head = ' '.join(words[:-1] + [candidate])
+        full_name = f"{singular_head} {numeral_suffix}" if numeral_suffix else singular_head
+        abbrev = lower_table.get(full_name.lower())
+        if abbrev:
+            return abbrev
+    return None
+
+
 def staff_abbreviation(staff_name: str) -> str:
     """Look up a staff's BANA Table 29 abbreviation, falling back to its
     first two letters (or "ms" for an unnamed staff) when not in the table."""
-    abbrev = TABLE_29_ENGLISH.get(staff_name)
+    abbrev = _table29_lookup(staff_name)
     if abbrev:
         return abbrev
     words = [w for w in staff_name.split() if w]
@@ -369,10 +405,31 @@ class BrailleRenderer:
         idx = 0
         prev_notes = [None] * n_staves
 
-        def render_candidate(group_size: int):
+        def active_staff_indices(group_size: int) -> list[int]:
+            # BANA 33.1: "each parallel contain[s] only the music of the
+            # instruments that have music to play in those measures. An
+            # instrument that has only rests in those measures is omitted
+            # from the parallel." A staff qualifies as active for this
+            # candidate system only if at least one of its measures in the
+            # range has something other than a bare rest.
+            active = [
+                s_idx for s_idx, staff in enumerate(score.staves)
+                if any(
+                    any(not isinstance(item, Rest) for item in m.notes)
+                    for m in staff.measures[idx:idx + group_size]
+                )
+            ]
+            # A measure range where every staff is tacet can't happen in
+            # real orchestral music (nothing would be there to transcribe),
+            # but fall back to showing everything rather than an empty
+            # system if it ever does.
+            return active or list(range(n_staves))
+
+        def render_candidate(group_size: int, active: list[int]):
             slices = []
             prevs = []
-            for s_idx, staff in enumerate(score.staves):
+            for s_idx in active:
+                staff = score.staves[s_idx]
                 slice_strs, tmp_prev = render_measure_slice(
                     staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level
                 )
@@ -380,32 +437,32 @@ class BrailleRenderer:
                 prevs.append(tmp_prev)
 
             prefixes = [
-                ensemble_abbrev_prefix(score.staves[s].name, "".join(slices[s]))
-                for s in range(n_staves)
+                ensemble_abbrev_prefix(score.staves[s].name, "".join(slices[k]))
+                for k, s in enumerate(active)
             ]
             max_prefix_len = max(len(p) for p in prefixes)
 
             # Every measure but the last in the system is a fixed table
             # column: its width is the widest rendering of that measure
-            # across all staves, plus 2 cells -- the next measure starts
-            # exactly 2 cells after the longest staff's content for this
-            # one, and shorter staves get that same width filled with
+            # across all active staves, plus 2 cells -- the next measure
+            # starts exactly 2 cells after the longest staff's content for
+            # this one, and shorter staves get that same width filled with
             # guide dots (or plain blanks for a small gap), never packed
             # flush against the next measure (BANA 33.4, like how the
             # instrument list aligns names to a fixed column).
             measure_widths = [
-                max(len(slices[s][k]) for s in range(n_staves)) + 2
-                for k in range(group_size - 1)
+                max(len(slices[k][m]) for k in range(len(active))) + 2
+                for m in range(group_size - 1)
             ]
 
             staff_lines = []
-            for s_idx in range(n_staves):
-                prefix = prefixes[s_idx] + chr(0x2800) * (max_prefix_len - len(prefixes[s_idx]))
+            for k in range(len(active)):
+                prefix = prefixes[k] + chr(0x2800) * (max_prefix_len - len(prefixes[k]))
                 body = "".join(
-                    pad_to_boundary(slices[s_idx][k], measure_widths[k])
-                    for k in range(group_size - 1)
+                    pad_to_boundary(slices[k][m], measure_widths[m])
+                    for m in range(group_size - 1)
                 )
-                body += slices[s_idx][group_size - 1]
+                body += slices[k][group_size - 1]
                 staff_lines.append(prefix + body)
 
             return staff_lines, prevs, max_prefix_len, measure_widths
@@ -415,17 +472,19 @@ class BrailleRenderer:
             best = None
 
             while idx + group_size <= n_measures:
-                staff_lines, prevs, max_prefix_len, measure_widths = render_candidate(group_size)
+                active = active_staff_indices(group_size)
+                staff_lines, prevs, max_prefix_len, measure_widths = render_candidate(group_size, active)
                 if any(len(line) > self.line_width for line in staff_lines):
                     break
-                best = (group_size, staff_lines, prevs, max_prefix_len, measure_widths)
+                best = (group_size, staff_lines, prevs, max_prefix_len, measure_widths, active)
                 group_size += 1
 
             if best is None:
                 # Force 1 measure even if it doesn't fit.
-                best = (1, *render_candidate(1))
+                active = active_staff_indices(1)
+                best = (1, *render_candidate(1, active), active)
 
-            fit_size, best_staff_lines, best_prev_notes, max_prefix_len, measure_widths = best
+            fit_size, best_staff_lines, best_prev_notes, max_prefix_len, measure_widths, best_active = best
 
             if idx > 0:
                 lines.append("")
@@ -449,7 +508,8 @@ class BrailleRenderer:
 
             for staff_line in best_staff_lines:
                 lines.extend(wrap_run_over_line(staff_line, self.line_width))
-            prev_notes = best_prev_notes
+            for k, s_idx in enumerate(best_active):
+                prev_notes[s_idx] = best_prev_notes[k]
             idx += fit_size
 
         return "\n".join(lines) + "\n"

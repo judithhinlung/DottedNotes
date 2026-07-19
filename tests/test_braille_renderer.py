@@ -5,7 +5,7 @@ from dottednotes.models.staff import Staff
 from dottednotes.models.measure import Measure
 from dottednotes.models.note import Note, Rest
 from dottednotes.models.duration import Duration
-from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefix, encode_literary_braille, abbrev_to_brl, wrap_run_over_line, pad_to_boundary
+from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefix, encode_literary_braille, abbrev_to_brl, wrap_run_over_line, pad_to_boundary, staff_abbreviation
 
 
 def test_solo_renderer():
@@ -209,19 +209,52 @@ def test_encode_literary_braille_single_capital_for_title_case_word():
     assert encode_literary_braille("Symphony No. II") == '⠠⠎⠽⠍⠏⠓⠕⠝⠽⠀⠠⠝⠕⠨⠀⠠⠠⠊⠊⠲'
 
 
+def test_staff_abbreviation_resolves_plural_section_names_to_table_29():
+    # BANA Table 29 keys are singular solo-instrument names ("Violin I",
+    # "Viola", "Violoncello", "Double bass"), but real MusicXML part names
+    # from orchestral scores are plural/section-style ("Violins I",
+    # "Violas", "Violoncellos", "Double Basses"). Without singularizing,
+    # all of these collapse to the same first-two-letters fallback
+    # ("vi"), colliding with each other and losing Table 29's abbreviations
+    # entirely.
+    assert staff_abbreviation("Violins I") == "v1"
+    assert staff_abbreviation("Violins II") == "v2"
+    assert staff_abbreviation("Violas") == "vl"
+    assert staff_abbreviation("Violoncellos") == "vc"
+    assert staff_abbreviation("Double Basses") == "db"
+
+    # Combined-instrument staff names (one staff notating two doubled
+    # parts) are an explicit scope boundary -- BANA 33.2.2's combined-
+    # numbering convention for these is out of scope here, so they must
+    # keep falling through to the existing first-two-letters heuristic
+    # unchanged, not accidentally match a singularization candidate.
+    assert staff_abbreviation("Piccolo, Flutes I/II") == "pi"
+    assert staff_abbreviation("Clarinets I/II in B-flat") == "cl"
+    assert staff_abbreviation("Bassoons I/II") == "ba"
+    assert staff_abbreviation("Horns in F I/II") == "ho"
+
+
 def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
     # BANA 33.4: "the first signs of the measures are vertically aligned
     # in all parts" -- a resting staff's short measure must be padded to
     # match a busy staff's longer measure so the NEXT measure starts at
     # the same column in every part, and the heading numbers land
     # correctly relative to every staff, not just staff 0.
+    #
+    # Flute rests for measure 1 only (not the whole system) so it stays
+    # *active* per BANA 33.1's tacet-staff omission and this test still
+    # exercises cross-staff column alignment within one shared system --
+    # a staff tacet for an entire system is dropped from it instead (see
+    # test_ensemble_renderer_omits_staff_tacet_for_an_entire_system).
     score = OrchestraScore(title="Trio")
 
     flute = Staff(name="Flute")
-    for n in [1, 2]:
-        m = Measure(number=n)
-        m.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
-        flute.add_measure(m)
+    m1 = Measure(number=1)
+    m1.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+    flute.add_measure(m1)
+    m2 = Measure(number=2)
+    m2.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=5, duration=Duration(value=1, dots=0)))
+    flute.add_measure(m2)
     score.add_staff(flute)
 
     violin = Staff(name="Violin")
@@ -239,8 +272,11 @@ def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
     flute_line = next(l for l in lines if l.startswith('⠜' + abbrev_to_brl('fl')))
     violin_line = next(l for l in lines if l.startswith('⠜' + abbrev_to_brl('vi')))
 
-    # Both staves' second measure must start at the same column.
-    flute_m2_col = len(flute_line) - 2  # "⠍⠀" (2 cells)
+    # Both staves' second measure must start at the same column. Flute's
+    # own measure-2 content starts with its octave mark (⠨, dot 4-6 --
+    # the treble-octave-5 mark), located directly rather than assumed
+    # from line length, since Flute is no longer a bare rest to the end.
+    flute_m2_col = flute_line.index('⠨')
     violin_m2_col = violin_line.index('⠳')  # first note of measure 2 (G)
     assert flute_m2_col == violin_m2_col
 
@@ -257,6 +293,75 @@ def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
     # plain blank cells (well under the >6 guide-dot threshold).
     violin_m1_end = violin_m2_col - 2
     assert violin_line[violin_m1_end:violin_m2_col] == chr(0x2800) * 2
+
+
+def test_ensemble_renderer_omits_staff_tacet_for_an_entire_system():
+    # BANA 33.1: "each parallel contain[s] only the music of the
+    # instruments that have music to play in those measures. An instrument
+    # that has only rests in those measures is omitted from the parallel."
+    # Flute rests for measures 1-2 entirely, then plays measures 3-4;
+    # line_width=20 forces a system break right at that boundary (verified
+    # by actually rendering the case), so Flute must be entirely absent
+    # from the first system's staff_lines and reappear -- with its
+    # abbreviation prefix restated -- in the second system.
+    score = OrchestraScore(title="Test")
+
+    flute = Staff(name="Flute")
+    for n in [1, 2]:
+        m = Measure(number=n)
+        m.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+        flute.add_measure(m)
+    for n in [3, 4]:
+        m = Measure(number=n)
+        m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=5, duration=Duration(value=1, dots=0)))
+        flute.add_measure(m)
+    score.add_staff(flute)
+
+    violin = Staff(name="Violin")
+    for n in [1, 2, 3, 4]:
+        m = Measure(number=n)
+        for note_name in ["C", "D", "E", "F"]:
+            m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name=note_name, octave=5, duration=Duration(value=4, dots=0)))
+        violin.add_measure(m)
+    score.add_staff(violin)
+
+    rendered = BrailleRenderer(line_width=20, compression_level="none").render(score)
+    systems = rendered.split("\n\n")
+    assert len(systems) == 2
+
+    first_system_lines = systems[0].splitlines()
+    flute_prefix = '⠜' + abbrev_to_brl('fl')
+    violin_prefix = '⠜' + abbrev_to_brl('vi')
+    assert not any(l.startswith(flute_prefix) for l in first_system_lines)
+    assert any(l.startswith(violin_prefix) for l in first_system_lines)
+
+    second_system_lines = systems[1].splitlines()
+    assert any(l.startswith(flute_prefix) for l in second_system_lines)
+    assert any(l.startswith(violin_prefix) for l in second_system_lines)
+
+
+def test_ensemble_renderer_all_staves_tacet_falls_back_to_showing_everything():
+    # A measure range where every staff is tacet simultaneously can't
+    # happen in real orchestral music (nothing would be there to
+    # transcribe), but `active_staff_indices` falls back to showing every
+    # staff rather than producing an empty system if it ever does. A more
+    # BANA-idiomatic single-line representation for a full-ensemble rest
+    # (rather than each staff's rest repeated) is a possible future
+    # improvement, not attempted here.
+    score = OrchestraScore(title="All Rest")
+    for name in ["Flute", "Violin"]:
+        staff = Staff(name=name)
+        for n in [1, 2]:
+            m = Measure(number=n)
+            m.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))
+            staff.add_measure(m)
+        score.add_staff(staff)
+
+    rendered = BrailleRenderer(line_width=40, compression_level="none").render(score)
+    lines = rendered.splitlines()
+
+    assert any(l.startswith('⠜' + abbrev_to_brl('fl')) for l in lines)
+    assert any(l.startswith('⠜' + abbrev_to_brl('vi')) for l in lines)
 
 
 def test_pad_to_boundary_uses_guide_dots_with_blanks_on_both_sides():

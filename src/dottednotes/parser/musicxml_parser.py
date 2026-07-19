@@ -726,7 +726,7 @@ class MusicXMLTranslator:
             octave = 4
 
         acc = None
-        if pitch.accidental is not None:
+        if pitch.accidental is not None and pitch.accidental.displayStatus is not False:
             m21_acc = pitch.accidental
             acc_type = None
             name = m21_acc.name

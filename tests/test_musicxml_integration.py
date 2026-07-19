@@ -10,6 +10,9 @@ from dottednotes.models import (
     Score, Staff, Measure, Note, Duration,
     Fermata, FermataShape, BreathMark, BreathMarkVariant,
 )
+from dottednotes.models.chord import Chord
+from dottednotes.models.tuplet import Tuplet
+from dottednotes.models.in_accord import InAccord
 from dottednotes.parser.musicxml_parser import load_musicxml
 from dottednotes.parser.input_pipeline import BRLInputPipeline
 from dottednotes.parser.braille_parser import BrailleParser
@@ -66,6 +69,45 @@ def test_bartok_orchestral_musicxml_smoke_converts_without_crashing():
     brf_content = score.to_braille(compression_level="full")
     assert len(brf_content) > 0
     assert any(0x2800 <= ord(c) <= 0x28FF for c in brf_content)
+
+def _count_accidentals(item) -> int:
+    if isinstance(item, Note):
+        return 1 if item.accidental is not None else 0
+    if isinstance(item, Chord):
+        return sum(_count_accidentals(n) for n in item.notes)
+    if isinstance(item, Tuplet):
+        return sum(_count_accidentals(sub) for sub in item.items)
+    if isinstance(item, InAccord):
+        return sum(_count_accidentals(sub) for part in item.parts for sub in part)
+    return 0
+
+def test_bartok_orchestral_musicxml_suppresses_spurious_accidentals():
+    """music21's engraving pass attaches a non-None `pitch.accidental` to
+    nearly every note in a keyed piece as internal pitch-spelling
+    bookkeeping (`displayStatus == False`), not just where an accidental
+    should actually print. Without the `displayStatus` gate in
+    `translate_note_obj()`, this fixture produced a non-None `Note.accidental`
+    on essentially every note (~1118 on one part alone). This is an
+    order-of-magnitude sanity check against the raw XML's 466 explicit
+    `<accidental>` tags, not an exact-equality check -- music21's
+    `displayStatus` computation is its own engraving-rule pass, not a
+    literal echo of the source tags.
+    """
+    fixture_path = "tests/fixtures/Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.xml"
+    score = load_musicxml(fixture_path)
+
+    total_accidentals = sum(
+        _count_accidentals(item)
+        for staff in score.staves
+        for measure in staff.measures
+        for item in measure.notes
+    )
+
+    with open(fixture_path) as f:
+        raw_tag_count = f.read().count("<accidental>")
+
+    assert raw_tag_count == 466
+    assert total_accidentals < raw_tag_count * 2
 
 def test_integration_brf_to_musicxml():
     # 1. Parse simple_melody.brf
