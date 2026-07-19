@@ -28,11 +28,25 @@ def unicode_to_ascii_braille(text: str) -> str:
 
 
 class BRFWriter:
-    def __init__(self, line_width: int = 40, page_height: int = 25, show_measure_numbers: bool = True, compression_level: str = "full"):
+    def __init__(
+        self,
+        line_width: int = 40,
+        page_height: int = 25,
+        show_measure_numbers: bool = True,
+        compression_level: str = "full",
+        page_numbers: bool = True,
+    ):
         self.line_width = line_width
         self.page_height = page_height
         self.show_measure_numbers = show_measure_numbers
         self.compression_level = compression_level
+        # BANA 32.1's running head (title + braille page number on every
+        # page after the first) is on by default to match this writer's
+        # existing behavior; set False to skip all pagination -- no page
+        # splits, no running heads, no form feeds -- and emit the music
+        # (with measure numbers/parallels exactly as configured above) as
+        # one continuous stream instead.
+        self.page_numbers = page_numbers
 
     def write(self, score: Score, filepath: Union[str, Path]) -> None:
         """Render a score and write it to a BRF file in ASCII braille."""
@@ -54,6 +68,9 @@ class BRFWriter:
         )
         raw_music = renderer.render(score)
         music_lines = [line.rstrip() for line in raw_music.splitlines()]
+
+        if not self.page_numbers:
+            return "\n".join(music_lines) + "\n"
 
         pages = []
         current_page_lines = []

@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // UI Option Groups
     const groupCategory = document.getElementById('group-category');
     const groupCompression = document.getElementById('group-compression');
+    const groupPageNumbers = document.getElementById('group-page-numbers');
+    const pageNumbersCheckbox = document.getElementById('page_numbers');
 
     // Results Section
     const resultSection = document.getElementById('result-section');
@@ -213,11 +215,15 @@ document.addEventListener('DOMContentLoaded', () => {
             groupCategory.classList.add('hidden');
         }
 
-        // Show/hide compression: Only relevant when output is Braille
+        // Show/hide compression and page-number pagination: only relevant
+        // when output is Braille (BANA running-head pagination is a
+        // braille-specific concept, meaningless for LilyPond/MusicXML).
         if (target === 'braille' || target === 'brl') {
             groupCompression.classList.remove('hidden');
+            groupPageNumbers.classList.remove('hidden');
         } else {
             groupCompression.classList.add('hidden');
+            groupPageNumbers.classList.add('hidden');
         }
     }
 
@@ -295,6 +301,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // silently omits disabled form fields, so building this after
         // setBusy(true) would drop the file field entirely.
         const formData = new FormData(form);
+
+        // FormData also omits an unchecked checkbox entirely (not "false",
+        // just absent) -- the backend's Form(True) default for
+        // page_numbers would then silently override an explicit uncheck
+        // back to true. Set it explicitly either way so unchecking it
+        // actually turns pagination off.
+        formData.set('page_numbers', pageNumbersCheckbox.checked ? 'true' : 'false');
 
         // Set Loading States
         setBusy(true);

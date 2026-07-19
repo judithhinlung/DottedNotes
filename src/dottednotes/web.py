@@ -165,6 +165,7 @@ async def convert_file(
     compression: str = Form("full"),        # "none", "minimal", "full"
     profile: str = Form("standard"),        # "standard", "strict"
     measure_numbers: bool = Form(False),
+    page_numbers: bool = Form(True),
 ):
     contents = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(contents) > MAX_UPLOAD_SIZE:
@@ -268,7 +269,8 @@ async def convert_file(
             writer = BRFWriter(
                 line_width=40,
                 show_measure_numbers=measure_numbers,
-                compression_level=compression
+                compression_level=compression,
+                page_numbers=page_numbers,
             )
             if target_format == "brl":
                 output_brl = job_dir / f"{input_path.stem}_output.brl"

@@ -209,6 +209,7 @@ def _run_convert(args: argparse.Namespace) -> None:
                 line_width=40,
                 show_measure_numbers=args.measure_numbers,
                 compression_level=args.compression,
+                page_numbers=not args.no_page_numbers,
             )
             is_brl = output_path is not None and Path(output_path).suffix.lower() == ".brl"
             if is_brl:
@@ -304,6 +305,14 @@ def main() -> None:
         default="full",
         help="Set repeat and shorthand compression level (none, minimal, full) "
              "for .brf/.brl output; has no effect on .ly output",
+    )
+    convert_parser.add_argument(
+        "--no-page-numbers",
+        action="store_true",
+        help="For .brf/.brl output, skip BANA running-head pagination "
+             "(title + braille page number on every page after the first) "
+             "and emit the music as one continuous stream instead. Page "
+             "numbers are included by default; has no effect on .ly output.",
     )
     convert_parser.add_argument(
         "--profile",
