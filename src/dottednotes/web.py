@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
 import re
 import shutil
@@ -8,6 +9,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, Union
@@ -25,6 +27,37 @@ from .parser.tokenizer import BrailleTokenizer
 from .validation.validator import BANAValidator
 
 JOBS_DIR = Path("/tmp/dottednotes-jobs")
+
+# Render Starter's 512MB is tight enough that a single large conversion request
+# can threaten the whole process's memory budget once music21 builds an
+# in-memory object graph from the parsed MusicXML. This is the ceiling on the
+# actual MusicXML/braille content a request may hand to the parsers -- for a
+# .mxl upload that means the *decompressed* size (see
+# `_check_mxl_decompressed_size` below), since checking only the compressed
+# upload size would let a small file expand well past this cap once unzipped.
+MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
+
+
+def _check_mxl_decompressed_size(contents: bytes, max_bytes: int) -> None:
+    """Reject a .mxl (compressed MusicXML) upload whose decompressed content
+    would exceed max_bytes, without actually decompressing it -- ZipInfo's
+    file_size comes from the zip's central directory."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(contents)) as archive:
+            total_decompressed = sum(info.file_size for info in archive.infolist())
+    except zipfile.BadZipFile:
+        raise HTTPException(
+            status_code=400,
+            detail="File is not a valid compressed MusicXML (.mxl) archive.",
+        )
+    if total_decompressed > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Compressed MusicXML archive decompresses to more than the "
+                f"{max_bytes // (1024 * 1024)}MB limit."
+            ),
+        )
 
 def _parse_score(text: str, category_override: str | None = None):
     if category_override == "Lead Sheet":
@@ -133,10 +166,12 @@ async def convert_file(
     profile: str = Form("standard"),        # "standard", "strict"
     measure_numbers: bool = Form(False),
 ):
-    # Enforce 1MB file limit
-    contents = await file.read(1024 * 1024 + 1)
-    if len(contents) > 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File size exceeds the 1MB limit.")
+    contents = await file.read(MAX_UPLOAD_SIZE + 1)
+    if len(contents) > MAX_UPLOAD_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size exceeds the {MAX_UPLOAD_SIZE // (1024 * 1024)}MB limit.",
+        )
 
     job_id = str(uuid.uuid4())
     job_dir = JOBS_DIR / job_id
@@ -146,9 +181,13 @@ async def convert_file(
     if not input_filename or input_filename in (".", ".."):
         input_filename = "input.brf"
     input_path = job_dir / input_filename
-    input_path.write_bytes(contents)
 
     ext = input_path.suffix.lower()
+    if ext == ".mxl":
+        _check_mxl_decompressed_size(contents, MAX_UPLOAD_SIZE)
+
+    input_path.write_bytes(contents)
+
     input_type = "braille"
     if ext in (".musicxml", ".xml", ".mxl"):
         input_type = "musicxml"

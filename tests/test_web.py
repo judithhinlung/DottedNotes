@@ -81,17 +81,39 @@ def test_convert_braille_to_braille_reformat():
     assert download_response.status_code == 200
 
 def test_convert_invalid_file_limit():
-    large_content = b"a" * (1024 * 1024 + 10) # slightly larger than 1MB
+    large_content = b"a" * (10 * 1024 * 1024 + 10) # slightly larger than 10MB
     file_obj = io.BytesIO(large_content)
-    
+
     response = client.post(
         "/api/convert",
         files={"file": ("test.brf", file_obj, "text/plain")},
         data={"target_format": "lilypond"}
     )
-    
+
     assert response.status_code == 400
     assert "exceeds" in response.json()["detail"]
+
+def test_convert_rejects_mxl_that_decompresses_past_the_limit():
+    # A small compressed upload whose decompressed content would exceed the
+    # 10MB cap must be rejected before it ever reaches music21 -- checking
+    # only the compressed upload size would miss this (S-ticket: MusicXML
+    # upload limit expansion, 2026-07-18).
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("score.xml", b"a" * (11 * 1024 * 1024))
+    mxl_bytes = buf.getvalue()
+    assert len(mxl_bytes) < 10 * 1024 * 1024  # the upload itself is tiny
+
+    response = client.post(
+        "/api/convert",
+        files={"file": ("test.mxl", io.BytesIO(mxl_bytes), "application/octet-stream")},
+        data={"target_format": "lilypond"}
+    )
+
+    assert response.status_code == 400
+    assert "decompress" in response.json()["detail"].lower()
 
 def test_convert_invalid_options():
     file_content = "⠐⠹".encode("utf-8")
