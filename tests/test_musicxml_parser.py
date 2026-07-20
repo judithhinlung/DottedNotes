@@ -424,6 +424,39 @@ def test_musicxml_note_without_ottava_is_unaffected():
     note = score.staves[0].measures[0].notes[0]
     assert note.octave == 5
 
+
+def test_musicxml_ottava_preserves_accidental_spelling():
+    # Regression test for S10b-8: a flatted note under an 8va bracket must
+    # keep its letter name and accidental (Ab5 -> Ab6), not get respelled
+    # enharmonically (G#6). The bug was in shifting via
+    # `Pitch.transpose(<semitones>)`, which builds a generic chromatic
+    # interval and can pick a different spelling than the original;
+    # shifting `Pitch.octave` directly (the fix) cannot. Found via a real
+    # chord in a real Debussy "Mandoline" MusicXML sample (musicxml.com's
+    # example set, measure 10), where an Ab5/C6/Ab6 chord under an 8va
+    # bracket imported as G#7/C7/G#6 before this fix.
+    xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>
+      <direction placement="above"><direction-type><octave-shift type="down" size="8" number="1"/></direction-type></direction>
+      <note><pitch><step>A</step><alter>-1</alter><octave>5</octave></pitch><duration>4</duration><type>whole</type><accidental>flat</accidental></note>
+      <direction><direction-type><octave-shift type="stop" size="8" number="1"/></direction-type></direction>
+    </measure>
+  </part>
+</score-partwise>
+'''
+    m21_score = music21.converter.parse(xml, format='musicxml')
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.note_name == 'A'
+    assert note.accidental.type == AccidentalType.FLAT
+    assert note.octave == 6
+
+
 def test_musicxml_fermata_over_note_imports():
     from dottednotes.models import FermataShape
 

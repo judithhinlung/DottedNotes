@@ -6900,7 +6900,7 @@ below rather than folded into this sprint.
 
 ---
 
-### [ ] S10b-8: Verify and, if needed, fix ottava (8va/15ma) pitch handling on import
+### [x] S10b-8: Verify and, if needed, fix ottava (8va/15ma) pitch handling on import
 
 **Why:** No reference to `music21.spanner.Ottava` anywhere in
 `musicxml_parser.py`. BANA's default (nonfacsimile) convention for 8va/15ma
@@ -6929,8 +6929,8 @@ a real ottava-bearing fixture, not assumed.
 3. Add a regression test locking in the correct behavior either way.
 
 **Definition of Done:**
-- [ ] Ottava-bracketed passages import at the correct sounding octave.
-- [ ] New tests pass.
+- [x] Ottava-bracketed passages import at the correct sounding octave.
+- [x] New tests pass.
 
 ---
 

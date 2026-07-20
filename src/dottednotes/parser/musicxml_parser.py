@@ -506,9 +506,10 @@ class MusicXMLTranslator:
         reverse = clef_name not in ("bass", "tenor")
         return sorted(voice_items, key=avg_pitch, reverse=reverse)
 
-    def _ottava_semitone_shift(self, el) -> int:
-        """Return the signed semitone shift from an active `music21.spanner.
-        Ottava` (8va/8vb/15ma/15mb) bracket around `el`, or 0 if none (S10b-8).
+    def _ottava_octave_shift(self, el) -> int:
+        """Return the signed number of octaves to shift `el`'s pitch by, from
+        an active `music21.spanner.Ottava` (8va/8vb/15ma/15mb) bracket around
+        it, or 0 if none (S10b-8).
 
         Confirmed against music21 10.5.0 by parsing hand-written MusicXML
         resembling real notation-software output (not just round-tripping
@@ -520,9 +521,20 @@ class MusicXMLTranslator:
         pitches in the octave in which they are to be performed without
         noting the expressions" -- so the importer has to apply this shift
         itself rather than trusting music21's parsed pitch as-is.
+
+        Returns a plain octave count (not a semitone count fed to
+        `Pitch.transpose()`): every Ottava interval is an exact multiple of
+        a perfect octave, and `Pitch.transpose(<int semitones>)` builds a
+        generic chromatic interval that can enharmonically respell the
+        pitch (e.g. `Pitch("A-5").transpose(12)` gives `G#6`, not `A-6`).
+        Shifting `Pitch.octave` directly instead preserves the letter name
+        and accidental exactly as notated, which is what BANA 3.3 needs.
+        Confirmed against a real Debussy "Mandoline" MusicXML sample (from
+        musicxml.com's example set, measure 10): an Ab5/C6/Ab6 chord under
+        an 8va bracket must import as Ab6/C7/Ab7, not G#6/C7/G#7.
         """
         for sp in el.getSpannerSites(music21.spanner.Ottava):
-            return sp.interval().semitones
+            return sp.interval().semitones // 12
         return 0
 
     def _translate_note_stream(self, elements, clef_name: str, dynamic_offsets: dict) -> list:
@@ -552,7 +564,7 @@ class MusicXMLTranslator:
                 continue
 
             duration = self.map_duration(el.duration)
-            ottava_shift = self._ottava_semitone_shift(el)
+            ottava_shift = self._ottava_octave_shift(el)
 
             if isinstance(el, music21.note.Note):
                 note_obj = self.translate_note_obj(el, duration, ottava_shift)
@@ -719,11 +731,12 @@ class MusicXMLTranslator:
         return Duration(value=val, dots=dots, is_triplet=is_triplet)
 
     def translate_note_obj(self, m21_note, duration: Duration, ottava_shift: int = 0) -> Note:
-        pitch = m21_note.pitch.transpose(ottava_shift) if ottava_shift else m21_note.pitch
+        pitch = m21_note.pitch
         note_name = pitch.step
         octave = pitch.octave
         if octave is None:
             octave = 4
+        octave += ottava_shift
 
         acc = None
         if pitch.accidental is not None and pitch.accidental.displayStatus is not False:
