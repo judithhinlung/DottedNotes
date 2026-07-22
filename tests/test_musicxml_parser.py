@@ -107,6 +107,145 @@ def test_musicxml_accidental_display_status_suppresses_spurious_naturals():
     assert implied_by_key.accidental is None
     assert fully_diatonic.accidental is None
 
+
+def test_musicxml_overlapping_slurs_get_consistent_plain_vs_bracket_roles():
+    # Regression test (found via gerhard_roberto_capriccio2_for_flute.xml):
+    # two overlapping slurs -- slurA spanning n1-n3, slurB spanning n2-n4
+    # (opening while slurA is still open) -- must resolve to the SAME
+    # plain/bracket role (BANA 13.3) at both their start and end notes.
+    # `getSpannerSites(Slur)`'s per-note list position isn't a stable
+    # identifier for a given slur across different notes, so deciding
+    # plain-vs-bracket independently at each note (the previous approach)
+    # could assign a slur one role at its start and the other at its end,
+    # producing mismatched LilyPond slur signs ("already have slur"/
+    # "cannot end slur"). Here slurA must stay "primary" (opens when
+    # nothing else is open) and slurB must be "bracket" throughout (opens
+    # while slurA is still open), consistently at both ends.
+    n1 = music21.note.Note('C4', type='quarter')
+    n2 = music21.note.Note('D4', type='quarter')
+    n3 = music21.note.Note('E4', type='quarter')
+    n4 = music21.note.Note('F4', type='quarter')
+    slur_a = music21.spanner.Slur(n1, n3)
+    slur_b = music21.spanner.Slur(n2, n4)
+
+    m = music21.stream.Measure(number=1)
+    for n in (n1, n2, n3, n4):
+        m.append(n)
+    m.insert(0, slur_a)
+    m.insert(0, slur_b)
+
+    from dottednotes.models.duration import Duration as ModelDuration
+    translator = MusicXMLTranslator()
+    model_duration = ModelDuration(value=4)
+    notes = [translator.translate_note_obj(n, model_duration) for n in (n1, n2, n3, n4)]
+    note1, note2, note3, note4 = notes
+
+    assert (note1.slur_start, note1.slur_bracket_open) == (True, False)
+    assert (note3.slur_end, note3.slur_bracket_close) == (True, False)
+    assert (note2.slur_bracket_open, note2.slur_start) == (True, False)
+    assert (note4.slur_bracket_close, note4.slur_end) == (True, False)
+
+
+def test_musicxml_tied_continuation_note_keeps_accidental_differing_from_key():
+    # Regression test (found via a real OMR-sourced solo flute piece,
+    # gerhard_roberto_capriccio2_for_flute.xml): a tied-continuation note is
+    # not visually re-printed with its accidental (music21 marks it
+    # displayStatus=False, same signal as a key-signature-implied
+    # accidental), but it still sounds the altered pitch and MUST keep its
+    # Accidental -- dropping it previously produced a wrong LilyPond pitch
+    # letter ("b" instead of "bes"), breaking the tie (the two notes no
+    # longer had matching pitches). Key is C major (no sharps/flats), so
+    # B-flat is a real deviation from the key here, unlike the
+    # implied-by-key case above.
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1"><part-name>Test</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch>
+        <duration>2</duration><type>half</type>
+        <tie type="start"/>
+        <notations><tied type="start"/></notations>
+      </note>
+      <note>
+        <pitch><step>B</step><alter>-1</alter><octave>4</octave></pitch>
+        <duration>2</duration><type>half</type>
+        <tie type="stop"/>
+        <notations><tied type="stop"/></notations>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+    m21_score = music21.converter.parse(xml, format="musicxml")
+    score = MusicXMLTranslator().translate(m21_score)
+
+    first, second = score.staves[0].measures[0].notes
+    assert first.accidental is not None
+    assert first.accidental.type == AccidentalType.FLAT
+    assert second.accidental is not None
+    assert second.accidental.type == AccidentalType.FLAT
+    assert first.note_name == second.note_name == "B"
+
+
+def test_musicxml_duration_diverging_from_type_finds_exact_dotted_match():
+    # Regression test (found via gerhard_roberto_capriccio2_for_flute.xml,
+    # measure 75): a tie-continuation note whose <duration> implies a
+    # dotted value (3 beats) but whose <type> carries no <dot> tag (a
+    # legitimate MusicXML divergence between the printed type and the
+    # actual performed length) previously fell back to a nearest-power-of-
+    # 2 approximation that always reset dots to 0, silently losing a full
+    # beat (interpreted as a plain, undotted half note = 2 beats instead
+    # of the true dotted half = 3 beats). The fallback must search for an
+    # EXACT (value, dots) match against the real duration before resorting
+    # to that lossy approximation.
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
+<score-partwise version="3.1">
+  <part-list>
+    <score-part id="P1"><part-name>Test</part-name></score-part>
+  </part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>2</divisions>
+        <key><fifths>0</fifths></key>
+        <time><beats>3</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note>
+        <pitch><step>C</step><alter>1</alter><octave>6</octave></pitch>
+        <duration>6</duration><type>half</type>
+        <tie type="stop"/>
+        <tie type="start"/>
+        <notations>
+          <tied type="stop"/>
+          <tied type="start"/>
+        </notations>
+      </note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+    m21_score = music21.converter.parse(xml, format="musicxml")
+    score = MusicXMLTranslator().translate(m21_score)
+
+    note = score.staves[0].measures[0].notes[0]
+    assert note.duration.value == 2
+    assert note.duration.dots == 1
+    assert score.staves[0].measures[0].total_ticks() == round(3 * 24)  # 3 beats, TICKS_PER_QUARTER=24
+
+
 def test_musicxml_tuplet_grouping():
     # Construct a music21 triplet measure: 3 eighth notes in a 3:2 tuplet
     m21_score = music21.stream.Score()

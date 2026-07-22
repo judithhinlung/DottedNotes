@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 import music21
 
 from dottednotes.exceptions import DottedNotesError
@@ -14,7 +15,7 @@ from dottednotes.models import (
     BreathMark, BreathMarkVariant,
 )
 from dottednotes.models.fingering import Fingering
-from dottednotes.models.duration import TICKS_PER_QUARTER
+from dottednotes.models.duration import TICKS_PER_QUARTER, VALID_DURATIONS
 from dottednotes.models.transposition import transposition_from_interval
 
 def load_musicxml(source: str) -> Score:
@@ -93,6 +94,14 @@ def _repeat_bracket_numbers(rb: "music21.spanner.RepeatBracket") -> list[int]:
 
 
 class MusicXMLTranslator:
+    def __init__(self):
+        # Tracks each Slur spanner's plain-vs-bracket role (BANA 13.3) by
+        # object identity, and which slurs are currently open, across the
+        # whole translate() call -- see translate_note_obj's slur handling
+        # for why this can't be recomputed independently at each note.
+        self._slur_roles: dict[int, str] = {}
+        self._open_slur_ids: set[int] = set()
+
     def translate(self, m21_score: music21.stream.Score) -> Score:
         score = Score()
         
@@ -379,7 +388,31 @@ class MusicXMLTranslator:
             if chord_symbols:
                 chord_track_entries = self._align_chord_symbols(stream_elements, chord_symbols)
 
+        self._validate_measure_beat_count(measure)
         return measure, chord_track_entries
+
+    def _validate_measure_beat_count(self, measure: Measure) -> None:
+        """Warn (plain text) if a measure's resolved note/rest duration
+        doesn't match its time signature -- mirrors braille_parser.py's
+        identical check on the BRF side (S5-8). MusicXML import had no
+        equivalent signal before this: a genuinely short/long source
+        measure (e.g. an OMR misread that only captured part of a
+        measure) converted silently, with the discrepancy only surfacing
+        much later as LilyPond bar-check failures possibly measures away
+        from the real defect, with no indication of which measure was
+        actually at fault.
+        """
+        num, den = measure.time_signature
+        expected_ticks = round(num * (4 / den) * TICKS_PER_QUARTER)
+        actual_ticks = measure.total_ticks()
+        if actual_ticks != expected_ticks:
+            warnings.warn(
+                f"Measure {measure.number}: expected "
+                f"{expected_ticks / TICKS_PER_QUARTER} beats but counted "
+                f"{actual_ticks / TICKS_PER_QUARTER}. Check the source "
+                "MusicXML for a missing/extra note or rest.",
+                stacklevel=2,
+            )
 
     def _align_chord_symbols(self, elements, m21_chord_symbols) -> list:
         """Align music21 harmony.ChordSymbol elements to the melody notes/
@@ -407,7 +440,7 @@ class MusicXMLTranslator:
             chord_for_index[max(candidates)] = self._translate_chord_symbol(cs)
 
         return [
-            (self.map_duration(el.duration), chord_for_index.get(i))
+            (self.map_duration(el.duration, measure_number=el.measureNumber), chord_for_index.get(i))
             for i, el in enumerate(melody)
         ]
 
@@ -563,7 +596,7 @@ class MusicXMLTranslator:
             if isinstance(el, music21.harmony.ChordSymbol):
                 continue
 
-            duration = self.map_duration(el.duration)
+            duration = self.map_duration(el.duration, measure_number=el.measureNumber)
             ottava_shift = self._ottava_octave_shift(el)
 
             if isinstance(el, music21.note.Note):
@@ -698,24 +731,62 @@ class MusicXMLTranslator:
 
         return items
 
-    def map_duration(self, m21_duration) -> Duration:
+    def map_duration(self, m21_duration, measure_number: "int | None" = None) -> Duration:
         is_triplet = False
         if m21_duration.tuplets:
             t = m21_duration.tuplets[0]
             if t.numberNotesActual == 3 and t.numberNotesNormal == 2:
                 is_triplet = True
+            else:
+                # Only 3-in-the-time-of-2 is supported (BANA 8.5's
+                # irregular-group signs for other ratios are out of scope,
+                # not yet verified against the primary source). This falls
+                # through to the nearest-power-of-2 approximation below,
+                # which under-counts the true duration -- warn so the
+                # discrepancy isn't silent, but keep converting (matching
+                # this parser's existing best-effort tolerance for large,
+                # complex real-world scores rather than hard-stopping a
+                # whole piece over one unsupported passage).
+                where = f" in measure {measure_number}" if measure_number is not None else ""
+                warnings.warn(
+                    f"Unsupported tuplet ratio {t.numberNotesActual}:{t.numberNotesNormal}"
+                    f"{where} -- DottedNotes only supports 3-in-the-time-of-2 "
+                    "tuplets (BANA 8.4). Duration approximated; the surrounding "
+                    "measure(s) may not add up to the time signature.",
+                    stacklevel=2,
+                )
 
         m21_type = m21_duration.type
         val = M21_DURATION_MAP.get(m21_type)
         dots = m21_duration.dots
 
-        # MusicXML allows <type> and <duration> to diverge (e.g. a "whole rest"
-        # used as a fermata-hold convention that doesn't actually span a whole
-        # measure) -- if the declared type/dots don't reproduce the note's
-        # actual quarterLength, trust quarterLength instead. Otherwise the
-        # mismatched duration survives into export and desyncs the measure.
+        # MusicXML allows <type>/<dots> and <duration> to diverge (e.g. a
+        # "whole rest" used as a fermata-hold convention that doesn't
+        # actually span a whole measure, or a note whose <duration> implies
+        # a dotted value with no <dot> tag present) -- if the declared
+        # type/dots don't reproduce the note's actual quarterLength, trust
+        # quarterLength instead. Otherwise the mismatched duration survives
+        # into export and desyncs the measure.
         actual_ticks = round(m21_duration.quarterLength * TICKS_PER_QUARTER)
         if val is None or Duration(value=val, dots=dots, is_triplet=is_triplet).duration_in_ticks() != actual_ticks:
+            # Search for an exact (value, dots) match against the note's
+            # true duration before falling back to an imprecise
+            # nearest-power-of-2 guess -- the previous code always reset
+            # dots to 0 here, so a genuinely dotted duration (e.g. exactly
+            # 3 quarter-beats) silently lost its dot and came out a full
+            # beat short, with no warning.
+            match = None
+            for candidate_val in sorted(VALID_DURATIONS, reverse=True):
+                for candidate_dots in (0, 1, 2):
+                    candidate = Duration(value=candidate_val, dots=candidate_dots, is_triplet=is_triplet)
+                    if candidate.duration_in_ticks() == actual_ticks:
+                        match = candidate
+                        break
+                if match is not None:
+                    break
+            if match is not None:
+                return match
+
             val = None
             ql = m21_duration.quarterLength
             if ql >= 8.0: val = 0
@@ -738,9 +809,36 @@ class MusicXMLTranslator:
             octave = 4
         octave += ottava_shift
 
+        # Note.accidental must record the note's actual sounding pitch
+        # alteration whenever it's a REAL deviation from the active key
+        # signature -- never gated on music21's own `displayStatus`
+        # bookkeeping, which also goes False for a tied-continuation note
+        # (and other "implied, not restated" cases) that still sounds the
+        # altered pitch. Dropping it in that case previously produced a
+        # wrong LilyPond pitch letter (e.g. "b" instead of "bes"), silently
+        # breaking ties whose pitch no longer matched.
+        #
+        # The correct suppression signal is instead "does this alteration
+        # match what the active key signature already implies for this
+        # pitch step" -- if so, LilyPond/braille apply the key signature
+        # automatically and no note-level accidental should be recorded at
+        # all (this is also what keeps a real orchestral score's accidental
+        # count sane: music21 attaches internal pitch-spelling bookkeeping
+        # to nearly every note in a keyed piece, not just genuinely altered
+        # ones). Whether a genuinely-different, still-present accidental
+        # is merely *redundant to restate* (e.g. already shown earlier in
+        # the same measure) is a separate, already-implemented concern
+        # (BANAValidator's S9c-redundant-accidental rule, surfaced via
+        # --report), not something to pre-decide by omitting it here.
         acc = None
-        if pitch.accidental is not None and pitch.accidental.displayStatus is not False:
-            m21_acc = pitch.accidental
+        m21_acc = None
+        if pitch.accidental is not None:
+            key_sig = m21_note.getContextByClass(music21.key.KeySignature)
+            key_accidental = key_sig.accidentalByStep(pitch.step) if key_sig else None
+            key_alter = key_accidental.alter if key_accidental else 0.0
+            if pitch.accidental.alter != key_alter:
+                m21_acc = pitch.accidental
+        if m21_acc is not None:
             acc_type = None
             name = m21_acc.name
             if name == 'sharp': acc_type = AccidentalType.SHARP
@@ -835,19 +933,38 @@ class MusicXMLTranslator:
             if m21_note.tie.type in ('start', 'continue'):
                 note.tie = True
                 
+        # A slur's plain-vs-bracket role (BANA 13.3: the first of two+
+        # simultaneously overlapping slurs stays a plain slur, any
+        # additional one(s) get bracket treatment) must be decided ONCE per
+        # slur and remembered by object identity -- `getSpannerSites`
+        # returns the same Slur object at both its start and end notes, but
+        # its position in that per-note list isn't guaranteed consistent
+        # between the two, so deciding "plain vs bracket" independently at
+        # each note (the previous approach) could assign a slur one role at
+        # its start and the other at its end, producing mismatched
+        # LilyPond slur signs ("already have slur"/"cannot end slur").
+        # Endings are resolved before openings on this note so a note that
+        # simultaneously closes one phrase and opens the next isn't
+        # mistaken for a real overlap.
         slurs = m21_note.getSpannerSites(music21.spanner.Slur)
-        for idx, slur in enumerate(slurs):
-            if idx == 0:
-                if slur.isFirst(m21_note):
-                    note.slur_start = True
-                if slur.isLast(m21_note):
+        for slur in slurs:
+            if slur.isLast(m21_note):
+                role = self._slur_roles.get(id(slur), "primary")
+                if role == "primary":
                     note.slur_end = True
-            else:
-                if slur.isFirst(m21_note):
-                    note.slur_bracket_open = True
-                if slur.isLast(m21_note):
+                else:
                     note.slur_bracket_close = True
-                
+                self._open_slur_ids.discard(id(slur))
+        for slur in slurs:
+            if slur.isFirst(m21_note):
+                role = "bracket" if self._open_slur_ids else "primary"
+                self._slur_roles[id(slur)] = role
+                self._open_slur_ids.add(id(slur))
+                if role == "primary":
+                    note.slur_start = True
+                else:
+                    note.slur_bracket_open = True
+
         return note
 
 
