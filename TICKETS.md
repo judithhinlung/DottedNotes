@@ -7441,5 +7441,499 @@ Two things must not get lost in implementation:
 
 </details>
 
+---
+
+# Sprint 10d: MusicXML Import Hardening, Round 2
+
+Estimated time: 2–3 weeks.
+
+**Why this sprint exists:** DottedNotes currently has no solo instruments
+besides piano tested against real-world input, so a real OMR-sourced
+MusicXML solo flute piece (Gerhard Roberto, *Capriccio No. 2*,
+`tests/fixtures/gerhard_roberto_capriccio2_for_flute.xml`) was used as a
+stress test, alongside the (unofficial but widely used) MusicXML Test Suite
+at `~/workspace/musicxmlTestSuite` (150 files, covering nearly every
+MusicXML tag/attribute in isolation). Converting the flute piece all the
+way to `.brf` surfaced a real crash (S10d-0, already fixed below) and a
+serious validator-consistency bug (S10d-1); running all 150 test-suite
+files through `load_musicxml()` + `BrailleRenderer` surfaced 7 further
+crashes and ~20 distinct "succeeded but silently wrong or dropped content"
+patterns. This sprint catalogs the ones judged worth a dedicated ticket,
+each already grounded in a specific repro file and, where one exists, a
+BANA Music Braille Code 2015 citation -- confirm any dot patterns quoted
+below against `bana_symbols.py`/the manual directly before implementing,
+per this file's standing rule; none of these have been developer-confirmed
+yet.
+
+**Already fixed while surveying (not a ticket, just for traceability):** a
+`Tuplet`/`InAccord`-voice/`AlternatingTremolo` whose last item is a bare
+`Rest` was propagated as the "previous note" for the next item's octave-
+interval comparison, crashing with `AttributeError: 'Rest' object has no
+attribute 'octave'` the first time real music hit it (confirmed: measure 7
+of the flute piece, a triplet ending in a rest). Fixed via a shared
+`_last_real_note()` helper in `models/measure.py` that skips rests and
+recurses into nested tuplets instead of falling back to whatever the last
+raw item happened to be.
+
+---
+
+### [ ] S10d-1: BANAValidator's octave-mark rule floods false positives on any multi-measure-per-line output
+
+**Why:** `--report` flagged "Missing octave mark" on essentially every
+measure of the flute piece (229 corrections, out of ~165 measures) --- and
+the same false-positive flood reproduces on an existing, unmodified BRF
+fixture too (`fengyang_flower_drum.brf`: 97 false positives), so this is
+not a MusicXML-specific bug. `validation/validator.py`'s
+`_validate_octave_marks()` (line ~281) treats *every measure boundary* as
+an octave-mark reset point:
+```python
+elif last_measure_number is not None and m_num != last_measure_number:
+    # BANA resets octave tracking at every measure boundary, not
+    # just line starts -- Note.to_braille() (the actual renderer)
+    # already forces an octave mark whenever is_measure_start is
+    # True, regardless of interval size. This mirrors that rule.
+    is_reset = True
+```
+That comment describes the renderer's behavior *before* this project's own
+"Fix missing line-start octave marks and word signs in braille output"
+commit. `BrailleRenderer._render_solo` (and the piano/ensemble equivalents)
+now only force `is_measure_start=True` for a measure that starts a new
+*physical braille line* -- mid-line measures don't get it unless
+`octave_mark_every_measure` is on -- matching BANA 3.2.1 ("The octave is
+always marked for the first note of a braille line..."), not "every
+measure." The validator's copy of this rule was never updated to match,
+so it now disagrees with the renderer it's supposed to be checking.
+
+**The hard part:** "is this measure boundary also a line boundary" is a
+*render-time* decision (depends on `line_width`, compression, hand/
+ensemble layout) that the validator currently has no access to -- it
+operates on the parsed `Score` alone. Fixing this properly likely means
+either (a) having `BANAValidator` accept the actual rendered line-break
+positions from a `BrailleRenderer` pass and check against those, or (b) if
+line breaks turn out to be reproducible from the score alone under the
+same settings the caller intends to render with, threading that same
+`line_width`/settings through to the validator so it can compute the same
+packing decision independently. Don't guess which -- read
+`BrailleRenderer._render_solo`/`_render_ensemble`'s packing loops first to
+see whether (b) is actually feasible without duplicating significant
+layout logic before choosing.
+
+**Steps:**
+1. Read `_render_solo`, `_render_piano`, `_render_ensemble`'s measure-
+   packing loops to determine whether line-break positions can be
+   recomputed cheaply from `(Score, line_width, compression_level, ...)`
+   without re-deriving the full renderer.
+2. Either thread real line-break info into `BANAValidator`, or change
+   `_validate_octave_marks` to stop treating a bare measure-number change
+   as a reset point (falling back to the interval-based rules already
+   below it in the same function for mid-line measures).
+3. Add a regression test using a real multi-measure-per-line fixture
+   (e.g. `g_major_scale.brf`, currently only 1 false positive since it's
+   short, vs. a longer fixture) asserting the corrected count of "missing
+   octave mark" corrections matches hand-verified expectations, not "one
+   per measure."
+4. Re-run `--report` against `fengyang_flower_drum.brf` and the flute
+   fixture and confirm the false-positive flood is gone.
+
+**Definition of Done:**
+- [ ] `_validate_octave_marks` agrees with `BrailleRenderer`'s actual,
+  current line-start-only rule (BANA 3.2.1) instead of a stale "every
+  measure" assumption.
+- [ ] False-positive count on `fengyang_flower_drum.brf` and the flute
+  fixture drops to (hand-verified) genuine issues only.
+- [ ] New tests pass; existing `test_validation.py` suite has no
+  regressions.
+
+---
+
+### [ ] S10d-2: BANAValidator reports "Line 1" for every correction on MusicXML/LilyPond-imported scores
+
+**Why:** Every line-number field in `--report`'s output comes from
+`Note.parsed_tokens[0].line`, falling back to `1` when `parsed_tokens` is
+empty (`validator.py`, at least 8 call sites, e.g. line 267:
+`line_num = curr_note.parsed_tokens[0].line if curr_note.parsed_tokens else 1`).
+`parsed_tokens` is populated *only* by `braille_parser.py`'s tokenizer --
+confirmed empty for every `Note` produced by `musicxml_parser.py` (and,
+presumably, `lilypond_parser.py`, not separately checked here). Confirmed:
+all 229 corrections for the flute piece say "Line 1", regardless of which
+of the piece's ~40 physical braille lines the issue is actually on -- for
+a blind composer relying on `--report` to navigate back to a specific
+line, this makes the report state "somewhere in this piece" instead of
+pointing anywhere useful.
+
+**Steps:**
+1. Decide what "line" should mean for a non-BRF-sourced score: the
+   rendered *braille output* line number (requires the same render-time
+   coupling as S10d-1) is the most useful answer for a user reading the
+   `.brf` output, but is not available to a validator that only sees the
+   parsed `Score`. A source-XML line number (from `music21`, if it tracks
+   one) would at least be *something*, though it points at the wrong
+   artifact (the input, not the output the user is reading).
+2. Most likely: solve alongside S10d-1, since both need the validator to
+   know the actual rendered line layout. Consider whether one shared
+   mechanism (validator runs against an already-rendered `BrailleRenderer`
+   pass, or receives a measure-number -> braille-line-number map from one)
+   fixes both tickets at once.
+3. Add a regression test asserting corrections for a MusicXML-sourced
+   multi-line score report distinct, correct line numbers, not a constant.
+
+**Definition of Done:**
+- [ ] `--report` on a MusicXML- or LilyPond-imported score reports a
+  genuinely useful line reference, not a constant "Line 1".
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-3: `load_musicxml()` lets internal translation errors surface as raw tracebacks
+
+**Why:** `load_musicxml()` (`musicxml_parser.py`) only wraps
+`music21.converter.parse(source)` in `try/except DottedNotesError` --
+`MusicXMLTranslator().translate(m21_score)` (the much larger, more
+failure-prone step) runs unguarded. Confirmed: the test suite's own
+deliberately-malformed-input file,
+`33e-Spanners-OctaveShifts-InvalidSize.xml` (an octave-shift/ottava
+spanner with a garbage size attribute), raises a raw
+`music21.exceptions21.SpannerException: Cannot get shift magnitude from
+'a'` all the way up through `cli.py`'s `main()` -- a full Python
+traceback, not the plain-text `Error: ...` line this project's own Key
+Design Decision 7 promises ("Error messages: Always plain text, always
+meaningful ... never silent failures"). Any other not-yet-cataloged
+internal error during translation (several of which surfaced during this
+same survey -- see S10d-4 through S10d-8) will do the same thing today.
+
+**Steps:**
+1. Wrap the `MusicXMLTranslator().translate(m21_score)` call in
+   `load_musicxml()` in the same style as the existing
+   `music21.converter.parse` guard, catching broad `Exception` and
+   re-raising as `DottedNotesError` with the original message -- mirroring
+   how `cli.py`'s `main()` already expects to catch exactly one error
+   type cleanly.
+2. Decide whether some internal exceptions (e.g. ones this sprint's other
+   tickets turn into a specific, named `DottedNotesError` subclass) should
+   be allowed to pass through this wrapper unchanged rather than being
+   re-wrapped generically -- likely yes, so a caller can still distinguish
+   "unsupported tuplet ratio" from "malformed spanner data" if that ever
+   matters.
+3. Add a regression test using `33e-Spanners-OctaveShifts-InvalidSize.xml`
+   (or a minimal hand-built equivalent) asserting `load_musicxml()` raises
+   `DottedNotesError` with a plain-text message, not a raw
+   `SpannerException`.
+
+**Definition of Done:**
+- [ ] No internal `music21`/DottedNotes exception during MusicXML
+  translation reaches the CLI as a raw traceback.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-4: Tuplet ratios beyond 3-in-the-time-of-2 (BANA 8.5, irregular groups)
+
+**Why:** Confirmed the single most commonly-hit missing feature across
+real and varied scores: the flute piece alone uses 5:4 and 7:4 ratios in 4
+different measures, and just the sampled MusicXML test-suite files add
+4:2, 4:1, 7:3, 6:2, 4:3, 17:3, 7:5, and 6:4 (`23a`/`23b`/`23c`/`23e`).
+Currently (as of this session's warn-instead-of-silently-guess fix)
+`map_duration()` warns and falls back to a nearest-power-of-2
+approximation, which keeps the piece converting but never actually
+transcribes the irregular group correctly. BANA Music Braille Code 2015
+Par. 8.5 (referenced already in `tuplet.py`'s docstring as "out of scope")
+defines the irregular-group sign(s) for ratios other than 3:2 --- fetch
+and read Par. 8.5 directly (this repo's cached copy, if still present in
+whatever scratchpad this ticket was written from, or re-download) before
+implementing; don't guess the dot pattern the way this project never
+guesses BANA cells from memory.
+
+**Steps:**
+1. Fetch and read BANA Par. 8.5 (irregular groups) directly from the
+   manual. Confirm whether it covers arbitrary N:M ratios or only specific
+   ones (quintuplets, septuplets, etc.), and what the actual dot pattern/
+   placement convention is.
+2. Extend `models/tuplet.py`'s `Tuplet` (or add a sibling model, if the
+   BANA sign differs enough structurally from the existing 3:2 case) to
+   carry an arbitrary ratio, not just `is_triplet: bool`.
+3. Extend `_translate_note_stream`/`map_duration` (`musicxml_parser.py`)
+   to group these into the new model instead of falling through to the
+   plain-item/approximation path, using the *exact* ratio from
+   `m21_duration.tuplets[0]` instead of only special-casing 3:2.
+4. Implement `to_braille()`/`to_lilypond()` for the new ratio(s), verified
+   against a real `lilypond` binary compile (LilyPond already supports
+   arbitrary tuplet ratios via `\tuplet n/m`) and against the BANA-derived
+   dot pattern from step 1.
+5. Add tests: a 5:4 and a 7:4 fixture (both real ratios confirmed in the
+   flute piece) round-tripping through MusicXML import with a correct,
+   exact (not approximated) duration and the correct BANA sign.
+
+**Definition of Done:**
+- [ ] At least 5:4 and 7:4 (the ratios confirmed in real repro material)
+  transcribe with an exact duration and a BANA-verified sign, not an
+  approximation.
+- [ ] The existing "unsupported ratio" warning either narrows to whatever
+  ratios remain genuinely unsupported, or is removed if this ticket
+  covers arbitrary ratios generally.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-5: Chord grouping breaks when a non-note element interrupts consecutive `<chord/>` notes
+
+**Why:** MusicXML allows `<direction>` (and other) elements to appear
+between the first note of a chord and its `<chord/>`-tagged continuation
+notes -- confirmed via the test suite's own
+`21f-Chord-ElementInBetween.xml` (a `<segno/>` and a dynamics `<p/>`
+direction sit between the first and second notes of a 3-note chord).
+DottedNotes' chord-grouping in `_translate_note_stream`
+(`musicxml_parser.py`) apparently treats the interruption as "end of
+chord", splitting a single 3-note chord into `Note(A)` + `Chord([F])` +
+`Chord([D])` -- three separate items, each counted as its own beat instead
+of one simultaneous beat. Confirmed via direct inspection: the measure's
+resolved beat count comes out to 6.0 instead of the correct 4.0.
+
+**Steps:**
+1. In `_translate_note_stream`, when scanning `elements` for chord
+   grouping, skip over non-`Note`/`Rest`/`Chord` stream elements (e.g.
+   `music21.dynamics.Dynamic`, spanner boundary markers) rather than
+   letting them terminate the current chord group -- confirm exactly
+   which element types `music21`'s own stream iteration surfaces here
+   before writing the skip condition, rather than guessing.
+2. Add a regression test using `21f-Chord-ElementInBetween.xml` (or a
+   minimal equivalent) asserting the measure imports as one `Chord` with
+   3 notes, and that the resolved beat count matches the time signature.
+
+**Definition of Done:**
+- [ ] A chord followed by a non-note element mid-sequence still imports
+  as one `Chord`, not several.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-6: `<backup>` that doesn't fully rewind to measure start isn't mapped to BANA's part-measure in-accord
+
+**Why:** MusicXML's `<backup>` element can rewind by less than the full
+duration already consumed (a legitimate way to stagger two voices' entry
+points within one measure) -- confirmed via the test suite's own
+`03b-Rhythm-Backup.xml`: voice 1 plays 2 quarter notes (2 beats), a
+`<backup duration="2">` rewinds only 1 beat (not the full 2), then voice 2
+plays 2 more quarter notes starting from that offset point, not from the
+measure start. `InAccord` already models exactly this distinction
+(`in_accord_type='part_measure'`, BANA Par. 11.1.2, vs. `'full_measure'`,
+Par. 11.1.1 -- see `models/in_accord.py`'s docstring), but S10b-1's voice
+import always uses `'full_measure'`, so a partially-offset backup like
+this one gets combined as if both voices started together, misrepresenting
+the actual rhythm.
+
+**Steps:**
+1. In `translate_measure`'s voice-handling branch (`musicxml_parser.py`),
+   detect when a `<backup>` (surfaced via `music21`'s voice/offset
+   handling -- confirm exactly how `music21` exposes partial backups
+   before writing the detection) doesn't rewind to the measure's start
+   offset, and reflect that as a `part_measure` in-accord (or an ordinary
+   sequential item followed by a `full_measure` in-accord for the
+   overlapping remainder, depending on what Par. 11.1.2 actually
+   prescribes for a partial-overlap case -- read it directly rather than
+   assuming a shape).
+2. Add a regression test using `03b-Rhythm-Backup.xml` (or a minimal
+   equivalent) asserting the resulting BRF matches BANA Par. 11.1.2's
+   part-measure in-accord convention, and that the resolved beat count is
+   correct (4.0, not 2.0).
+
+**Definition of Done:**
+- [ ] A partially-rewound `<backup>` imports as a part-measure in-accord
+  (or whatever the manual actually prescribes), not a naive full-measure
+  combination.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-7: Non-traditional/microtonal key signatures (`<key-step>`/`<key-alter>`) not imported at all
+
+**Why:** MusicXML supports two key-signature encodings: `<fifths>` (the
+common case, already supported) and a list of `<key-step>`/`<key-alter>`
+pairs for a "non-traditional" key (e.g. an octatonic or custom scale) --
+confirmed via the test suite's `13c-KeySignatures-NonTraditional.xml` and
+`13d-KeySignatures-Microtones.xml`, both of which crash with
+`TypeError: '<=' not supported between instances of 'int' and 'NoneType'`
+because `translate_measure` only reads `keys[0].sharps`, which is `None`
+for this encoding. BANA Par. 6.5.1 ("Unusual Key Signatures") already
+documents the transcription convention: "music parenthesis, hand or clef
+sign, accidental, octave mark, note(s), closing music parenthesis" -- this
+is a real, named BANA concept, not an out-of-scope curiosity.
+
+**Steps:**
+1. Fetch and read BANA Par. 6.5.1 directly to confirm the exact cell
+   sequence/placement (the "music parenthesis" sign, specifically) before
+   implementing -- this repo already has `bana_symbols.py`'s music-
+   parenthesis cell for another context (chord symbols, Table 23); confirm
+   whether it's the same cell here or a different one.
+2. In `translate_measure`, detect `<key-step>`/`<key-alter>` (via
+   whatever `music21` exposes for this -- `keys[0].sharps is None` is
+   already the detection signal that currently crashes) and represent it
+   distinctly from the numeric `sharps_or_flats` model, likely as a new,
+   explicit field/variant on `KeySignature` rather than trying to force it
+   into the existing ±7 integer.
+3. Implement `to_braille()` for this variant per Par. 6.5.1, and decide
+   what (if anything) sensible `to_lilypond()` output looks like for a
+   non-traditional key (LilyPond has its own custom-key-signature syntax;
+   verify against the Notation Reference before writing it, per this
+   project's standing rule).
+4. Add tests using both test-suite fixtures, asserting a clean import
+   (no crash) and BANA-Par.-6.5.1-shaped braille output.
+
+**Definition of Done:**
+- [ ] Non-traditional key signatures import without crashing and produce
+  BANA-Par.-6.5.1-shaped output.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-8: Key signatures beyond ±7 sharps/flats crash instead of using BANA's numeral-prefixed form
+
+**Why:** `KeySignature`'s `sharps_or_flats` is hard-limited to −7…+7;
+confirmed via the test suite's own `13aa-KeySignatures-Extreme.xml`
+(fifths values down to −11), which raises
+`ValueError: sharps_or_flats must be in –7 … +7, got -11`. BANA Par. 6.5
+already documents the correct convention for 4+ accidentals: "the number
+including the numeric indicator precedes a single flat or sharp sign" --
+i.e. BANA's key-signature notation is not inherently capped at 7; the cap
+is specific to DottedNotes' current model, not to BANA itself. (Low
+practical priority -- an 11-accidental key signature is a theoretical/
+enharmonic-respelling curiosity, not something a real solo instrumental
+piece is likely to need -- but a clean, documented limit or a real
+extension is better than a raw `ValueError`.)
+
+**Steps:**
+1. Re-read BANA Par. 6.5's numeral-prefixed form for 4+ accidentals
+   (already partially quoted in this project's own `to_braille()` for the
+   4-7 case, per `key_signature.py` -- confirm whether that existing code
+   already generalizes past 7 or is itself hardcoded to the same range)
+   and either extend it past 7, or raise a clean `DottedNotesError`
+   instead of a raw `ValueError` if the decision is to keep the limit.
+2. Add a test confirming whichever behavior is chosen (extended range, or
+   a clean plain-text error) for a key signature beyond ±7.
+
+**Definition of Done:**
+- [ ] A key signature beyond ±7 either transcribes correctly (BANA Par.
+  6.5) or fails with a clean, plain-text `DottedNotesError` -- never a raw
+  `ValueError` traceback.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-9: Note values finer than 64th and augmentation dots beyond 2 crash instead of using BANA's value signs
+
+**Why:** `Duration.dots` is limited to 0-2 and `VALID_DURATIONS` tops out
+at 64th notes; confirmed via the test suite's
+`03d-Rhythm-DottedDurations-Factors.xml` (a note with 4 `<dot/>` tags,
+`ValueError: Invalid dot count: 4`) and `03ab-Rhythm-Durations.xml`
+(`ValueError: denominator must be a power of 2 in [1, 2, 4, 8, 16, 32], got
+64`, i.e. a 128th-note-equivalent duration). BANA Par. 2.3 ("Dotted
+Notes") states plainly: "When a note has more than one dot, the same
+number of dot 3s are given in the braille" -- no cap at 2 is stated there.
+Par. 2.4/2.4.1 go further and explicitly cover 128th and 256th notes,
+via a "larger/smaller value" sign (`^<1`/`,<1`) used to disambiguate
+otherwise-ambiguous note values -- both finer values and 3+ dots are
+real, documented BANA constructs, not out-of-scope extremes. (Rare in
+practice for solo instrumental writing, but real repro data exists in
+this survey, and the current behavior is a raw crash rather than a
+graceful limit.)
+
+**Steps:**
+1. Fetch and read BANA Par. 2.3/2.4/2.4.1 directly, confirming the exact
+   dot-tripling convention for 3+ dots and the value-sign cells/placement
+   rule for 128th/256th notes, before touching `bana_symbols.py` or
+   `models/duration.py`.
+2. Extend `Duration` to allow more than 2 dots and note values below 64
+   (128, 256), and extend `duration_in_ticks()`'s dot-scaling formula
+   (currently hardcoded for exactly 0/1/2) to a general case.
+3. Implement the larger/smaller value-sign placement logic in whichever
+   render path needs it (likely `Note.to_braille()`, checking the
+   previous/next note's value the same way existing ambiguity-resolution
+   code already does elsewhere in this parser).
+4. At minimum, even before implementing the full value-sign mechanism,
+   replace the raw `ValueError` with a clean `DottedNotesError` so a
+   score using these values fails gracefully rather than with a
+   traceback, if the fuller implementation is deferred further.
+5. Add tests using both test-suite fixtures.
+
+**Definition of Done:**
+- [ ] Notes with 3+ dots or finer-than-64th values either transcribe
+  correctly per BANA Par. 2.3/2.4, or fail with a clean plain-text error
+  -- never a raw `ValueError` traceback.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-10: Missing lead-sheet chord-symbol mapping for "augmented-seventh" (and similar combination kinds)
+
+**Why:** Confirmed via the test suite's `71f-AllChordTypes.xml`: MusicXML
+chord kind `augmented-seventh` isn't in
+`_CHORD_KIND_TO_MODEL_FIELDS` (`musicxml_parser.py`), raising
+`DottedNotesError: Unrecognized MusicXML chord kind 'augmented-seventh'`
+-- already a clean error, not a crash, so this is a small/easy gap rather
+than a robustness issue. BANA Table 23 doesn't need a new sign for this:
+it's the existing "Plus" sign (augmented) combined with the existing
+"Italic 7" sign (seventh) already used elsewhere in the same dict (see
+e.g. `'dominant-seventh': {'extensions': [(7, None)]}` and how
+`is_augmented`/`is_diminished` combine with `extensions` for other kinds)
+-- this ticket is "add the missing dict entry using primitives that
+already exist," not new BANA research.
+
+**Steps:**
+1. Add `'augmented-seventh': {'is_augmented': True, 'extensions': [(7,
+   None)]}` to `_CHORD_KIND_TO_MODEL_FIELDS`.
+2. Cross-check the full MusicXML 4.0 chord-kind vocabulary against this
+   dict's current keys (the spec lists ~30 standard kinds) for other
+   similarly-missing combinations while already in this area, rather than
+   fixing only the one this survey happened to hit.
+3. Add a test using `71f-AllChordTypes.xml` asserting every chord kind in
+   that fixture imports without raising.
+
+**Definition of Done:**
+- [ ] `71f-AllChordTypes.xml` imports without raising.
+- [ ] Any other MusicXML-spec-standard chord kinds missing from the dict
+  are filled in at the same time.
+- [ ] New tests pass; existing test suite has no regressions.
+
+---
+
+### [ ] S10d-11: Unpitched percussion notes (`<unpitched>`) are silently dropped entirely (scope decision needed)
+
+**Why:** Confirmed via the test suite's `73a-Percussion.xml`: a Timpani
+staff (pitched percussion, written with real `<pitch>` elements) imports
+correctly, but Cymbals and Triangle staves (using `<unpitched>` instead of
+`<pitch>`) import as completely empty measures -- not even converted to
+rests, just absent, with the resolved beat count coming out to 0.0.
+BANA Chapter 34 ("Percussion") documents the transcription convention in
+detail (Par. 34.2 "Typical Braille Transcription", 34.2.1 "Note Names",
+34.2.2 "Octave Marks", 34.2.3 "Interval Signs and In-Accords", 34.7 "Drum
+Kit Transcriptions"), so this is a real, well-documented gap, not a
+guess -- but per this project's current stated scope (solo instrumental,
+not yet ensemble/orchestral percussion), this is lower priority than the
+other tickets in this sprint unless a percussion piece becomes a near-term
+target. Flagging for a scope decision rather than assuming it should be
+built now.
+
+**Steps (if greenlit):**
+1. Fetch and read BANA Chapter 34 directly (Par. 34.2.1/34.2.2/34.2.3 in
+   particular) before implementing anything -- unpitched percussion note
+   naming/octave conventions differ from pitched instruments and
+   shouldn't be guessed from the pitched-note code path.
+2. Decide on a model representation for an unpitched note (a distinct
+   field on `Note`, or a new lightweight model -- BANA's own note-naming
+   convention from step 1 should inform which fits better).
+3. Import `<unpitched>` elements in `_translate_note_stream`
+   (`musicxml_parser.py`) instead of silently skipping them.
+4. Implement `to_braille()` per BANA 34.2, and `to_lilypond()` (LilyPond's
+   percussion-staff/note-name syntax, verified against the Notation
+   Reference, not guessed).
+5. Add a test using `73a-Percussion.xml` asserting Cymbals/Triangle
+   measures import with real content, not empty.
+
+**Definition of Done:**
+- [ ] Explicit scope decision recorded (build now vs. defer) before any
+  code changes.
+- [ ] If built: unpitched percussion notes import and transcribe per BANA
+  Chapter 34, verified tests pass, existing test suite has no
+  regressions.
+
 
 

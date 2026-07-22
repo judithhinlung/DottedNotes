@@ -67,6 +67,28 @@ def _item_ticks(item: MeasureItem) -> int:
     return item.duration.duration_in_ticks()
 
 
+def _last_real_note(items: list) -> Optional[Note]:
+    """Scan `items` from the end for the last item carrying an actual
+    pitch (a Note, or a Chord's written note), skipping bare Rests and
+    recursing into a nested Tuplet's own items -- used to find the correct
+    octave-interval reference after a Tuplet/InAccord voice/
+    AlternatingTremolo whose last element is a Rest, which has no pitch
+    and must never itself become "the previous note" (Note.to_braille's
+    octave logic accesses prev_note.octave/note_name unconditionally, so
+    assigning it a Rest crashes instead of just rendering an extra octave
+    mark)."""
+    for sub in reversed(items):
+        if hasattr(sub, 'notes') and sub.notes:
+            return sub.notes[0]
+        if isinstance(sub, Note):
+            return sub
+        if hasattr(sub, 'items') and sub.items:
+            inner = _last_real_note(sub.items)
+            if inner is not None:
+                return inner
+    return None
+
+
 def _render_note_list_to_braille(
     items: list,
     prev_note: Optional[Note] = None,
@@ -208,13 +230,11 @@ def _render_note_list_to_braille(
             elif isinstance(item, Chord) and item.notes:
                 curr_prev = item.notes[0]
             elif isinstance(item, Tuplet) and item.items:
-                last_sub = item.items[-1]
-                curr_prev = last_sub.notes[0] if hasattr(last_sub, 'notes') and last_sub.notes else last_sub
+                curr_prev = _last_real_note(item.items) or curr_prev
             elif isinstance(item, InAccord) and item.parts and item.parts[0]:
-                last_sub = item.parts[0][-1]
-                curr_prev = last_sub.notes[0] if hasattr(last_sub, 'notes') and last_sub.notes else last_sub
+                curr_prev = _last_real_note(item.parts[0]) or curr_prev
             elif isinstance(item, AlternatingTremolo):
-                curr_prev = item.items[1].notes[0] if hasattr(item.items[1], 'notes') and item.items[1].notes else item.items[1]
+                curr_prev = _last_real_note(item.items) or curr_prev
 
             # A leading Rest never receives (or consumes) the octave-mark
             # reset: BANA 3.2.1 requires the octave mark on the first NOTE

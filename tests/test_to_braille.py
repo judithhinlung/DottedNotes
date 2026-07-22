@@ -178,6 +178,27 @@ def test_tuplet_with_rest_to_braille_does_not_raise():
     assert brl
 
 
+def test_tuplet_ending_in_rest_does_not_crash_next_notes_octave_logic():
+    # Regression test (found via a real OMR-sourced MusicXML solo flute
+    # piece, gerhard_roberto_capriccio2_for_flute.xml, measure 7): when a
+    # Tuplet's LAST item is a Rest, _render_note_list_to_braille's
+    # curr_prev tracking (models/measure.py) used to fall back to
+    # assigning the Rest object itself as "the previous note" -- fine
+    # until the NEXT note's octave-interval comparison unconditionally
+    # accessed prev_note.octave/note_name, crashing with AttributeError:
+    # 'Rest' object has no attribute 'octave'. The correct previous note
+    # is the tuplet's last REAL note (skipping the trailing rest), not
+    # the rest itself.
+    n1 = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(value=8, dots=0))
+    r = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=8, dots=0))
+    t = Tuplet(items=[n1, r])
+    n2 = Note(dots=frozenset(), category=None, raw_brl="", note_name="D", octave=4, duration=Duration(value=4, dots=0))
+    m = Measure(number=1, notes=[t, n2])
+    brl, last_note = m.to_braille(is_measure_start=True)
+    assert brl
+    assert last_note is n2
+
+
 def test_measure_with_measure_repeat_to_braille_does_not_raise():
     mr = MeasureRepeat(count=2, line=0)
     m = Measure(number=1, notes=[mr])
