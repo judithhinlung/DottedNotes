@@ -211,6 +211,9 @@ def _run_convert(args: argparse.Namespace) -> None:
                 compression_level=args.compression,
                 page_numbers=not args.no_page_numbers,
                 measure_numbering=args.measure_numbering,
+                octave_mark_every_measure=args.octave_mark_every_measure,
+                full_measure_repeat=args.full_measure_repeat,
+                min_repeated_measures=args.min_repeated_measures,
             )
             is_brl = output_path is not None and Path(output_path).suffix.lower() == ".brl"
             if is_brl:
@@ -320,6 +323,40 @@ def main() -> None:
         default="full",
         help="Set repeat and shorthand compression level (none, minimal, full) "
              "for .brf/.brl output; has no effect on .ly output",
+    )
+    convert_parser.add_argument(
+        "--octave-mark-every-measure",
+        action="store_true",
+        help="For .brf/.brl output, force the octave mark on every "
+             "measure's first note, not just measures that start a new "
+             "braille line. Additive on top of the required BANA 3.2.1 "
+             "trigger points (line start, after a word sign/numeric "
+             "indicator) -- never suppresses a mark that would already be "
+             "shown. Off by default; has no effect on .ly output.",
+    )
+    convert_parser.add_argument(
+        "--full-measure-repeat",
+        choices=["off", "single-voice", "multi-voice"],
+        default="single-voice",
+        help="Control whole-measure repeat-sign compression (BANA Par. "
+             "18.2) for .brf/.brl output, independent of --compression's "
+             "articulation-carry shorthand: 'off' disables repeat-sign "
+             "compression entirely; 'single-voice' (default) compresses "
+             "only measures with no in-accord (multi-voice) content; "
+             "'multi-voice' also allows compressing in-accord-containing "
+             "measures. Has no effect if --compression is 'none' (that "
+             "remains a hard override disabling all compression) or on "
+             ".ly output.",
+    )
+    convert_parser.add_argument(
+        "--min-repeated-measures",
+        type=int,
+        default=2,
+        help="Minimum number of consecutive musically-identical measures "
+             "required before they are compressed into a repeat sign, for "
+             ".brf/.brl output (default 2, the smallest possible repeat: "
+             "one original plus one repetition). Has no effect if "
+             "--full-measure-repeat is 'off' or on .ly output.",
     )
     convert_parser.add_argument(
         "--no-page-numbers",

@@ -1,6 +1,7 @@
 import pytest
 from dottednotes.models.note import Note, Rest
 from dottednotes.models.chord import Chord
+from dottednotes.models.in_accord import InAccord
 from dottednotes.models.measure import Measure
 from dottednotes.models.duration import Duration
 from dottednotes.models.articulation import Articulation, ArticulationType
@@ -77,6 +78,33 @@ def test_musical_equals_measure():
 
     assert m1.musical_equals(m2)
     assert not m1.musical_equals(m3)
+
+
+def test_musical_equals_in_accord_ignores_notation_only_field():
+    # Identical pitches/durations across both parts, differing only in a
+    # notation-only field (articulation_format, set by the rendering-time
+    # carry-shorthand pass) -- must still be musically equal, unlike
+    # Python's default dataclass == (the bug this method fixes).
+    def make_note(art_format="single"):
+        n = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(4))
+        n.articulation_format = art_format
+        return n
+
+    ia1 = InAccord(parts=[[make_note("single")], [make_note("single")]])
+    ia2 = InAccord(parts=[[make_note("start_carry")], [make_note("single")]])
+
+    assert ia1 != ia2  # default dataclass == sees the difference
+    assert ia1.musical_equals(ia2)  # musical_equals doesn't
+
+
+def test_musical_equals_in_accord_detects_real_pitch_difference():
+    n_c = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(4))
+    n_d = Note(dots=frozenset(), category=None, raw_brl="", note_name="D", octave=4, duration=Duration(4))
+
+    ia1 = InAccord(parts=[[n_c], [n_c]])
+    ia2 = InAccord(parts=[[n_d], [n_c]])
+
+    assert not ia1.musical_equals(ia2)
 
 
 def test_compression_none():

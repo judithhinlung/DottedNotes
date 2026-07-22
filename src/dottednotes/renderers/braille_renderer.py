@@ -298,14 +298,18 @@ def render_measure_slice(
     size: int,
     prev_note: Optional[Note],
     time_sig,
-    compression_level: str = "full"
+    compression_level: str = "full",
+    force_all_starts: bool = False,
 ) -> tuple[list[str], Optional[Note]]:
-    """Helper to render a slice of measures. Only the first measure of the slice is treated as a line start."""
+    """Helper to render a slice of measures. Only the first measure of the
+    slice is treated as a line start, unless `force_all_starts` is set (the
+    "octave mark on every measure" reader preference), in which case every
+    measure in the slice is."""
     rendered = []
     curr_prev = prev_note
     for k in range(size):
         m = measures[start_idx + k]
-        is_start = (k == 0)
+        is_start = (k == 0) or force_all_starts
         m_brl, curr_prev = m.to_braille(prev_note=curr_prev, is_measure_start=is_start, time_signature=time_sig, compression_level=compression_level)
         rendered.append(m_brl)
     return rendered, curr_prev
@@ -350,6 +354,15 @@ class TranscriptionMode(Enum):
 # introducing a new pattern for a user-facing setting.
 MEASURE_NUMBERING_MODES = ("auto", "print_score")
 
+# "off": disable full-measure repeat-sign compression (BANA Par. 18.2)
+# entirely. "single-voice": only compress measures with no in-accord
+# (multi-voice) content. "multi-voice": also allow compressing in-accord-
+# containing measures (relies on InAccord.musical_equals -- see
+# _compress_measure_repeats below). Independent of `compression_level`,
+# which continues to gate the unrelated articulation-carry-shorthand pass;
+# `compression_level == "none"` remains a hard override disabling both.
+FULL_MEASURE_REPEAT_MODES = ("off", "single-voice", "multi-voice")
+
 
 class BrailleRenderer:
     def __init__(
@@ -359,6 +372,9 @@ class BrailleRenderer:
         compression_level: str = "full",
         omit_redundant_hairpin_terminators: bool = True,
         measure_numbering: str = "auto",
+        octave_mark_every_measure: bool = False,
+        full_measure_repeat: str = "single-voice",
+        min_repeated_measures: int = 2,
     ):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
@@ -374,6 +390,23 @@ class BrailleRenderer:
                 f"got {measure_numbering!r}"
             )
         self.measure_numbering = measure_numbering
+        # BANA 3.2.1 already forces the octave mark at a line's first note
+        # (and at other required trigger points); this is an additive
+        # reader preference that widens that reset to every measure's
+        # first note, never suppressing a mark that was already required.
+        self.octave_mark_every_measure = octave_mark_every_measure
+        if full_measure_repeat not in FULL_MEASURE_REPEAT_MODES:
+            raise ValueError(
+                f"full_measure_repeat must be one of {FULL_MEASURE_REPEAT_MODES}, "
+                f"got {full_measure_repeat!r}"
+            )
+        self.full_measure_repeat = full_measure_repeat
+        if min_repeated_measures < 2:
+            raise ValueError(
+                "min_repeated_measures must be >= 2 (a repeat needs at "
+                f"least one original plus one repetition), got {min_repeated_measures!r}"
+            )
+        self.min_repeated_measures = min_repeated_measures
 
     def _detect_transcription_mode(self, score: Score) -> TranscriptionMode:
         # is_piano is computed first and independent of isinstance(score,
@@ -440,7 +473,7 @@ class BrailleRenderer:
         ]
 
         measure_repeat_originals: dict[tuple[int, int], list] = {}
-        if self.compression_level != "none":
+        if self.compression_level != "none" and self.full_measure_repeat != "off":
             # Pass 2: Measure repeat compression pass
             measure_repeat_originals = self._compress_measure_repeats(score)
 
@@ -481,7 +514,10 @@ class BrailleRenderer:
         for idx, m in enumerate(staff.measures):
             # Render both possibilities
             brl_start, prev_start = m.to_braille(prev_note=prev_note, is_measure_start=True, time_signature=staff.time_signature, compression_level=self.compression_level)
-            brl_no_start, prev_no_start = m.to_braille(prev_note=prev_note, is_measure_start=False, time_signature=staff.time_signature, compression_level=self.compression_level)
+            # A measure that fits mid-line only forces the octave-mark
+            # reset when the reader-preference setting asks for it --
+            # a line-starting measure (above) always forces it regardless.
+            brl_no_start, prev_no_start = m.to_braille(prev_note=prev_note, is_measure_start=self.octave_mark_every_measure, time_signature=staff.time_signature, compression_level=self.compression_level)
 
             if not current_line:
                 # BANA 24.1.1: "Each segment is introduced at the margin by
@@ -544,8 +580,8 @@ class BrailleRenderer:
             best_prev_lh = prev_note_lh
             
             while idx + group_size <= n_measures:
-                rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level)
-                lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level)
+                rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
+                lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
                 
                 m_num = self._display_measure_number(rh_staff.measures[idx], idx)
                 test_rh = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
@@ -562,8 +598,8 @@ class BrailleRenderer:
             
             if not best_rh_lines:
                 # Force at least one measure to avoid infinite loop
-                rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level)
-                lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level)
+                rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
+                lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
                 m_num = self._display_measure_number(rh_staff.measures[idx], idx)
                 best_rh_lines = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
                 best_lh_lines = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
@@ -697,7 +733,8 @@ class BrailleRenderer:
             for s_idx in active:
                 staff = score.staves[s_idx]
                 slice_strs, tmp_prev = render_measure_slice(
-                    staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level
+                    staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level,
+                    force_all_starts=self.octave_mark_every_measure,
                 )
                 slices.append(slice_strs)
                 prevs.append(tmp_prev)
@@ -888,15 +925,20 @@ class BrailleRenderer:
         return flat
 
     def _compress_measure_repeats(self, score: Score) -> dict[tuple[int, int], list]:
-        """Replace musically-identical repeated measures with a
-        `MeasureRepeat` sign. Returns a `(staff_index, measure_index) ->
-        original notes` map for every measure this compresses, so a later
-        layout pass (`_render_ensemble`, per BANA 33.4.3) can restore a
-        measure's real content if it turns out to start a new braille
-        line -- this pass runs before line-breaking is known, so it can't
-        make that call itself."""
-        import copy
+        """Replace runs of `self.min_repeated_measures` or more consecutive
+        musically-identical measures with `MeasureRepeat` signs (every
+        member but the run's first). Returns a `(staff_index,
+        measure_index) -> original notes` map for every measure this
+        compresses, so a later layout pass (`_render_ensemble`, per BANA
+        33.4.3) can restore a measure's real content if it turns out to
+        start a new braille line -- this pass runs before line-breaking is
+        known, so it can't make that call itself."""
         from dottednotes.models.measure_repeat import MeasureRepeat
+        from dottednotes.models.in_accord import InAccord
+
+        original_notes: dict[tuple[int, int], list] = {}
+        if self.full_measure_repeat == "off":
+            return original_notes
 
         def is_whole_measure_rest(measure: Measure) -> bool:
             return (
@@ -905,23 +947,36 @@ class BrailleRenderer:
                 and measure.notes[0].is_full_measure
             )
 
-        original_notes: dict[tuple[int, int], list] = {}
+        def has_in_accord(measure: Measure) -> bool:
+            return any(isinstance(item, InAccord) for item in measure.notes)
+
+        def can_repeat(measure: Measure) -> bool:
+            # BANA Par. 18.2: "It is never, however, used to represent a
+            # full measure of rest; the measure rest sign must be used" --
+            # never collapse a whole-measure rest into a repeat sign, even
+            # when it repeats an identical whole-measure rest.
+            if is_whole_measure_rest(measure):
+                return False
+            # "single-voice" mode: an in-accord (multi-voice) measure never
+            # participates in a repeat run at all.
+            if self.full_measure_repeat == "single-voice" and has_in_accord(measure):
+                return False
+            return True
+
         for staff_idx, staff in enumerate(score.staves):
-            if not staff.measures:
-                continue
-            i = 1
-            last_non_repeat_measure = copy.deepcopy(staff.measures[0])
-            while i < len(staff.measures):
-                curr_m = staff.measures[i]
-                # BANA Par. 18.2: "It is never, however, used to
-                # represent a full measure of rest; the measure rest
-                # sign must be used" -- never collapse a whole-measure
-                # rest into a repeat sign, even when it repeats an
-                # identical whole-measure rest.
-                if curr_m.musical_equals(last_non_repeat_measure) and not is_whole_measure_rest(curr_m):
-                    original_notes[(staff_idx, i)] = curr_m.notes
-                    curr_m.notes = [MeasureRepeat(count=1, line=1)]
-                else:
-                    last_non_repeat_measure = copy.deepcopy(curr_m)
-                i += 1
+            measures = staff.measures
+            n = len(measures)
+            i = 0
+            while i < n:
+                if not can_repeat(measures[i]):
+                    i += 1
+                    continue
+                j = i + 1
+                while j < n and can_repeat(measures[j]) and measures[j].musical_equals(measures[i]):
+                    j += 1
+                if j - i >= self.min_repeated_measures:
+                    for k in range(i + 1, j):
+                        original_notes[(staff_idx, k)] = measures[k].notes
+                        measures[k].notes = [MeasureRepeat(count=1, line=1)]
+                i = j
         return original_notes

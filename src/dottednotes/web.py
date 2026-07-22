@@ -167,6 +167,9 @@ async def convert_file(
     measure_numbers: bool = Form(False),
     page_numbers: bool = Form(True),
     measure_numbering: str = Form("auto"),  # "auto", "print_score"
+    octave_mark_every_measure: bool = Form(False),
+    full_measure_repeat: str = Form("single-voice"),  # "off", "single-voice", "multi-voice"
+    min_repeated_measures: int = Form(2),
 ):
     contents = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(contents) > MAX_UPLOAD_SIZE:
@@ -212,6 +215,12 @@ async def convert_file(
     # Measure numbering validation
     if measure_numbering not in {"auto", "print_score"}:
         raise HTTPException(status_code=400, detail="Invalid measure numbering mode. Must be 'auto' or 'print_score'.")
+
+    # Full-measure repeat validation
+    if full_measure_repeat not in {"off", "single-voice", "multi-voice"}:
+        raise HTTPException(status_code=400, detail="Invalid full_measure_repeat mode. Must be 'off', 'single-voice', or 'multi-voice'.")
+    if min_repeated_measures < 2:
+        raise HTTPException(status_code=400, detail="min_repeated_measures must be >= 2.")
 
     try:
         # 1. Parse Input to Score
@@ -277,6 +286,9 @@ async def convert_file(
                 compression_level=compression,
                 page_numbers=page_numbers,
                 measure_numbering=measure_numbering,
+                octave_mark_every_measure=octave_mark_every_measure,
+                full_measure_repeat=full_measure_repeat,
+                min_repeated_measures=min_repeated_measures,
             )
             if target_format == "brl":
                 output_brl = job_dir / f"{input_path.stem}_output.brl"

@@ -167,6 +167,33 @@ dottednotes --version
     and `auto` behave the same there; MusicXML and BRF sources aren't
     affected by that limitation.)
 
+* **`--octave-mark-every-measure`**:
+  For `.brf`/`.brl` output, forces the octave mark on every measure's first
+  note, not just measures that start a new braille line. Off by default.
+  This is a reader/regional preference on top of BANA's required rules
+  (which already force the mark at each line's first note, and after a
+  word sign or numeric indicator) — turning it on never removes a mark
+  that would already be shown, it only adds more. Has no effect on `.ly`
+  output.
+
+* **`--full-measure-repeat <Mode>`**:
+  Controls whole-measure repeat-sign compression for `.brf`/`.brl` output,
+  independent of `--compression`'s (unrelated) articulation-carry
+  shorthand. Has no effect if `--compression` is `none` (that remains a
+  hard override disabling all compression) or on `.ly` output.
+  * `single-voice` (Default; compresses runs of identical measures, but
+    never a measure containing in-accord/multi-voice content)
+  * `off` (Disables repeat-sign compression entirely)
+  * `multi-voice` (Also compresses in-accord-containing measures, when
+    every voice matches)
+
+* **`--min-repeated-measures <N>`**:
+  Minimum number of consecutive musically-identical measures required
+  before they're compressed into a repeat sign, for `.brf`/`.brl` output.
+  Default `2` (the smallest possible repeat: one original plus one
+  repetition). Has no effect if `--full-measure-repeat` is `off` or on
+  `.ly` output.
+
 ## Background
 
 This project is written by a blind composer who uses a BrailleNotetaker to

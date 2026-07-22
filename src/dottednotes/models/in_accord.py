@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .note import Note
@@ -23,6 +23,31 @@ class InAccord:
 
     parts: list[list] = field(default_factory=list)
     in_accord_type: str = 'full_measure'
+
+    def musical_equals(self, other: Any) -> bool:
+        """Equivalence for measure-repeat detection (mirrors `Measure.
+        musical_equals`'s hasattr-preferring pattern), ignoring notation-only
+        fields (e.g. an articulation-carry-shorthand format tag) that Python's
+        default dataclass `==` would otherwise compare. A `Tuplet` nested in a
+        part still has no `musical_equals()` of its own and falls back to
+        plain `==` here too -- a pre-existing, separate gap, not fixed by this
+        method."""
+        if not isinstance(other, InAccord):
+            return False
+        if self.in_accord_type != other.in_accord_type:
+            return False
+        if len(self.parts) != len(other.parts):
+            return False
+        for part1, part2 in zip(self.parts, other.parts):
+            if len(part1) != len(part2):
+                return False
+            for item1, item2 in zip(part1, part2):
+                if hasattr(item1, 'musical_equals'):
+                    if not item1.musical_equals(item2):
+                        return False
+                elif item1 != item2:
+                    return False
+        return True
 
     def to_braille(
         self,

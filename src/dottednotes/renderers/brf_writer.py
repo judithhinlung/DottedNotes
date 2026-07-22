@@ -36,6 +36,9 @@ class BRFWriter:
         compression_level: str = "full",
         page_numbers: bool = True,
         measure_numbering: str = "auto",
+        octave_mark_every_measure: bool = False,
+        full_measure_repeat: str = "single-voice",
+        min_repeated_measures: int = 2,
     ):
         self.line_width = line_width
         self.page_height = page_height
@@ -54,6 +57,13 @@ class BRFWriter:
         # per input format). Independent of `show_measure_numbers`, which
         # controls whether a number is shown at all.
         self.measure_numbering = measure_numbering
+        # Additive reader preference: force the octave mark on every
+        # measure's first note, not just line starts (see
+        # BrailleRenderer.octave_mark_every_measure).
+        self.octave_mark_every_measure = octave_mark_every_measure
+        # See BrailleRenderer.full_measure_repeat / .min_repeated_measures.
+        self.full_measure_repeat = full_measure_repeat
+        self.min_repeated_measures = min_repeated_measures
 
     def write(self, score: Score, filepath: Union[str, Path]) -> None:
         """Render a score and write it to a BRF file in ASCII braille."""
@@ -73,6 +83,9 @@ class BRFWriter:
             show_measure_numbers=self.show_measure_numbers,
             compression_level=self.compression_level,
             measure_numbering=self.measure_numbering,
+            octave_mark_every_measure=self.octave_mark_every_measure,
+            full_measure_repeat=self.full_measure_repeat,
+            min_repeated_measures=self.min_repeated_measures,
         )
         raw_music = renderer.render(score)
         music_lines = [line.rstrip() for line in raw_music.splitlines()]

@@ -19,6 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const groupCompression = document.getElementById('group-compression');
     const groupPageNumbers = document.getElementById('group-page-numbers');
     const groupMeasureNumbering = document.getElementById('group-measure-numbering');
+    const groupOctaveEveryMeasure = document.getElementById('group-octave-every-measure');
+    const groupFullMeasureRepeat = document.getElementById('group-full-measure-repeat');
+    const groupMinRepeatedMeasures = document.getElementById('group-min-repeated-measures');
     const pageNumbersCheckbox = document.getElementById('page_numbers');
 
     // Results Section
@@ -216,18 +219,24 @@ document.addEventListener('DOMContentLoaded', () => {
             groupCategory.classList.add('hidden');
         }
 
-        // Show/hide compression, page-number pagination, and measure-
-        // numbering mode: only relevant when output is Braille (BANA
-        // running-head pagination and margin/heading measure numbers are
-        // braille-specific concepts, meaningless for LilyPond/MusicXML).
+        // Show/hide compression, page-number pagination, measure-numbering
+        // mode, octave-every-measure, and repeat-sign settings: only
+        // relevant when output is Braille (these are all braille-specific
+        // concepts, meaningless for LilyPond/MusicXML).
         if (target === 'braille' || target === 'brl') {
             groupCompression.classList.remove('hidden');
             groupPageNumbers.classList.remove('hidden');
             groupMeasureNumbering.classList.remove('hidden');
+            groupOctaveEveryMeasure.classList.remove('hidden');
+            groupFullMeasureRepeat.classList.remove('hidden');
+            groupMinRepeatedMeasures.classList.remove('hidden');
         } else {
             groupCompression.classList.add('hidden');
             groupPageNumbers.classList.add('hidden');
             groupMeasureNumbering.classList.add('hidden');
+            groupOctaveEveryMeasure.classList.add('hidden');
+            groupFullMeasureRepeat.classList.add('hidden');
+            groupMinRepeatedMeasures.classList.add('hidden');
         }
     }
 

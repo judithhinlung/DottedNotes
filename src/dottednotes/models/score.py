@@ -29,12 +29,18 @@ class Score:
         compression_level: str = "full",
         measure_numbers: bool = True,
         measure_numbering: str = "auto",
+        octave_mark_every_measure: bool = False,
+        full_measure_repeat: str = "single-voice",
+        min_repeated_measures: int = 2,
     ) -> str:
         from dottednotes.renderers.braille_renderer import BrailleRenderer
         return BrailleRenderer(
             compression_level=compression_level,
             show_measure_numbers=measure_numbers,
             measure_numbering=measure_numbering,
+            octave_mark_every_measure=octave_mark_every_measure,
+            full_measure_repeat=full_measure_repeat,
+            min_repeated_measures=min_repeated_measures,
         ).render(self)
 
     @staticmethod

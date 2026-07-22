@@ -97,6 +97,30 @@
                             </label>
                             <p class="help-text">Adds the piece title and a braille page number to every page. Turn off for a plain continuous stream with no page breaks.</p>
                         </div>
+
+                        <div class="form-group checkbox-group" id="group-octave-every-measure">
+                            <label for="octave_mark_every_measure" class="checkbox-label">
+                                <input type="checkbox" id="octave_mark_every_measure" name="octave_mark_every_measure" value="true">
+                                <span>Always Mark Octave at Start of Measure</span>
+                            </label>
+                            <p class="help-text">Forces the octave mark on every measure's first note, not just measures that start a new braille line. Additive on top of BANA's required rules — never removes a mark that would already show.</p>
+                        </div>
+
+                        <div class="form-group" id="group-full-measure-repeat">
+                            <label for="full_measure_repeat">Full-Measure Repeat</label>
+                            <select id="full_measure_repeat" name="full_measure_repeat">
+                                <option value="single-voice" selected>Single-Voice Only (default)</option>
+                                <option value="off">Off</option>
+                                <option value="multi-voice">Single- and Multi-Voice</option>
+                            </select>
+                            <p class="help-text">Controls when the whole-measure repeat sign is used, independent of Braille Compression's shorthand-carrying. "Single-Voice Only" never compresses a measure with in-accord (multi-voice) content.</p>
+                        </div>
+
+                        <div class="form-group" id="group-min-repeated-measures">
+                            <label for="min_repeated_measures">Minimum Repeated Measures</label>
+                            <input type="number" id="min_repeated_measures" name="min_repeated_measures" min="2" value="2">
+                            <p class="help-text">Minimum number of consecutive identical measures required before the repeat sign is used instead of writing them out. Only matters when Full-Measure Repeat isn't Off.</p>
+                        </div>
                     </div>
 
                     <!-- Advanced Toggle & Overrides -->
