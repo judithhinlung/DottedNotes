@@ -63,9 +63,10 @@ def test_layout_heading_spacing():
     spacing_warns = [c for c in result.corrections if "Heading Spacing" in c.message]
     assert len(spacing_warns) == 1
     
-    # Rendering should not have any blank line between signatures and first music line
+    # Rendering should not have any blank line between signatures and first music line.
+    # BANA 24.1.1: single-line solo margin numbers carry the number sign (⠼).
     rendered = score.to_braille()
-    assert "        ⠼⠉⠲\n⠁ ⠐⠹" in rendered
+    assert "        ⠼⠉⠲\n⠼⠁ ⠐⠹" in rendered
 
 
 def test_layout_running_head_centering():

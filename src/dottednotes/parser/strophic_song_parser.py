@@ -303,7 +303,7 @@ def parse_strophic_song(text: str) -> Score:
     # does -- this reuses all of its measure/duration/slur resolution.
     melody_lines = [g.melody_line for g in groups]
     music_text = '\n'.join(header_lines + melody_lines)
-    tokens = BrailleTokenizer().tokenize(music_text, margin_numbers_use_number_sign=True)
+    tokens = BrailleTokenizer().tokenize(music_text)
     score = BrailleParser(tokens=tokens).parse()
     if len(score.staves) != 1:
         raise BrailleParseError(

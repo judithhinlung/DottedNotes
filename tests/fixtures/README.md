@@ -7,8 +7,6 @@ This directory holds `.brf` braille music files used as test inputs.
 | fengyang_flower_drum.brf | Fengyang Flower Drum (凤阳花鼓) | Traditional Chinese folk song, arr. Judith Lung | Flute and strings | Developer-authored |
 | children_s_piece.brf | Children's Piece | Judith Lung | Piano | Developer-authored composition exercise |
 | Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl | Romanian Folk Dances | Béla Bartók | Orchestra | Auto-transcribed by Sao Mai Braille software |
-| Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf | String Quartet No. 1 in F, Movement 1 | Ludwig van Beethoven | String quartet | MusicXML from braillemuse.net, transcribed via their system |
-| Faure_Gabriel_Morceau_de_Concours.brf | Morceau de Concours | Gabriel Fauré | Flute and piano | IMSLP (PDF → MusicXML via PlayScore2, transcribed via braillemuse.net) |
 | lead_sheet_test.brf | (untitled exercise) | Judith Lung | Melody + chord symbols (BANA Sec. 27 lead sheet) | Developer-authored, S8b-9 |
 | instrumental_techniques_test.brf | (untitled exercise) | Judith Lung | Flute, Violin, Piano (2 staves) | Developer-authored, S8b-10 |
 | strophic_song_test.brf | (untitled exercise) | Judith Lung | Solo voice with chords and refrain (BANA Secs. 35/36) | Developer-authored |

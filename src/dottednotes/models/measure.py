@@ -216,7 +216,13 @@ def _render_note_list_to_braille(
             elif isinstance(item, AlternatingTremolo):
                 curr_prev = item.items[1].notes[0] if hasattr(item.items[1], 'notes') and item.items[1].notes else item.items[1]
 
-        curr_measure_start = False
+            # A leading Rest never receives (or consumes) the octave-mark
+            # reset: BANA 3.2.1 requires the octave mark on the first NOTE
+            # of a braille line, not literally the first item, so a rest
+            # sitting before it must not clear this flag before the real
+            # first note is reached.
+            if not isinstance(item, (Rest, MeasureRepeat)):
+                curr_measure_start = False
 
     return "".join(rendered)
 
@@ -319,7 +325,7 @@ class Measure:
         time_signature: Optional["TimeSignature"] = None,
         compression_level: str = "full",
     ) -> tuple[str, Optional[Note]]:
-        marking_strs = "".join(m.to_braille() for m in self.text_markings)
+        marking_strs = "".join(m.to_braille(inline=True) for m in self.text_markings)
 
         from .key_signature import KeySignature
         key_sig_obj = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=self.key_signature)
@@ -331,11 +337,27 @@ class Measure:
         notes_str = _render_note_list_to_braille(
             self.notes,
             prev_note=prev_note,
-            is_measure_start=is_measure_start,
+            # BANA 3.2.1: "the octave is always marked ... for the first
+            # note following any occurrence of a numeric indicator or word
+            # sign" -- a mid-measure text marking is rendered as a word-sign
+            # expression right before this measure's own notes (see
+            # `marking_strs` above), so it forces the same reset as a real
+            # line/measure start regardless of `is_measure_start`.
+            is_measure_start=is_measure_start or bool(self.text_markings),
             time_signature=ts_obj,
             key_signature=key_sig_obj,
             compression_level=compression_level,
         )
+
+        if marking_strs and notes_str and (ord(notes_str[0]) - 0x2800) & 0x07 != 0:
+            # BANA 22.3(d): the word-sign expression "must be followed by
+            # dot 3 if the following sign contains dot 1, 2, or 3" -- e.g. a
+            # rest cell (dots 1,2,3,6 for a quarter rest) right after the
+            # marking. A following note is normally exempt (its forced
+            # octave mark above uses only dots 4-6), so this only fires for
+            # the rest/other cases where that protection doesn't apply.
+            from dottednotes.bana_symbols import END_WORD_SIGN
+            marking_strs += END_WORD_SIGN
 
         from dottednotes.bana_symbols import BAR_LINE_CELLS, BAR_LINE_SEQUENCES
         bar_cell = {v: k for k, v in BAR_LINE_CELLS.items()}.get(self.bar_line_type, '')

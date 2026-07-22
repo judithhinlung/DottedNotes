@@ -114,7 +114,6 @@ class BrailleTokenizer:
         self,
         text: str,
         at_line_start: bool = True,
-        margin_numbers_use_number_sign: bool = False,
     ) -> list[BrailleToken]:
         tokens: list[BrailleToken] = []
         line = 1
@@ -153,9 +152,13 @@ class BrailleTokenizer:
 
             # --- measure number at line start ---
             # BANA music braille places an explicit measure number at the left
-            # margin of each system.  It uses literary braille letter-digits
-            # (A–J = 1–0) WITHOUT a number-sign prefix, followed by at least one
-            # blank cell (⠀) before the musical content.
+            # margin of each system, using literary braille letter-digits
+            # (A–J = 1–0), followed by at least one blank cell (⠀) before the
+            # musical content. Keyboard bar-over-bar format omits the
+            # number-sign prefix (BANA 29.3(b)) -- handled by this branch.
+            # Single-line solo format and an ensemble system's heading DO use
+            # the number-sign prefix (BANA 24.1.1, 33.4.6) -- handled by the
+            # ⠼ branch below instead.
             #
             # Disambiguation: digits 4–9 and 0 share dot patterns with 8th-note
             # cells, and digit 3 shares with the slur cell.  Position state
@@ -184,27 +187,39 @@ class BrailleTokenizer:
                     at_line_start = False
                     continue
                 # No digits found — fall through and process normally.
-            elif at_line_start and margin_numbers_use_number_sign and char == self._NUMBER_SIGN:
-                # Lead-sheet margin measure numbers (BANA Sec. 27) are written
-                # WITH the number-sign prefix, unlike plain-score margins
-                # above -- confirmed by the developer. Opt-in only
-                # (`margin_numbers_use_number_sign`) so solo/ensemble parsing
-                # keeps reading a line-start NUMBER_SIGN+digits run as a BANA
-                # Sec. 19 numeral repeat (the generic ⠼ handling below).
+            elif at_line_start and char == self._NUMBER_SIGN:
+                # Margin measure numbers are written WITH the number-sign
+                # prefix in single-line solo format (BANA 24.1.1, Example
+                # 24.1.1-1: "#A", "#E'") and in an ensemble system's
+                # measure-number heading (BANA 33.4.6, Example 33.4.6-2:
+                # "#BE") -- unlike a keyboard bar-over-bar parallel's margin
+                # number, which BANA 29.3(b) says is "given without the
+                # numeric indicator" (handled by the bare-digit branch
+                # above, unaffected by this one).
+                #
+                # A bare "#<digits>" is also BANA Sec. 19's numeral-repeat
+                # shorthand (unsupported -- see NumeralRepeatError), which
+                # this codebase deliberately keeps reading as such: real
+                # margin numbers are always followed by actual music
+                # content, not just a trailing blank cell and nothing else,
+                # so requiring real content after the separator disambiguates
+                # the two without needing a per-caller opt-in.
                 j = i + 1
                 digit_values = []
                 while j < len(text) and text[j] in LITERARY_DIGITS:
                     digit_values.append(LITERARY_DIGITS[text[j]])
                     j += 1
                 next_char = text[j] if j < len(text) else ''
-                if digit_values and next_char in (' ', '⠀', '\n', '\r', '\t', ''):
-                    number = int(''.join(str(d) for d in digit_values))
-                    tokens.append(BrailleToken(str(number), SymbolCategory.MEASURE_NUMBER, i, line))
-                    i = j
-                    while i < len(text) and text[i] == '⠀':
-                        i += 1
-                    at_line_start = False
-                    continue
+                if digit_values and next_char in (' ', '⠀'):
+                    k = j
+                    while k < len(text) and text[k] == '⠀':
+                        k += 1
+                    if k < len(text) and text[k] not in ('\n', '\r'):
+                        number = int(''.join(str(d) for d in digit_values))
+                        tokens.append(BrailleToken(str(number), SymbolCategory.MEASURE_NUMBER, i, line))
+                        i = k
+                        at_line_start = False
+                        continue
                 # Not a margin number after all — fall through and process normally.
             at_line_start = False
 

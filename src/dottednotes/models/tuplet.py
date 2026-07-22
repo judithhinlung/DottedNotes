@@ -78,7 +78,9 @@ class Tuplet:
                 # reference for the next note (matching Measure's own item loop,
                 # which likewise leaves curr_prev unchanged across a Rest).
                 curr_prev = item.notes[0] if hasattr(item, 'notes') else item
-            curr_measure_start = False
+                # Nor may it consume the line/measure-start octave-mark
+                # reset (BANA 3.2.1) before a real note reaches it.
+                curr_measure_start = False
 
         if rendered_items:
             rendered_items[0] = indicator + rendered_items[0]

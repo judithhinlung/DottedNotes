@@ -51,7 +51,7 @@ def test_bartok_smoke_parses_without_crashing():
         assert len(staff.measures) == 247
 
 # Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf and
-# Faure_Gabriel_Morceau_de_Concours.brf are intentionally excluded from S5b-8:
-# per the developer, these two fixtures don't adhere to BANA conventions, so
-# they aren't reliable smoke-test material either. Do not add tests against
-# them here without the developer's go-ahead.
+# Faure_Gabriel_Morceau_de_Concours.brf have been removed from tests/fixtures/
+# entirely: per the developer, these two fixtures don't adhere to BANA
+# conventions, so they aren't reliable smoke-test material. Do not
+# re-introduce tests against them without the developer's go-ahead.

@@ -74,7 +74,7 @@ def parse_lead_sheet(text: str) -> Score:
     chord_lines = lines[1::2]
 
     music_text = '\n'.join(header_lines + music_lines)
-    tokens = BrailleTokenizer().tokenize(music_text, margin_numbers_use_number_sign=True)
+    tokens = BrailleTokenizer().tokenize(music_text)
     score = BrailleParser(tokens=tokens).parse()
 
     if len(score.staves) != 1:

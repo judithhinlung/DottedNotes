@@ -406,7 +406,12 @@ class BrailleRenderer:
             brl_no_start, prev_no_start = m.to_braille(prev_note=prev_note, is_measure_start=False, time_signature=staff.time_signature, compression_level=self.compression_level)
 
             if not current_line:
-                num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
+                # BANA 24.1.1: "Each segment is introduced at the margin by
+                # the number of its first measure" -- Example 24.1.1-1 shows
+                # this margin number with the numeral sign (⠼), unlike a
+                # keyboard bar-over-bar parallel's margin number (BANA
+                # 29.3(b): "given without the numeric indicator").
+                num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
                 prefix = (num_str + " ") if self.show_measure_numbers else ""
                 current_line = prefix + brl_start
                 prev_note = prev_start
@@ -416,7 +421,7 @@ class BrailleRenderer:
                     prev_note = prev_no_start
                 else:
                     lines.append(current_line)
-                    num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
+                    num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
                     prefix = (num_str + " ") if self.show_measure_numbers else ""
                     current_line = prefix + brl_start
                     prev_note = prev_start

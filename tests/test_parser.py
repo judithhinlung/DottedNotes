@@ -1347,6 +1347,26 @@ def test_two_system_measure_numbers():
     assert mn_tokens[1].character == '5'
 
 
+def test_number_sign_prefixed_margin_number_followed_by_music_is_measure_number():
+    # BANA 24.1.1: single-line solo margin numbers carry the number sign
+    # (⠼), unlike a keyboard bar-over-bar margin number (BANA 29.3(b)).
+    # Real content (a note) follows the margin here, disambiguating it from
+    # the BANA Sec. 19 numeral-repeat shorthand, which uses the same shape.
+    tokens = BrailleTokenizer().tokenize('⠼⠁⠀⠐⠹')
+    assert tokens[0].category == SymbolCategory.MEASURE_NUMBER
+    assert tokens[0].character == '1'
+
+
+def test_bare_number_sign_digit_with_no_following_content_is_still_numeral_repeat():
+    # Without real content after it, "#1" alone stays a BANA Sec. 19
+    # numeral-repeat token (unsupported -- BrailleParser rejects it), not a
+    # margin measure number -- a margin number is never the last thing in
+    # the piece with nothing after it.
+    tokens = BrailleTokenizer().tokenize('⠼⠁')
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.NUMERAL_REPEAT
+
+
 def test_measure_number_not_parsed_mid_line():
     """Literary digit cells that appear mid-line are not parsed as MEASURE_NUMBER."""
     # ⠐⠹⠑ = octave-4 mark, C-quarter, D-eighth (⠑ = dots 1,5 = digit 5 mid-line)
