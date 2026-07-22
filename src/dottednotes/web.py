@@ -166,6 +166,7 @@ async def convert_file(
     profile: str = Form("standard"),        # "standard", "strict"
     measure_numbers: bool = Form(False),
     page_numbers: bool = Form(True),
+    measure_numbering: str = Form("auto"),  # "auto", "print_score"
 ):
     contents = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(contents) > MAX_UPLOAD_SIZE:
@@ -207,6 +208,10 @@ async def convert_file(
     # Profile validation
     if profile not in {"standard", "strict"}:
         raise HTTPException(status_code=400, detail="Invalid profile. Must be 'standard' or 'strict'.")
+
+    # Measure numbering validation
+    if measure_numbering not in {"auto", "print_score"}:
+        raise HTTPException(status_code=400, detail="Invalid measure numbering mode. Must be 'auto' or 'print_score'.")
 
     try:
         # 1. Parse Input to Score
@@ -271,6 +276,7 @@ async def convert_file(
                 show_measure_numbers=measure_numbers,
                 compression_level=compression,
                 page_numbers=page_numbers,
+                measure_numbering=measure_numbering,
             )
             if target_format == "brl":
                 output_brl = job_dir / f"{input_path.stem}_output.brl"

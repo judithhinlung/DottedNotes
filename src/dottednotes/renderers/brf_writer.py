@@ -35,6 +35,7 @@ class BRFWriter:
         show_measure_numbers: bool = True,
         compression_level: str = "full",
         page_numbers: bool = True,
+        measure_numbering: str = "auto",
     ):
         self.line_width = line_width
         self.page_height = page_height
@@ -47,6 +48,12 @@ class BRFWriter:
         # (with measure numbers/parallels exactly as configured above) as
         # one continuous stream instead.
         self.page_numbers = page_numbers
+        # "auto": renumber sequentially from 1, ignoring the source file's
+        # own measure numbers. "print_score": use the source's numbers as
+        # parsed (see BrailleRenderer.measure_numbering for what that means
+        # per input format). Independent of `show_measure_numbers`, which
+        # controls whether a number is shown at all.
+        self.measure_numbering = measure_numbering
 
     def write(self, score: Score, filepath: Union[str, Path]) -> None:
         """Render a score and write it to a BRF file in ASCII braille."""
@@ -64,7 +71,8 @@ class BRFWriter:
         renderer = BrailleRenderer(
             line_width=self.line_width,
             show_measure_numbers=self.show_measure_numbers,
-            compression_level=self.compression_level
+            compression_level=self.compression_level,
+            measure_numbering=self.measure_numbering,
         )
         raw_music = renderer.render(score)
         music_lines = [line.rstrip() for line in raw_music.splitlines()]

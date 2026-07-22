@@ -210,6 +210,7 @@ def _run_convert(args: argparse.Namespace) -> None:
                 show_measure_numbers=args.measure_numbers,
                 compression_level=args.compression,
                 page_numbers=not args.no_page_numbers,
+                measure_numbering=args.measure_numbering,
             )
             is_brl = output_path is not None and Path(output_path).suffix.lower() == ".brl"
             if is_brl:
@@ -294,10 +295,24 @@ def main() -> None:
     convert_parser.add_argument(
         "--measure-numbers",
         action="store_true",
-        help="Prefix each measure's line in LilyPond output with a '%% N' "
-             "comment giving its real BANA margin number, for faster "
-             "screen-reader navigation back from a validation warning to "
-             "the line it refers to. Has no effect on .brf/.brl output.",
+        help="Show measure numbers: in LilyPond output, prefix each measure's "
+             "line with a '%% N' comment giving its real BANA margin number, "
+             "for faster screen-reader navigation back from a validation "
+             "warning to the line it refers to; in .brf/.brl output, show "
+             "the BANA margin number/heading itself (see --measure-numbering "
+             "for which number is shown). Off by default in both.",
+    )
+    convert_parser.add_argument(
+        "--measure-numbering",
+        choices=["auto", "print_score"],
+        default="auto",
+        help="For .brf/.brl output, which measure numbers to show when "
+             "--measure-numbers is on: 'auto' (default) renumbers "
+             "sequentially from 1, ignoring any measure numbers in the "
+             "source file; 'print_score' reads and keeps the source "
+             "MusicXML/LilyPond file's own measure numbers (e.g. a pickup "
+             "measure numbered 0, or a non-sequential renumbering), rather "
+             "than recalculating them. Has no effect on .ly output.",
     )
     convert_parser.add_argument(
         "--compression",

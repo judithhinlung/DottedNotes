@@ -102,6 +102,11 @@ dottednotes convert piece.brf --report
 # measure-repeat compression (full, minimal, none).
 dottednotes convert piece.brf piece.brf --compression minimal
 
+# Show measure numbers in braille output, keeping the source MusicXML/
+# LilyPond file's own numbering (e.g. a pickup measure numbered 0) instead
+# of renumbering sequentially from 1
+dottednotes convert piece.musicxml piece.brf --measure-numbers --measure-numbering print_score
+
 # Show version
 dottednotes --version
 ```
@@ -139,6 +144,28 @@ dottednotes --version
   * `full` (Default; enables all shorthand carrying and measure repeat compression)
   * `minimal` (Enables shorthand carrying and measure repeats, but disables long-span repeats if supported)
   * `none` (Disables all shorthand carrying and repeat compression, rendering notes and articulations explicitly)
+
+* **`--measure-numbers`**:
+  Shows measure numbers at all. Off by default. In `.brf`/`.brl` output this
+  is the BANA margin number (solo/keyboard) or heading (ensemble) that
+  marks where each system starts; in `.ly` output it's a `% N` comment on
+  each measure's line instead, for navigating a validation warning back to
+  its source line.
+
+* **`--measure-numbering <Mode>`**:
+  Only matters when `--measure-numbers` is on, and only for `.brf`/`.brl`
+  output — controls *which* number gets shown, not whether one is shown.
+  * `auto` (Default; numbers measures sequentially from 1, ignoring
+    whatever measure numbers the source file has — a plain BRF's own
+    margin numbers, or a MusicXML/LilyPond file's `<measure number="...">`,
+    are all disregarded in favor of a clean 1, 2, 3, ... count)
+  * `print_score` (Reads and keeps the source MusicXML/LilyPond file's own
+    measure numbers instead of recalculating them — including an
+    irregular pickup measure numbered 0, or a mid-piece renumbering that
+    isn't strictly sequential. A LilyPond source currently has no way to
+    carry that original numbering through the round trip, so `print_score`
+    and `auto` behave the same there; MusicXML and BRF sources aren't
+    affected by that limitation.)
 
 ## Background
 

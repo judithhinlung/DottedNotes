@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const groupCategory = document.getElementById('group-category');
     const groupCompression = document.getElementById('group-compression');
     const groupPageNumbers = document.getElementById('group-page-numbers');
+    const groupMeasureNumbering = document.getElementById('group-measure-numbering');
     const pageNumbersCheckbox = document.getElementById('page_numbers');
 
     // Results Section
@@ -215,15 +216,18 @@ document.addEventListener('DOMContentLoaded', () => {
             groupCategory.classList.add('hidden');
         }
 
-        // Show/hide compression and page-number pagination: only relevant
-        // when output is Braille (BANA running-head pagination is a
-        // braille-specific concept, meaningless for LilyPond/MusicXML).
+        // Show/hide compression, page-number pagination, and measure-
+        // numbering mode: only relevant when output is Braille (BANA
+        // running-head pagination and margin/heading measure numbers are
+        // braille-specific concepts, meaningless for LilyPond/MusicXML).
         if (target === 'braille' || target === 'brl') {
             groupCompression.classList.remove('hidden');
             groupPageNumbers.classList.remove('hidden');
+            groupMeasureNumbering.classList.remove('hidden');
         } else {
             groupCompression.classList.add('hidden');
             groupPageNumbers.classList.add('hidden');
+            groupMeasureNumbering.classList.add('hidden');
         }
     }
 

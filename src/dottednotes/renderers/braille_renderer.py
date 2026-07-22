@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Optional, Union, Any
 from dottednotes.models.score import Score
 from dottednotes.models.orchestra_score import OrchestraScore
@@ -310,6 +311,46 @@ def render_measure_slice(
     return rendered, curr_prev
 
 
+class TranscriptionMode(Enum):
+    """Which of BANA's braille layouts a score gets transcribed in. This is
+    an explicit, named result of structural detection (staff count/family/
+    OrchestraScore-ness) rather than the ad hoc `is_piano`/`is_ensemble`
+    booleans re-derived inline that used to live in `render()` -- detection
+    itself is unchanged, only now it produces one value instead of two
+    booleans callers had to keep consistent by hand.
+
+    Placement of measure numbers (margin vs. a blank line above the system
+    of parallels) is *derived from* this mode, not an independent setting:
+    SOLO and PIANO both use margin placement (BANA 24.1.1 / 29.3(b) -- they
+    differ only in whether the numeral sign is included, already handled by
+    each render method), ENSEMBLE uses the blank-line heading (BANA 33.4.6).
+
+    TODO(product): a user who wants margin-style placement in ensemble mode
+    (or blank-line placement in solo/piano mode) would need placement
+    decoupled from transcription mode as its own setting. Not built here --
+    it wasn't requested, and doing it well needs product input on how BANA
+    would even describe such a layout (neither 24.1.1/29.3(b) nor 33.4.6
+    anticipates it). Revisit only on an explicit future request.
+    """
+    SOLO = auto()
+    PIANO = auto()
+    ENSEMBLE = auto()
+
+
+# "auto": engine numbers measures sequentially from 1, ignoring whatever
+# Measure.number carries in from the source file. "print_score": use
+# Measure.number as the source parser assigned it -- MusicXML's own
+# <measure number="..."> (already threaded straight through by
+# musicxml_parser.translate_measure), a BRF's explicit margin numbers where
+# given (braille_parser.py's _handle_measure_number), or a LilyPond import's
+# sequential count (lilypond_parser.py currently has no source-side bar-
+# number annotation to read, so it produces the same numbers either way --
+# see the TODO on _display_measure_number below). Matches compression_level/
+# validation `profile`'s existing plain-string-choice convention rather than
+# introducing a new pattern for a user-facing setting.
+MEASURE_NUMBERING_MODES = ("auto", "print_score")
+
+
 class BrailleRenderer:
     def __init__(
         self,
@@ -317,6 +358,7 @@ class BrailleRenderer:
         show_measure_numbers: bool = True,
         compression_level: str = "full",
         omit_redundant_hairpin_terminators: bool = True,
+        measure_numbering: str = "auto",
     ):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
@@ -326,6 +368,51 @@ class BrailleRenderer:
         # independent of `compression_level`, since this is a transcription
         # rule rather than one of the optional space-saving passes below.
         self.omit_redundant_hairpin_terminators = omit_redundant_hairpin_terminators
+        if measure_numbering not in MEASURE_NUMBERING_MODES:
+            raise ValueError(
+                f"measure_numbering must be one of {MEASURE_NUMBERING_MODES}, "
+                f"got {measure_numbering!r}"
+            )
+        self.measure_numbering = measure_numbering
+
+    def _detect_transcription_mode(self, score: Score) -> TranscriptionMode:
+        # is_piano is computed first and independent of isinstance(score,
+        # OrchestraScore): LilypondParser tags any parsed score containing
+        # "PianoStaff" as an OrchestraScore, so a 2-staff piano score must
+        # not automatically fall into ensemble layout.
+        from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
+        is_piano = len(score.staves) == 2 and any(
+            get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP for s in score.staves
+        )
+        if is_piano:
+            return TranscriptionMode.PIANO
+        if isinstance(score, OrchestraScore) or len(score.staves) > 2:
+            return TranscriptionMode.ENSEMBLE
+        return TranscriptionMode.SOLO
+
+    def _display_measure_number(self, measure: Measure, position: int) -> int:
+        """The number to show at `measure`'s margin/heading position.
+
+        "auto" renumbers sequentially from 1 by `position` (the measure's
+        0-based index within its staff), ignoring whatever `Measure.number`
+        carries in from the source. "print_score" uses `Measure.number`
+        as-is -- the source parser's own numbering, however it was
+        assigned (see MEASURE_NUMBERING_MODES above for what that means
+        per input format).
+
+        TODO(lilypond-roundtrip): `to_lilypond()` doesn't currently emit
+        anything (e.g. `\\set Score.currentBarNumber`) that would let
+        `lilypond_parser.py` recover an irregular source numbering (a
+        pickup measure numbered 0, a renumbered section) on import --
+        until that exists, "print_score" and "auto" are equivalent for a
+        LilyPond source, both falling back to the parser's own sequential
+        count. MusicXML and BRF sources are unaffected: both already carry
+        real per-measure numbering into `Measure.number` independently of
+        this renderer.
+        """
+        if self.measure_numbering == "auto":
+            return position + 1
+        return measure.number
 
     def render(self, score: Score) -> str:
         if not score.staves:
@@ -357,19 +444,10 @@ class BrailleRenderer:
             # Pass 2: Measure repeat compression pass
             measure_repeat_originals = self._compress_measure_repeats(score)
 
-        # Determine layout type. is_piano is computed first and independent of
-        # isinstance(score, OrchestraScore): LilypondParser tags any parsed
-        # score containing "PianoStaff" as an OrchestraScore, so a 2-staff
-        # piano score must not automatically fall into ensemble layout.
-        from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
-        is_piano = len(score.staves) == 2 and any(
-            get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP for s in score.staves
-        )
-        is_ensemble = not is_piano and (isinstance(score, OrchestraScore) or len(score.staves) > 2)
-
-        if is_ensemble:
+        mode = self._detect_transcription_mode(score)
+        if mode == TranscriptionMode.ENSEMBLE:
             return self._render_ensemble(score, rest_only_grid, measure_repeat_originals)
-        elif is_piano:
+        elif mode == TranscriptionMode.PIANO:
             return self._render_piano(score)
         else:
             return self._render_solo(score)
@@ -411,7 +489,7 @@ class BrailleRenderer:
                 # this margin number with the numeral sign (⠼), unlike a
                 # keyboard bar-over-bar parallel's margin number (BANA
                 # 29.3(b): "given without the numeric indicator").
-                num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
+                num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx)))
                 prefix = (num_str + " ") if self.show_measure_numbers else ""
                 current_line = prefix + brl_start
                 prev_note = prev_start
@@ -421,7 +499,7 @@ class BrailleRenderer:
                     prev_note = prev_no_start
                 else:
                     lines.append(current_line)
-                    num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
+                    num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx)))
                     prefix = (num_str + " ") if self.show_measure_numbers else ""
                     current_line = prefix + brl_start
                     prev_note = prev_start
@@ -469,7 +547,7 @@ class BrailleRenderer:
                 rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level)
                 lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level)
                 
-                m_num = rh_staff.measures[idx].number
+                m_num = self._display_measure_number(rh_staff.measures[idx], idx)
                 test_rh = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
                 test_lh = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
                 
@@ -486,7 +564,7 @@ class BrailleRenderer:
                 # Force at least one measure to avoid infinite loop
                 rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level)
                 lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level)
-                m_num = rh_staff.measures[idx].number
+                m_num = self._display_measure_number(rh_staff.measures[idx], idx)
                 best_rh_lines = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
                 best_lh_lines = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
                 fit_size = 1
@@ -700,7 +778,7 @@ class BrailleRenderer:
                 col = max_prefix_len + 1
                 for k in range(fit_size):
                     m = score.staves[0].measures[idx + k]
-                    num_str = "⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m.number))
+                    num_str = "⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx + k)))
                     for char_idx, char in enumerate(num_str):
                         if col + char_idx < self.line_width:
                             heading_chars[col + char_idx] = char

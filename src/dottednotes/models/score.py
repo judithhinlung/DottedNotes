@@ -24,11 +24,17 @@ class Score:
     def add_staff(self, staff: Staff) -> None:
         self.staves.append(staff)
 
-    def to_braille(self, compression_level: str = "full", measure_numbers: bool = True) -> str:
+    def to_braille(
+        self,
+        compression_level: str = "full",
+        measure_numbers: bool = True,
+        measure_numbering: str = "auto",
+    ) -> str:
         from dottednotes.renderers.braille_renderer import BrailleRenderer
         return BrailleRenderer(
             compression_level=compression_level,
-            show_measure_numbers=measure_numbers
+            show_measure_numbers=measure_numbers,
+            measure_numbering=measure_numbering,
         ).render(self)
 
     @staticmethod
