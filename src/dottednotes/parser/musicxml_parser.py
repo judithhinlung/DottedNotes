@@ -26,7 +26,21 @@ def load_musicxml(source: str) -> Score:
         m21_score = music21.converter.parse(source)
     except Exception as e:
         raise DottedNotesError(f"Could not parse MusicXML: {e}")
-    return MusicXMLTranslator().translate(m21_score)
+    try:
+        return MusicXMLTranslator().translate(m21_score)
+    except DottedNotesError:
+        # Already a clean, specific, plain-text error (e.g. an
+        # unrecognized chord symbol kind) -- let it through unchanged
+        # rather than burying its message inside a generic one.
+        raise
+    except Exception as e:
+        # Any other internal failure during translation (malformed
+        # spanner data, an unexpected music21 shape, ...) must still
+        # surface as a plain-text message, not a raw Python traceback --
+        # this project's own "never a silent failure, never a raw
+        # traceback" rule (see exceptions.py) applied to music21's own
+        # parsing internals, not just this file's own code.
+        raise DottedNotesError(f"Could not import MusicXML: {e}")
 
 
 M21_DURATION_MAP = {

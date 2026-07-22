@@ -551,6 +551,44 @@ def test_musicxml_ottava_down_imports_at_sounding_octave():
     assert note.octave == 4
 
 
+def test_load_musicxml_wraps_internal_translate_errors_cleanly():
+    # Regression test (found via the MusicXML Test Suite's own
+    # 33e-Spanners-OctaveShifts-InvalidSize.xml): a malformed
+    # <octave-shift size="..."> (non-numeric) makes music21 raise a raw
+    # SpannerException deep inside MusicXMLTranslator.translate(), not
+    # during the initial music21.converter.parse() call -- load_musicxml()
+    # previously only wrapped the latter, so this reached the caller as an
+    # unhandled traceback instead of a plain-text DottedNotesError.
+    from dottednotes.exceptions import DottedNotesError
+
+    xml = _measure_with_octave_shift(5, 'down').replace('size="8"', 'size="a"')
+    with pytest.raises(DottedNotesError):
+        load_musicxml(xml)
+
+
+def test_load_musicxml_does_not_double_wrap_existing_dottednoteserror():
+    # A DottedNotesError already raised inside translate() (e.g. an
+    # unrecognized chord symbol kind) must reach the caller with its own
+    # specific message intact, not re-wrapped inside a generic
+    # "Could not import MusicXML: ..." message.
+    from dottednotes.exceptions import DottedNotesError
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Test</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes><divisions>1</divisions></attributes>
+      <harmony><root><root-step>C</root-step></root><kind>power</kind></harmony>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+    with pytest.raises(DottedNotesError, match="Unrecognized MusicXML chord kind"):
+        load_musicxml(xml)
+
+
 def test_musicxml_note_without_ottava_is_unaffected():
     m21_score = music21.stream.Score()
     part = music21.stream.Part()
