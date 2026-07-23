@@ -181,10 +181,25 @@ class BANAValidator:
             if "hairpin-terminator-omission" in self.enabled_rules:
                 corrections.extend(self._validate_hairpin_terminator_omission(staff))
 
+            # Real rendered-line data for octave-mark reset detection (S9b-3)
+            # and accurate line-number reporting (S10d-2) -- only derivable
+            # for a single-staff (solo) score today; a multi-staff score's
+            # rendered text interleaves several staves' worth of tokens per
+            # line, which this simple per-staff BAR_LINE walk can't
+            # disambiguate (see _build_measure_line_map).
+            line_map = None
+            if raw_brl_text and len(score.staves) == 1:
+                positions = self._build_measure_line_map(raw_brl_text)
+                if positions is not None:
+                    line_map = {
+                        staff.measures[i].number: positions[i]
+                        for i in range(min(len(positions), len(staff.measures)))
+                    }
+
             voices = self._get_staff_voices(staff)
             for voice in voices:
                 if "S9b-3" in self.enabled_rules:
-                    corrections.extend(self._validate_octave_marks(voice))
+                    corrections.extend(self._validate_octave_marks(voice, line_map))
                 if "S9b-2" in self.enabled_rules:
                     corrections.extend(self._validate_articulation_shorthand(voice))
                 if "S9b-sign-order" in self.enabled_rules:
@@ -251,7 +266,58 @@ class BANAValidator:
                 flat.extend(self._flatten_items(item.items))
         return flat
 
-    def _validate_octave_marks(self, voice: list[tuple[Any, int]]) -> list[Correction]:
+    def _build_measure_line_map(self, raw_brl_text: str) -> Optional[list[int]]:
+        """Map each measure's 0-indexed POSITION (order of appearance) to the
+        1-based physical line it starts on in `raw_brl_text`, by tokenizing
+        the text and walking it: skip the leading title/signature header
+        (CLEF/KEY_SIGNATURE/TIME_SIGNATURE/WORD_SIGN/UNKNOWN tokens, none of
+        which can occur inside a measure), then segment the rest into
+        measures on BAR_LINE boundaries, recording each segment's first
+        token's line.
+
+        Only meaningful for solo (single-staff) output -- a multi-staff
+        rendering (piano bar-over-bar, ensemble parallels) interleaves
+        several staves' tokens per physical line, which this simple
+        sequential walk can't disambiguate; callers must not use this for a
+        multi-staff Score. Returns None if the text has no tokens.
+        """
+        if not raw_brl_text:
+            return None
+        from dottednotes.parser.tokenizer import BrailleTokenizer
+
+        header_categories = {
+            SymbolCategory.CLEF, SymbolCategory.KEY_SIGNATURE,
+            SymbolCategory.TIME_SIGNATURE, SymbolCategory.WORD_SIGN,
+            SymbolCategory.UNKNOWN,
+        }
+        tokens = BrailleTokenizer().tokenize(raw_brl_text)
+        if not tokens:
+            return None
+
+        lines: list[int] = []
+        past_header = False
+        measure_started = False
+        current_line: Optional[int] = None
+        for tok in tokens:
+            if not past_header:
+                if tok.category in header_categories:
+                    continue
+                past_header = True
+            if tok.category == SymbolCategory.BAR_LINE:
+                measure_started = False
+                continue
+            # A measure boundary is either an explicit BAR_LINE (mid-line
+            # measure separator or final barline) or an implicit one: this
+            # parser's grammar treats every new physical line as the start
+            # of a new measure too, even with no BAR_LINE token written
+            # (a source BRF can hand-break a line without a bar-line cell).
+            if not measure_started or tok.line != current_line:
+                lines.append(tok.line)
+                measure_started = True
+                current_line = tok.line
+        return lines if lines else None
+
+    def _validate_octave_marks(self, voice: list[tuple[Any, int]], line_map: Optional[dict[int, int]] = None) -> list[Correction]:
         corrections = []
         last_note: Optional[Note] = None
         last_measure_number: Optional[int] = None
@@ -264,7 +330,10 @@ class BANAValidator:
                 continue
 
             curr_note = item.notes[0] if isinstance(item, Chord) else item
-            line_num = curr_note.parsed_tokens[0].line if curr_note.parsed_tokens else 1
+            if line_map is not None and m_num in line_map:
+                line_num = line_map[m_num]
+            else:
+                line_num = curr_note.parsed_tokens[0].line if curr_note.parsed_tokens else 1
 
             has_mark = curr_note.has_octave_mark or any(t.category == SymbolCategory.OCTAVE_MARK for t in curr_note.parsed_tokens)
 
@@ -279,14 +348,30 @@ class BANAValidator:
                 is_reset = True
                 reset_reason = "first note after numeric indicator"
             elif last_measure_number is not None and m_num != last_measure_number:
-                # BANA resets octave tracking at every measure boundary, not
-                # just line starts -- Note.to_braille() (the actual renderer)
-                # already forces an octave mark whenever is_measure_start is
-                # True, regardless of interval size. This mirrors that rule.
-                is_reset = True
-                reset_reason = "first note of a new measure"
+                # BANA resets octave tracking at the first note of a new
+                # PHYSICAL LINE, not at every measure boundary --
+                # Note.to_braille() (the actual renderer) only forces an
+                # octave mark for a measure that starts a new line; a
+                # measure that fits mid-line gets no forced mark unless the
+                # reader opted into octave_mark_every_measure. When a real
+                # rendered-line map is available (solo/single-staff output),
+                # use it to check whether this measure boundary is also a
+                # line boundary; otherwise fall back to the (rarer) case of
+                # comparing parsed_tokens line numbers directly.
+                if line_map is not None:
+                    if line_map.get(m_num) != line_map.get(last_measure_number):
+                        is_reset = True
+                        reset_reason = "first note in new line"
+                elif last_note and curr_note.parsed_tokens and last_note.parsed_tokens:
+                    curr_line = curr_note.parsed_tokens[0].line
+                    prev_line = last_note.parsed_tokens[0].line
+                    if curr_line != prev_line:
+                        is_reset = True
+                        reset_reason = "first note in new line"
             else:
-                # Check for line start
+                # Same measure number as before -- check for a line start
+                # anyway (a source BRF can, in principle, hand-break a line
+                # mid-measure even though the renderer itself never does).
                 if last_note and curr_note.parsed_tokens and last_note.parsed_tokens:
                     curr_line = curr_note.parsed_tokens[0].line
                     prev_line = last_note.parsed_tokens[0].line

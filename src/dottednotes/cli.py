@@ -175,8 +175,16 @@ def _run_convert(args: argparse.Namespace) -> None:
 
     if getattr(args, 'report', False):
         from dottednotes.validation.validator import BANAValidator
+        # For MusicXML/LilyPond input there is no source braille text at
+        # all (`text` is "") -- render one so line-length/page-layout
+        # rules (S9b-4/S11c-2) and real line-number reporting work for
+        # these input types too, not just BRF/BRL. For BRF/BRL input,
+        # keep validating the literal source text as before (that is the
+        # correct semantics there -- checking what the user actually
+        # wrote, not a freshly re-rendered version of it).
+        report_text = text if text else score.to_braille()
         validator = BANAValidator(profile=args.profile)
-        result = validator.validate(score, raw_brl_text=text)
+        result = validator.validate(score, raw_brl_text=report_text)
         for c in result.corrections:
             msg = ""
             if c.line_number > 0:

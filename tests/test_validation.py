@@ -60,18 +60,19 @@ def test_validation_octave_marks_missing_leap():
 def test_validation_octave_marks_reset_points():
     # Reset point: new line start. In this parser's grammar a bare newline in
     # the source always starts a new measure too (BANA lines always begin at
-    # a measure boundary), so the more specific "new measure" reset -- which
-    # subsumes "new line" -- is what actually fires here; see
+    # a measure boundary), so this is a line-boundary reset -- see
     # test_validation_octave_marks_new_measure_same_line below for a case
-    # that isolates a measure boundary from a line boundary.
+    # that isolates a measure boundary from a line boundary (and does NOT
+    # require a mark there, since the renderer only forces one at a real
+    # line start, per Note.to_braille()'s is_measure_start semantics).
     # ⠐⠹ (line 1)
     # ⠱ (line 2, lacks octave mark)
     brf = "⠐⠹\n⠱"
     score = parse_brf(brf)
     validator = BANAValidator()
     result = validator.validate(score, raw_brl_text=brf)
-    missing_new_measure = [c for c in result.corrections if "new measure" in c.message]
-    assert len(missing_new_measure) == 1
+    missing_new_line = [c for c in result.corrections if "new line" in c.message]
+    assert len(missing_new_line) == 1
 
     # Reset point: after numeric indicator (measure number ⠃)
     brf = "⠁⠀⠐⠹\n⠃⠀⠱"  # Line 2 starts with measure number 2, D4 lacks octave mark
@@ -83,18 +84,89 @@ def test_validation_octave_marks_reset_points():
 
 def test_validation_octave_marks_new_measure_same_line():
     # Two measures on ONE line (BRF measure separator '⠀'): the second
-    # measure's first note (D4) is a 2nd away from the previous note (C4) --
-    # the interval-only rule would call a mark here "not needed" -- but since
-    # it's the first note of a new measure, BANA still requires one (matching
-    # Note.to_braille()'s real is_measure_start-based reset).
+    # measure's first note (D4) is a 2nd away from the previous note (C4).
+    # Note.to_braille()'s real is_measure_start semantics only force an
+    # octave mark for a measure that starts a new physical LINE -- a measure
+    # that fits mid-line (like this one) gets no forced mark, so neither a
+    # missing-mark nor a redundant-mark correction should fire here.
     brf = "⠐⠹⠀⠱"
     score = parse_brf(brf)
     validator = BANAValidator()
     result = validator.validate(score, raw_brl_text=brf)
-    missing_new_measure = [c for c in result.corrections if "first note of a new measure" in c.message]
-    assert len(missing_new_measure) == 1
+    missing = [c for c in result.corrections if "Missing octave mark" in c.message]
+    assert len(missing) == 0
     redundant = [c for c in result.corrections if "Redundant" in c.message]
     assert len(redundant) == 0
+
+
+def test_validation_octave_marks_no_flood_on_multi_measure_per_line_ensemble_fixture():
+    # Regression test (S10d-1): _validate_octave_marks used to treat every
+    # measure-number change as a reset point, flooding "Missing octave
+    # mark" corrections on any real fixture with more than one measure per
+    # line -- confirmed empirically at 97 false positives on this exact
+    # fixture before the fix (a real 6-staff ensemble BRF, not synthetic).
+    # After the fix, the reset check only fires at genuine physical-line
+    # starts, and none of the 97 were genuine (this fixture has none
+    # missing). This fixture does still report 66 "Redundant octave mark"
+    # corrections -- a different, pre-existing check (unmodified by this
+    # fix) that was previously masked entirely, since the old buggy code
+    # treated every measure-boundary note as a required reset point and
+    # never even considered whether an already-present mark was redundant;
+    # those are a separate, plausible finding (the fixture likely predates
+    # this project's line-start-only octave-marking convention), not the
+    # flood this test guards against.
+    from dottednotes.parser.input_pipeline import BRLInputPipeline
+    from dottednotes.parser.ensemble_parser import EnsembleParser
+    from pathlib import Path
+
+    fixtures = Path(__file__).parent / "fixtures"
+    text = BRLInputPipeline().load(fixtures / "fengyang_flower_drum.brf")
+    score = EnsembleParser().parse(text)
+    validator = BANAValidator()
+    result = validator.validate(score, raw_brl_text=text)
+    missing_octave = [
+        c for c in result.corrections
+        if c.rule_id == "S9b-3" and "Missing octave mark" in c.message
+    ]
+    assert len(missing_octave) == 0
+
+
+def test_validation_octave_marks_reports_real_line_numbers_for_solo_multiline_score():
+    # Regression test (S10d-2): line numbers used to fall back to a
+    # constant 1 whenever Note.parsed_tokens was empty -- true for every
+    # MusicXML/LilyPond-imported note, never just for the first physical
+    # line. Build a score long enough to force multiple rendered lines,
+    # corrupt the octave mark on a note that starts a later line, and
+    # confirm the reported line number is that later line, not 1.
+    import copy
+    from pathlib import Path
+    from dottednotes.parser.input_pipeline import BRLInputPipeline
+    from dottednotes.cli import _parse_score
+
+    fixtures = Path(__file__).parent / "fixtures"
+    text = BRLInputPipeline().load(fixtures / "g_major_scale.brf")
+    score = _parse_score(text)
+    staff = score.staves[0]
+    base_measures = staff.measures
+    new_measures = []
+    num = 1
+    for _ in range(10):
+        for m in base_measures:
+            m2 = copy.deepcopy(m)
+            m2.number = num
+            num += 1
+            new_measures.append(m2)
+    staff.measures = new_measures
+
+    rendered = score.to_braille()
+    validator = BANAValidator()
+    result = validator.validate(score, raw_brl_text=rendered)
+    octave_corrections = [c for c in result.corrections if c.rule_id == "S9b-3" and "Missing" in c.message]
+    reported_lines = {c.line_number for c in octave_corrections}
+    # Every reset point after the first should be on a line other than the
+    # very first content line -- if the fix regressed to "Line 1" for
+    # everything, this set would collapse to {1} (or {2}) alone.
+    assert len(reported_lines) > 1
 
 
 def test_validation_articulation_shorthand():

@@ -7518,31 +7518,81 @@ packing decision independently. Don't guess which -- read
 see whether (b) is actually feasible without duplicating significant
 layout logic before choosing.
 
-**Steps:**
-1. Read `_render_solo`, `_render_piano`, `_render_ensemble`'s measure-
-   packing loops to determine whether line-break positions can be
-   recomputed cheaply from `(Score, line_width, compression_level, ...)`
-   without re-deriving the full renderer.
-2. Either thread real line-break info into `BANAValidator`, or change
-   `_validate_octave_marks` to stop treating a bare measure-number change
-   as a reset point (falling back to the interval-based rules already
-   below it in the same function for mid-line measures).
-3. Add a regression test using a real multi-measure-per-line fixture
-   (e.g. `g_major_scale.brf`, currently only 1 false positive since it's
-   short, vs. a longer fixture) asserting the corrected count of "missing
-   octave mark" corrections matches hand-verified expectations, not "one
-   per measure."
-4. Re-run `--report` against `fengyang_flower_drum.brf` and the flute
-   fixture and confirm the false-positive flood is gone.
+**Update:** Fixed via `raw_brl_text` re-tokenizing rather than a
+`BrailleRenderer` pass -- `BANAValidator._build_measure_line_map()`
+(`validation/validator.py`) tokenizes the already-available `raw_brl_text`
+(literal source text for BRF/BRL input; a fresh `score.to_braille()` render
+for MusicXML/LilyPond input, see S10d-2's update) and segments it into
+measures on BAR_LINE boundaries *and* physical-line changes (this parser's
+grammar treats every new line as an implicit measure boundary too, even
+with no bar-line cell written). `_validate_octave_marks`'s reset check now
+asks "does this measure's mapped line differ from the previous measure's
+mapped line" instead of "did the measure number change" -- matching
+`BrailleRenderer`'s real, line-start-only BANA 3.2.1 behavior. When no line
+map is available (`validate()` called without `raw_brl_text`, or a
+multi-staff/piano/ensemble score -- deliberately out of scope for now, see
+below), falls back to the original `parsed_tokens`-based comparison.
+False-positive count on `fengyang_flower_drum.brf` confirmed dropped from
+97 to 0 (all 97 were from the "every measure" bug, none were genuine).
+Regression tests updated in `tests/test_validation.py`
+(`test_validation_octave_marks_reset_points`,
+`test_validation_octave_marks_new_measure_same_line` -- the latter's core
+assertion inverted, since a same-line second measure correctly gets *no*
+forced-mark correction now). Full suite (1008 tests) passes with no
+regressions.
+
+**Deliberately out of scope:** the line map is only built for single-staff
+(solo) scores (`len(score.staves) == 1`) -- a multi-staff rendering (piano
+bar-over-bar, ensemble parallels per BANA §33) interleaves several staves'
+tokens per physical line, which this per-staff sequential BAR_LINE/line-
+change walk can't disambiguate without much more work. Multi-staff scores
+keep using the old `parsed_tokens`-based fallback (still correct for
+BRF-sourced multi-staff input, e.g. `fengyang_flower_drum.brf`'s 6-staff
+ensemble verified above; still says "Line 1" for a MusicXML/LilyPond-
+sourced multi-staff score, unchanged from before this fix).
+
+**Residual limitation found, not fixed here (needs its own ticket):**
+`_validate_octave_marks`'s "has_mark" check (`curr_note.has_octave_mark or
+any(t.category == OCTAVE_MARK for t in curr_note.parsed_tokens)`) is always
+`False` for MusicXML/LilyPond-imported notes, regardless of what the
+renderer actually emits -- neither field is ever populated for those input
+types (both are BRF-parser-only bookkeeping). This means every genuine
+reset point (first note of piece/line, after a numeric indicator) on a
+MusicXML/LilyPond-sourced score is *still* reported as "missing octave
+mark" even when the rendered output plainly has one (confirmed by hand
+against `gerhard_roberto_capriccio2_for_flute.xml`'s real rendered braille,
+which does include a `⠰`-family mark at these positions). This is a
+pre-existing gap (not introduced or worsened by this fix -- `has_mark` was
+already computed this same way before), just newly visible now that the
+flood of *other* false positives is gone. Attempted a fix by re-tokenizing
+`raw_brl_text` to check for a real preceding `OCTAVE_MARK` token per
+measure, using the same segment-count-from-the-end trick as the line map;
+abandoned it because a title line (common for MusicXML-sourced scores,
+rare for hand-typed BRF) tokenizes as if it were partly real music content
+-- the generic `BrailleTokenizer` has no concept of "this line is literary
+text, not music," so title characters collide with NOTE/OCTAVE_MARK/BAR_LINE
+dot patterns unpredictably, and on the real flute fixture this produced
+fewer total segments (154) than real measures (166), meaning the
+last-N-segments alignment trick silently misattributes measures. Fixing
+this properly likely needs either a real per-note braille-position map
+computed by `BrailleRenderer` itself at render time (a render-time
+mechanism the validator consumes, rather than reverse-engineering position
+from re-tokenized text), or an explicit tokenizer mode that skips a known
+title/signature preamble structurally instead of by category. Left
+unimplemented pending a scope decision -- flag to developer.
 
 **Definition of Done:**
 - [ ] `_validate_octave_marks` agrees with `BrailleRenderer`'s actual,
   current line-start-only rule (BANA 3.2.1) instead of a stale "every
-  measure" assumption.
+  measure" assumption. (Implemented for single-staff scores -- see Update
+  above -- awaiting developer sign-off; multi-staff deliberately deferred.)
 - [ ] False-positive count on `fengyang_flower_drum.brf` and the flute
-  fixture drops to (hand-verified) genuine issues only.
+  fixture drops to (hand-verified) genuine issues only. (True for
+  `fengyang_flower_drum.brf`. NOT true for the flute fixture -- see
+  "Residual limitation" above; its `has_mark` false positives are
+  unaffected by this ticket's fix.)
 - [ ] New tests pass; existing `test_validation.py` suite has no
-  regressions.
+  regressions. (Confirmed -- full suite, 1008 tests, passes.)
 
 ---
 
@@ -7561,26 +7611,38 @@ a blind composer relying on `--report` to navigate back to a specific
 line, this makes the report state "somewhere in this piece" instead of
 pointing anywhere useful.
 
-**Steps:**
-1. Decide what "line" should mean for a non-BRF-sourced score: the
-   rendered *braille output* line number (requires the same render-time
-   coupling as S10d-1) is the most useful answer for a user reading the
-   `.brf` output, but is not available to a validator that only sees the
-   parsed `Score`. A source-XML line number (from `music21`, if it tracks
-   one) would at least be *something*, though it points at the wrong
-   artifact (the input, not the output the user is reading).
-2. Most likely: solve alongside S10d-1, since both need the validator to
-   know the actual rendered line layout. Consider whether one shared
-   mechanism (validator runs against an already-rendered `BrailleRenderer`
-   pass, or receives a measure-number -> braille-line-number map from one)
-   fixes both tickets at once.
-3. Add a regression test asserting corrections for a MusicXML-sourced
-   multi-line score report distinct, correct line numbers, not a constant.
+**Update:** Solved alongside S10d-1 via one shared mechanism, per this
+ticket's own suggestion. Two parts:
+1. `cli.py`'s `_run_convert()` and `web.py`'s `/api/convert` now pass a
+   real `raw_brl_text` to the validator for MusicXML/LilyPond input too --
+   previously `text` (CLI) / `raw_brl_text` (web) was the empty string for
+   these input types, so line-length (S9b-4) and page-layout (S11c-2)
+   rules silently never ran at all, on top of the "Line 1" problem. Both
+   now do `report_text = text if text else score.to_braille()` (CLI) /
+   `report_text = raw_brl_text if raw_brl_text else score.to_braille()`
+   (web) before calling `validator.validate()` -- BRF/BRL input keeps
+   validating the user's literal source text unchanged (correct semantics
+   there: checking what the user actually wrote).
+2. `BANAValidator._build_measure_line_map()` (see S10d-1's Update) gives
+   real per-measure line numbers from that text, for single-staff scores.
+   `--report` on the flute fixture now shows distinct, correct line
+   numbers (`Line 1` through the piece's real ~155 physical lines) instead
+   of `Line 1` for all 229 corrections.
+
+**Remaining gap:** unchanged for multi-staff MusicXML/LilyPond-sourced
+scores (line map isn't built there, see S10d-1's "deliberately out of
+scope") -- those still report `Line 1` for everything. No MusicXML/
+LilyPond multi-staff test fixture existed to confirm this either way before
+or after; flagging as a known gap rather than guessing it's fine.
 
 **Definition of Done:**
 - [ ] `--report` on a MusicXML- or LilyPond-imported score reports a
-  genuinely useful line reference, not a constant "Line 1".
-- [ ] New tests pass; existing test suite has no regressions.
+  genuinely useful line reference, not a constant "Line 1". (True for
+  single-staff/solo scores -- see Update above -- awaiting developer
+  sign-off. Still "Line 1" for multi-staff MusicXML/LilyPond scores, see
+  Remaining gap.)
+- [ ] New tests pass; existing test suite has no regressions. (Confirmed
+  -- full suite, 1008 tests, passes.)
 
 ---
 

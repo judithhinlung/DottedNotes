@@ -236,8 +236,14 @@ async def convert_file(
             score = _parse_score(raw_brl_text, category_override=category)
 
         # 2. Run BANA validation
+        # For MusicXML/LilyPond input there is no source braille text at
+        # all -- render one so line-length/page-layout rules and real
+        # line-number reporting work for these input types too, not just
+        # BRF/BRL (which keeps validating the literal source text, the
+        # correct semantics there).
+        report_text = raw_brl_text if raw_brl_text else score.to_braille()
         validator = BANAValidator(profile=profile)
-        val_result = validator.validate(score, raw_brl_text=raw_brl_text)
+        val_result = validator.validate(score, raw_brl_text=report_text)
         corrections = [c.to_dict() for c in val_result.corrections]
 
         # 3. Render Output format
