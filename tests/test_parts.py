@@ -4,6 +4,7 @@ import io
 import json
 import re
 import pytest
+import music21
 from pathlib import Path
 from fastapi.testclient import TestClient
 
@@ -13,6 +14,35 @@ from dottednotes.cli import main
 from dottednotes.web import app, SCORE_CACHE
 
 client = TestClient(app)
+
+
+def _write_flute_and_horn_musicxml(tmp_path: Path) -> Path:
+    """A two-part MusicXML score: a non-transposing Flute and a Horn in F
+    (down a perfect 5th) -- used to verify that individual-part output uses
+    the horn player's written (transposed) pitch, not concert pitch."""
+    flute = music21.stream.Part()
+    flute.partName = "Flute"
+    fm = music21.stream.Measure(number=1)
+    fm.append(music21.meter.TimeSignature("4/4"))
+    fm.append(music21.note.Note("C5", quarterLength=4))
+    flute.append(fm)
+
+    horn = music21.stream.Part()
+    inst = music21.instrument.Horn()
+    inst.partName = "Horn in F"
+    inst.transposition = music21.interval.Interval('P-5')
+    horn.insert(0, inst)
+    hm = music21.stream.Measure(number=1)
+    hm.append(music21.note.Note("C5", quarterLength=4))
+    horn.append(hm)
+
+    m21_score = music21.stream.Score()
+    m21_score.insert(0, flute)
+    m21_score.insert(0, horn)
+
+    out_path = tmp_path / "flute_horn.musicxml"
+    m21_score.write("musicxml", fp=str(out_path))
+    return out_path
 
 
 def test_score_extract_part_index():
@@ -131,6 +161,24 @@ def test_cli_part_by_name(monkeypatch, tmp_path):
     assert "g'4 a4 b4 c4" not in content.lower()
 
 
+def test_cli_part_of_transposing_instrument_uses_written_pitch(monkeypatch, tmp_path):
+    # Regression test: an individual player's part for a transposing
+    # instrument must show written (transposed) pitch, not concert pitch --
+    # see Score.to_lilypond's concert_pitch docstring.
+    xml_path = _write_flute_and_horn_musicxml(tmp_path)
+
+    full_out = tmp_path / "full.ly"
+    _run_main(monkeypatch, ["convert", str(xml_path), str(full_out)])
+    full_content = full_out.read_text(encoding="utf-8")
+    assert r"\transpose" in full_content  # full score defaults to concert pitch
+
+    horn_out = tmp_path / "horn_part.ly"
+    _run_main(monkeypatch, ["convert", str(xml_path), str(horn_out), "--part", "Horn in F"])
+    horn_content = horn_out.read_text(encoding="utf-8")
+    assert r"\transpose" not in horn_content
+    assert "c1" in horn_content.lower()  # written pitch, untouched
+
+
 # Web API Tests
 def test_web_convert_returns_parts_list():
     brf_content = (
@@ -218,3 +266,30 @@ def test_web_part_rendering_endpoint():
     part1_response_fallback = client.get(f"/api/jobs/{job_id}/parts/1/ly")
     assert part1_response_fallback.status_code == 200
     assert "g'4 a4 b4 c4" in part1_response_fallback.text.lower()
+
+
+def test_web_part_of_transposing_instrument_uses_written_pitch(tmp_path):
+    # Regression test: the per-part download endpoint must render a
+    # transposing instrument's individual part in written pitch, not
+    # concert pitch -- see Score.to_lilypond's concert_pitch docstring.
+    xml_path = _write_flute_and_horn_musicxml(tmp_path)
+
+    with open(xml_path, "rb") as f:
+        response = client.post(
+            "/api/convert",
+            files={"file": ("flute_horn.musicxml", f, "application/xml")},
+            data={"target_format": "lilypond"},
+        )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["parts"] == ["Flute", "Horn in F"]
+    job_id = data["job_id"]
+
+    full_response = client.get(f"/api/jobs/{job_id}/ly")
+    assert full_response.status_code == 200
+    assert r"\transpose" in full_response.text  # full score defaults to concert pitch
+
+    horn_response = client.get(f"/api/jobs/{job_id}/parts/1/ly")
+    assert horn_response.status_code == 200
+    assert r"\transpose" not in horn_response.text
+    assert "c1" in horn_response.text.lower()  # written pitch, untouched

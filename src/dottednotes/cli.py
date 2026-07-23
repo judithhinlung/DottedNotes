@@ -182,7 +182,8 @@ def _run_convert(args: argparse.Namespace) -> None:
                 print(f"  {i+1}. {staff.name}", file=sys.stderr)
         sys.exit(0)
 
-    if getattr(args, "part", None) is not None:
+    is_part_extraction = getattr(args, "part", None) is not None
+    if is_part_extraction:
         try:
             part_val = int(args.part) - 1
         except ValueError:
@@ -251,6 +252,10 @@ def _run_convert(args: argparse.Namespace) -> None:
                 category_override=category_override,
                 format_overrides=format_overrides,
                 measure_numbers=args.measure_numbers,
+                # An extracted individual part must show the performer's
+                # written (transposed) pitch, not concert pitch -- see
+                # Score.to_lilypond's concert_pitch docstring.
+                concert_pitch=not is_part_extraction,
             )
 
         if args.compile and output_path is None:

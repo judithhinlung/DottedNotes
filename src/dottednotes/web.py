@@ -510,7 +510,11 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
             rendered = part_score.to_lilypond(
                 category_override=meta.get("category"),
                 format_overrides=parsed_format_overrides,
-                measure_numbers=meta.get("measure_numbers", False)
+                measure_numbers=meta.get("measure_numbers", False),
+                # An individual part must show the performer's written
+                # (transposed) pitch, not concert pitch -- see
+                # Score.to_lilypond's concert_pitch docstring.
+                concert_pitch=False,
             )
             output_path.write_text(rendered, encoding="utf-8")
             
@@ -523,7 +527,8 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
                 rendered = part_score.to_lilypond(
                     category_override=meta.get("category"),
                     format_overrides=parsed_format_overrides,
-                    measure_numbers=meta.get("measure_numbers", False)
+                    measure_numbers=meta.get("measure_numbers", False),
+                    concert_pitch=False,
                 )
                 ly_path.write_text(rendered, encoding="utf-8")
             
@@ -541,7 +546,8 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
                 rendered = part_score.to_lilypond(
                     category_override=meta.get("category"),
                     format_overrides=parsed_format_overrides,
-                    measure_numbers=meta.get("measure_numbers", False)
+                    measure_numbers=meta.get("measure_numbers", False),
+                    concert_pitch=False,
                 )
                 ly_path.write_text(rendered, encoding="utf-8")
             
