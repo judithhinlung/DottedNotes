@@ -89,9 +89,11 @@ def test_breve_duration():
 
 
 def test_invalid_dot_count_raises():
+    # BANA Par. 2.3 has no cap on dot count (S10d-9) -- only a negative
+    # count is actually invalid.
     import pytest
     with pytest.raises(ValueError):
-        Duration(value=4, dots=3)
+        Duration(value=4, dots=-1)
 
 
 def test_duration_in_ticks_quarter():
@@ -152,6 +154,39 @@ def test_duration_tuplet_ratio_takes_priority_over_is_triplet():
     # the hardcoded 2/3 triplet shortcut.
     d = Duration(value=8, is_triplet=True, tuplet_ratio=(5, 4))
     assert d.duration_in_ticks() == Duration(value=8, tuplet_ratio=(5, 4)).duration_in_ticks()
+
+
+# --- Note values finer than 64th and 3+ augmentation dots (S10d-9) ---
+
+def test_duration_128th_note_is_valid():
+    d = Duration(value=128)
+    assert d.to_lilypond() == "128"
+
+def test_duration_three_dots():
+    # BANA Par. 2.3: "the same number of dot 3s are given in the braille"
+    # -- no cap at 2.
+    d = Duration(value=4, dots=3)
+    assert d.to_lilypond() == "4..."
+    # A quarter note is 24 ticks; 3 dots scale by (2^4 - 1)/2^3 = 15/8,
+    # so 24 * 15 // 8 = 45.
+    assert d.duration_in_ticks() == 45
+
+def test_duration_four_dots_on_breve():
+    d = Duration(value=0, dots=4)
+    assert d.to_lilypond() == r"\breve...."
+
+def test_duration_128th_note_does_not_vanish_from_beat_count():
+    # TICKS_PER_QUARTER (24) cannot exactly represent a 128th note (24*4/128
+    # = 0.75) -- this must clamp to a minimum of 1 tick, not truncate to 0
+    # and silently disappear from beat-accounting (S10d-9).
+    assert Duration(value=128).duration_in_ticks() > 0
+
+def test_duration_dots_formula_matches_previous_hardcoded_cases():
+    # Regression guard: the general formula must reproduce the exact
+    # values the old hardcoded 0/1/2 branches gave.
+    assert Duration(value=8, dots=0).duration_in_ticks() == 12
+    assert Duration(value=8, dots=1).duration_in_ticks() == 18
+    assert Duration(value=8, dots=2).duration_in_ticks() == 21
 
 
 def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None,

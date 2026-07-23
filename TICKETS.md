@@ -8123,29 +8123,72 @@ practice for solo instrumental writing, but real repro data exists in
 this survey, and the current behavior is a raw crash rather than a
 graceful limit.)
 
-**Steps:**
-1. Fetch and read BANA Par. 2.3/2.4/2.4.1 directly, confirming the exact
-   dot-tripling convention for 3+ dots and the value-sign cells/placement
-   rule for 128th/256th notes, before touching `bana_symbols.py` or
-   `models/duration.py`.
-2. Extend `Duration` to allow more than 2 dots and note values below 64
-   (128, 256), and extend `duration_in_ticks()`'s dot-scaling formula
-   (currently hardcoded for exactly 0/1/2) to a general case.
-3. Implement the larger/smaller value-sign placement logic in whichever
-   render path needs it (likely `Note.to_braille()`, checking the
-   previous/next note's value the same way existing ambiguity-resolution
-   code already does elsewhere in this parser).
-4. At minimum, even before implementing the full value-sign mechanism,
-   replace the raw `ValueError` with a clean `DottedNotesError` so a
-   score using these values fails gracefully rather than with a
-   traceback, if the fuller implementation is deferred further.
-5. Add tests using both test-suite fixtures.
+**Update:** Fetched BANA 2015 Par. 2.1/2.3/2.4/2.4.1 directly (PDF text-
+extracted locally). Par. 2.3 (Dotted Notes): "the same number of dot 3s
+are given in the braille" -- no cap at 2, and mechanically simple (no
+special sign, just repeat the same cell). Par. 2.1: "Each sign also
+represents a smaller value" -- the eighth-note cell's smaller pair is a
+128th note, the same 16x-smaller relationship already implemented for the
+whole/16th, half/32nd, and quarter/64th pairs. Both fixed directly (not
+just wrapped in a clean error, since the underlying rule turned out to be
+simple and mechanical once confirmed):
+
+- `Duration.dots` is now unbounded (only negative is rejected);
+  `duration_in_ticks()`'s dot-scaling generalized from hardcoded 0/1/2
+  branches to `base * (2^(dots+1) - 1) // 2^dots`, verified to reproduce
+  the old 0/1/2 outputs exactly before trusting it beyond 2.
+  `to_lilypond()` already built its dot suffix as `"." * self.dots`
+  (already general, no change needed).
+- `VALID_DURATIONS`/`M21_DURATION_MAP` gained `128`; `Note.to_braille()`/
+  `Rest.to_braille()`'s existing base-duration bucketing (already grouping
+  1&16, 2&32, 4&64 into shared cells) extended to group 8&128 the same way.
+
+**Known, deliberately unfixed limitation:** `TICKS_PER_QUARTER = 24`
+cannot exactly represent a 128th note (24*4/128 = 0.75, not an integer --
+in fact even a bare 64th note was already only approximate at this
+resolution before this ticket, 24*4/64 = 1.5 truncated to 1). Used
+`max(1, ...)` so a 128th note contributes at least 1 tick to beat
+accounting instead of silently truncating to 0 and vanishing entirely, but
+this remains an approximation, not an exact value -- the same kind of
+resolution limit already accepted for non-24-dividing tuplet ratios
+(S10d-4); raising `TICKS_PER_QUARTER` project-wide to fix both exactly is
+a larger, separate change (see S10d-4's own note on this), not attempted
+here.
+
+**Explicitly out of scope, not guessed:** (1) The larger/smaller value
+sign (`^<1`/`,<1`, Par. 2.4) that disambiguates a note's cell between its
+two possible values when context alone would leave a human reader unsure
+-- this needs comparing neighboring notes' values and deciding when
+disambiguation is "likely to arise," a genuinely separate, more complex
+feature than the mechanical dots/128th-note fixes above; not implemented,
+so rendered output for an actually-ambiguous passage may be technically
+correct but harder to read without it. (2) 256th notes: no repro data in
+the confirmed survey actually uses one (only up to 128th appears in the
+real test-suite files), and the exact base-cell pairing for it was
+genuinely unclear to derive confidently (would need to determine whether
+it chains off the 16th note's own cell or something else) -- left
+unimplemented rather than guessed; `map_duration` still raises/approximates
+for it exactly as before. (3) MusicXML's `'longa'` duration type (found in
+`03ab-Rhythm-Durations.xml`, quarterLength 16.0/24.0/28.0): BANA Par. 2.6's
+"Proportional Notation" chart is a separate, specialized mensural/early-
+music system with its own distinct signs, not an extension of the ordinary
+note-value system this ticket covers -- not attempted, falls through to
+the pre-existing crude approximation unchanged (not a regression, not
+newly introduced). (4) `'complex'` duration types (e.g. a note requiring a
+tied combination like a quarter tied to a 16th, quarterLength 1.25):
+a separate, pre-existing gap (duration-to-tie decomposition), not
+about dot count or note-value fineness -- unchanged by this ticket.
 
 **Definition of Done:**
 - [ ] Notes with 3+ dots or finer-than-64th values either transcribe
   correctly per BANA Par. 2.3/2.4, or fail with a clean plain-text error
-  -- never a raw `ValueError` traceback.
-- [ ] New tests pass; existing test suite has no regressions.
+  -- never a raw `ValueError` traceback. (3+ dots and 128th notes now
+  transcribe correctly and are verified with a real `lilypond` compile --
+  see Update above -- awaiting developer sign-off. 256th notes, the
+  larger/smaller value sign, `'longa'`, and `'complex'` durations remain
+  out of scope -- see the lists above.)
+- [ ] New tests pass; existing test suite has no regressions. (Confirmed
+  -- full suite, 1047 tests, passes.)
 
 ---
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-VALID_DURATIONS = {0, 1, 2, 4, 8, 16, 32, 64}
+VALID_DURATIONS = {0, 1, 2, 4, 8, 16, 32, 64, 128}
 
 # MusicXML-style integer tick resolution (quarter note = 24 ticks). Chosen
 # over float beats (S5-8) so triplet math (thirds) is always exact: a
@@ -13,8 +13,11 @@ TICKS_PER_QUARTER = 24
 
 @dataclass
 class Duration:
-    value: int  # 0=breve, 1=whole, 2=half, 4=quarter, 8=eighth, 16=sixteenth, 32=thirty-second, 64=sixty-fourth
-    dots: int = 0  # augmentation dots (0, 1, or 2)
+    value: int  # 0=breve, 1=whole, 2=half, 4=quarter, 8=eighth, 16=sixteenth, 32=thirty-second, 64=sixty-fourth, 128=128th
+    # Augmentation dots (S10d-9, BANA Par. 2.3: "When a note has more than
+    # one dot, the same number of dot 3s are given in the braille" -- no
+    # cap stated, so this is unbounded, not just 0-2).
+    dots: int = 0
     is_triplet: bool = False  # BANA 8.4's single-cell sign applies (exactly 3 notes, any value)
     # Exact (actual, normal) tuplet ratio, e.g. (5, 4) for a quintuplet
     # (S10d-4, BANA 8.5) -- None for a plain (non-tuplet) duration. A
@@ -30,9 +33,9 @@ class Duration:
                 f"Invalid duration value: {self.value}. "
                 f"Must be one of {sorted(VALID_DURATIONS)}"
             )
-        if self.dots not in (0, 1, 2):
+        if self.dots < 0:
             raise ValueError(
-                f"Invalid dot count: {self.dots}. Must be 0, 1, or 2."
+                f"Invalid dot count: {self.dots}. Must be 0 or greater."
             )
 
     def to_lilypond(self) -> str:
@@ -51,17 +54,26 @@ class Duration:
         LilyPond output. `tuplet_ratio`, when set, gives the exact scale
         for any ratio (S10d-4); otherwise `is_triplet` falls back to the
         classic 2/3 scale.
+
+        `TICKS_PER_QUARTER = 24` cannot exactly represent a 128th note
+        (24 * 4 / 128 = 0.75, not an integer -- in fact even a bare 64th
+        note is already only approximate at this resolution, 24 * 4 / 64
+        = 1.5 truncated down to 1) -- `max(1, ...)` keeps a 128th note's
+        base at 1 tick rather than 0, which would otherwise make it
+        silently vanish from beat-accounting entirely (S10d-9). This is
+        the same kind of resolution limit already accepted for tuplet
+        ratios that do not divide 24 evenly (S10d-4) -- raising
+        TICKS_PER_QUARTER project-wide to fix it exactly is a larger,
+        separate change, not attempted here.
         """
         if self.value == 0:
             base = TICKS_PER_QUARTER * 8
         else:
-            base = TICKS_PER_QUARTER * 4 // self.value
-        if self.dots == 1:
-            ticks = base * 3 // 2
-        elif self.dots == 2:
-            ticks = base * 7 // 4
-        else:
-            ticks = base
+            base = max(1, TICKS_PER_QUARTER * 4 // self.value)
+        # N augmentation dots multiply the base duration by (2^(N+1) - 1) / 2^N
+        # (S10d-9, generalizing the previous hardcoded 0/1/2 cases: 1 dot =
+        # 3/2, 2 dots = 7/4, 3 dots = 15/8, ...).
+        ticks = base * (2 ** (self.dots + 1) - 1) // (2 ** self.dots)
         if self.tuplet_ratio is not None:
             actual, normal = self.tuplet_ratio
             ticks = ticks * normal // actual

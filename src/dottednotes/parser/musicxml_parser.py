@@ -52,6 +52,8 @@ M21_DURATION_MAP = {
     '16th': 16,
     '32nd': 32,
     '64th': 64,
+    '128th': 128,  # S10d-9 (BANA Par. 2.1: the eighth-note cell also
+                   # represents this smaller value, like the other pairs)
 }
 
 M21_ARTICULATION_MAP = {

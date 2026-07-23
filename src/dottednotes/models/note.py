@@ -202,7 +202,11 @@ class Note(BrailleSymbol):
                     base_dur = 2
                 elif self.duration.value in (4, 64):
                     base_dur = 4
-                elif self.duration.value == 8:
+                elif self.duration.value in (8, 128):
+                    # BANA Par. 2.1: "Each sign also represents a smaller
+                    # value" -- the eighth-note cell's smaller partner is
+                    # the 128th note (S10d-9), the same 16x-smaller
+                    # relationship as the other three pairs above.
                     base_dur = 8
                 else:
                     raise ValueError(f"Unsupported duration value: {self.duration.value}")
@@ -495,7 +499,8 @@ class Rest(BrailleSymbol):
             cell = '⠥'
         elif self.duration.value in (4, 64):
             cell = '⠧'
-        elif self.duration.value == 8:
+        elif self.duration.value in (8, 128):
+            # Mirrors Note.to_braille()'s same 128th/eighth pairing (S10d-9).
             cell = '⠭'
         else:
             raise ValueError(f"Unsupported rest duration: {self.duration.value}")

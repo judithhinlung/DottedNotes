@@ -1156,3 +1156,55 @@ def test_repeat_bracket_numbers_falls_back_when_number_range_missing():
     assert _repeat_bracket_numbers(FakeOldRepeatBracket('1, 2')) == [1, 2]
     assert _repeat_bracket_numbers(FakeOldRepeatBracket('1-3')) == [1, 2, 3]
     assert _repeat_bracket_numbers(FakeOldRepeatBracket('1, 2, 3, 7')) == [1, 2, 3, 7]
+
+
+def test_musicxml_four_dot_breve_does_not_crash():
+    # Regression test (S10d-9, found via the MusicXML Test Suite's own
+    # 03d-Rhythm-DottedDurations-Factors.xml): a note with 4 <dot/> tags
+    # used to raise ValueError: Invalid dot count: 4 -- BANA Par. 2.3 has
+    # no cap on dot count ("the same number of dot 3s are given in the
+    # braille"), so this should import and render cleanly instead.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    n = music21.note.Note('C4')
+    n.duration.type = 'breve'
+    n.duration.dots = 4
+    measure.append(n)
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.duration.dots == 4
+    assert note.to_lilypond().endswith('....')
+    assert note.to_braille().endswith('⠄⠄⠄⠄')
+
+
+def test_musicxml_128th_note_does_not_crash():
+    # Regression test (S10d-9, found via the MusicXML Test Suite's own
+    # 03ab-Rhythm-Durations.xml): a 128th note used to raise ValueError:
+    # denominator must be a power of 2 in [1, 2, 4, 8, 16, 32], got 64 --
+    # BANA Par. 2.1 already documents that the eighth-note cell doubles as
+    # the 128th note's cell (the same "also represents a smaller value"
+    # relationship as the other three note-shape pairs), so this should
+    # import and render cleanly instead.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    n = music21.note.Note('C4')
+    n.duration.type = '128th'
+    measure.append(n)
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    note = score.staves[0].measures[0].notes[0]
+    assert note.duration.value == 128
+    assert note.to_lilypond() == "c'128"
+    # Same braille cell as an eighth-note C (BANA Par. 2.1's ambiguity).
+    from dottednotes.models.note import Note as DNNote
+    from dottednotes.models.duration import Duration as DNDuration
+    eighth_c = DNNote(dots=frozenset(), category=None, raw_brl='', note_name='C', octave=4,
+                       duration=DNDuration(value=8))
+    assert note.to_braille() == eighth_c.to_braille()
