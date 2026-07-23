@@ -95,14 +95,27 @@ class GraceNote:
         indicator = '⠐⠢' if self.long_appoggiatura else '⠢'
         rendered_notes = []
         curr_prev = prev_note
+        # BANA 3.2.1's line/measure-start octave-mark force applies to
+        # whichever note is genuinely first on the line -- when this note
+        # has a grace-note group attached, that is the group's own first
+        # note, not the main note that follows it (previously this whole
+        # method hardcoded is_measure_start=False for every grace note,
+        # silently dropping the required mark whenever a line happened to
+        # start on a grace note). Only the first note keeps the caller's
+        # real is_measure_start; every later note in the group is never
+        # itself "first," so it always gets False, matching every other
+        # multi-item sequence in this codebase (e.g. Measure's own item
+        # loop).
+        first = True
 
         if len(self.notes) <= 3:
             for n in self.notes:
-                rendered_notes.append(indicator + n.to_braille(prev_note=curr_prev, is_measure_start=False, time_signature=time_signature))
+                rendered_notes.append(indicator + n.to_braille(prev_note=curr_prev, is_measure_start=(is_measure_start and first), time_signature=time_signature))
                 curr_prev = n
+                first = False
         else:
             # 4+ notes: doubled indicator before first, none for middle, single before last
-            rendered_notes.append(indicator + indicator + self.notes[0].to_braille(prev_note=curr_prev, is_measure_start=False, time_signature=time_signature))
+            rendered_notes.append(indicator + indicator + self.notes[0].to_braille(prev_note=curr_prev, is_measure_start=is_measure_start, time_signature=time_signature))
             curr_prev = self.notes[0]
             for n in self.notes[1:-1]:
                 rendered_notes.append(n.to_braille(prev_note=curr_prev, is_measure_start=False, time_signature=time_signature))

@@ -1393,6 +1393,58 @@ def test_note_no_grace_note_no_prefix():
     assert not note.to_lilypond().startswith(r'\appoggiatura')
 
 
+# --- Grace note octave-mark forcing at a new braille line (BANA 3.2.1) ---
+#
+# GraceNote.to_braille() used to hardcode is_measure_start=False for every
+# grace note regardless of what its caller passed in, so a note whose
+# grace note happened to start a new braille line lost its required forced
+# octave mark entirely -- neither the grace note nor the main note that
+# follows it got one, since Note.to_braille() also clears is_measure_start
+# to False for the main note once a grace note has been rendered (correct,
+# once the grace note itself carries the force responsibility).
+
+def test_grace_note_forces_octave_mark_at_line_start():
+    prev = _make_note('B', 4, 4)
+    main = _make_note('C', 5, 4)
+    main.grace_note = GraceNote(notes=[_make_note('D', 5, 8)])
+    brl = main.to_braille(prev_note=prev, is_measure_start=True)
+    assert '⠨' in brl  # octave 5 mark, forced on the grace note
+
+def test_grace_note_does_not_force_mark_mid_line():
+    # Same notes, but NOT a line start -- stepwise motion from a close
+    # prev_note needs no mark, confirming the fix doesn't over-force.
+    prev = _make_note('C', 5, 4)
+    main = _make_note('C', 5, 4)
+    main.grace_note = GraceNote(notes=[_make_note('D', 5, 8)])
+    brl = main.to_braille(prev_note=prev, is_measure_start=False)
+    assert '⠨' not in brl
+
+def test_multiple_grace_notes_force_mark_only_on_the_first():
+    prev = _make_note('B', 4, 4)
+    main = _make_note('C', 5, 4)
+    gn1 = _make_note('D', 5, 8)
+    gn2 = _make_note('D', 5, 8)  # same pitch as gn1 -- would need no mark of its own
+    main.grace_note = GraceNote(notes=[gn1, gn2])
+    brl = main.to_braille(prev_note=prev, is_measure_start=True)
+    assert brl.count('⠨') == 1
+
+def test_four_or_more_grace_notes_force_mark_only_on_the_first():
+    prev = _make_note('B', 4, 4)
+    main = _make_note('C', 5, 4)
+    grace_notes = [_make_note(n, 5, 8) for n in ('D', 'E', 'F', 'G')]
+    main.grace_note = GraceNote(notes=grace_notes)
+    brl = main.to_braille(prev_note=prev, is_measure_start=True)
+    assert brl.count('⠨') == 1
+
+def test_grace_note_first_note_of_piece_still_forces_mark():
+    # prev_note=None (very first note of the whole piece) already forced
+    # the mark before this fix too -- confirm no regression there.
+    main = _make_note('C', 5, 4)
+    main.grace_note = GraceNote(notes=[_make_note('D', 5, 8)])
+    brl = main.to_braille(prev_note=None, is_measure_start=True)
+    assert '⠨' in brl
+
+
 def test_instrument_family_resolution():
     from dottednotes.models.instrument import get_instrument_family, InstrumentFamily, InstrumentInfo
 
