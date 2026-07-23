@@ -4320,7 +4320,7 @@ def test_score_to_lilypond_single_staff_unchanged():
 
 def test_score_to_lilypond_empty_score_unchanged():
     ly = Score().to_lilypond()
-    assert r'\version "2.24.0"' in ly
+    assert r'\version "2.26.0"' in ly
     assert r'#(set-global-staff-size 20.0)' in ly
     assert r'\paper {' in ly
 

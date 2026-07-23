@@ -7,7 +7,7 @@ from .chord_names import ChordNamesTrack
 from .staff import Staff
 from .transposition import get_transposition
 
-_LILYPOND_VERSION = "2.24.0"
+_LILYPOND_VERSION = "2.26.0"
 
 
 @dataclass

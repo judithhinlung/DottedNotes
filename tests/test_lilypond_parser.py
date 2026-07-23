@@ -15,7 +15,7 @@ from dottednotes.models.duration import Duration
 
 def test_parse_single_staff():
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\header {
       title = "Test Solo"
       composer = "A. Composer"
@@ -61,7 +61,7 @@ def test_parse_single_staff():
 
 def test_parse_piano():
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     rhMusic = \\relative c' {
       c4 e g2
     }
@@ -107,7 +107,7 @@ def test_parse_multi_measure_rest():
     # the parser must expand it back into 8 real Measure objects, each a
     # single-measure rest, or the trailing c4's measure number drifts.
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         R1*8 c4
@@ -131,7 +131,7 @@ def test_parse_multi_measure_rest():
 
 def test_parse_full_measure_rest_without_multiplier_defaults_to_one():
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         R1 c4
@@ -198,7 +198,7 @@ def test_parse_generated_orchestra_score_survives_paper_block():
 
 def test_chord_written_note_sorted_highest_first_for_treble():
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         <c e g>4
@@ -214,7 +214,7 @@ def test_chord_written_note_sorted_highest_first_for_treble():
 
 def test_chord_written_note_sorted_lowest_first_for_bass_clef():
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         \\clef bass
@@ -235,7 +235,7 @@ def test_chord_sort_does_not_break_relative_pitch_chain():
     # BANA-sorted written note (G) -- otherwise \relative octave tracking
     # would silently regress.
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         <c e g>4 a4
@@ -269,7 +269,7 @@ def test_dynamic_marking_does_not_crash():
     # 'dots' -- Dynamic (unlike Note) only has a `level` field. This crashed
     # on any real piece using so much as a single \mf/\p/\f marking.
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         c4\\mf d4\\p
@@ -288,7 +288,7 @@ def test_in_accord_parses_two_independent_voices():
     # voice 2 d4 g4 g4 -- both voices must come back as two separate lists
     # of real notes, not silently merged into one 7-note sequence.
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         << { g'8. b16 d4 g4 } \\\\ { d4 g4 g4 } >>
@@ -319,7 +319,7 @@ def test_in_accord_second_voice_chains_from_first_voices_last_note():
     # where it started) to pin down the same rule inside DottedNotes'
     # in-accord parsing.
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         g4 << { c,4 b'4 } \\\\ { d4 } >> c4
@@ -347,7 +347,7 @@ def test_relative_reference_after_in_accord_uses_last_voice():
     # from voice 2/the last voice's C5" (nearest D to C5 is D5) and rules
     # out "continue from voice 1's C6" (nearest D to C6 would be D6).
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         << { c'8 d8 e8 f8 g8 a8 b8 c8 } \\\\ { c,8 } >> d4
@@ -372,7 +372,7 @@ def test_two_consecutive_in_accord_measures_chain_through_last_voice():
     # measure 1's LAST voice's C5" (nearest D to C5 is D5) and ruling out
     # "continue from voice 1's C6" (nearest D to C6 would be D6).
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         << { c'8 d8 e8 f8 g8 a8 b8 c8 } \\\\ { c,8 } >> |
@@ -417,7 +417,7 @@ def test_grace_note_attaches_to_following_note_and_chains_octave():
     # like an ordinary note, and the main note that follows it is relative
     # to the grace note, not to whatever preceded the \grace block.
     ly_content = """
-    \\version "2.24.0"
+    \\version "2.26.0"
     \\score {
       \\relative c' {
         b'4 \\grace {a8(} g4

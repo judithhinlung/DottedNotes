@@ -1717,7 +1717,7 @@ def test_score_to_lilypond_includes_version():
 
 def test_score_to_lilypond_empty_score_has_no_header_or_score_block():
     ly = Score().to_lilypond()
-    assert r'\version "2.24.0"' in ly
+    assert r'\version "2.26.0"' in ly
     assert r'#(set-global-staff-size 20.0)' in ly
     assert r'\paper {' in ly
     assert r'\header' not in ly

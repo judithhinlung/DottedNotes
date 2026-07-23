@@ -69,7 +69,7 @@ Token: OCTAVE_MARK ⠐
 Token: NOTE ⠹
 Token: BAR_LINE ⠀
 Warning: Measure 1: expected 4.0 beats but counted 1.0. Check for notation ambiguity or missing/extra notes.
-\version "2.24.0"
+\version "2.26.0"
 ...
 \score {
   \relative c' {
