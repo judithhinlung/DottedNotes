@@ -372,6 +372,19 @@ class MusicXMLTranslator:
             if lvl is not None:
                 dynamic_offsets[d.offset] = Dynamic(level=lvl)
                 
+        # A <direction>/<harmony> element sitting between the first note of
+        # a chord and its <chord/>-tagged continuation notes (BANA has no
+        # bearing here -- this is a pure MusicXML/music21 parsing quirk)
+        # makes music21 fail to group the continuation notes into the
+        # anchor's Chord object: each continuation surfaces as its own
+        # separate single-note Chord at its own (wrong, sequentially
+        # advanced) offset instead of stacking on the anchor's offset,
+        # inflating the measure's resolved beat count (S10d-5). Repair this
+        # before extracting notesAndRests, on both the plain-measure and
+        # each Voice sub-stream, so _translate_note_stream never has to
+        # know this happened.
+        self._merge_interrupted_chord_continuations(m21_measure)
+
         # Parse notes and rests. A measure whose content lives in nested
         # music21 Voice streams (MusicXML's <voice> numbering -- the normal
         # way a single staff carries two independent rhythmic lines, e.g.
@@ -381,6 +394,8 @@ class MusicXMLTranslator:
         # voice is translated separately and wrapped in an InAccord (BANA
         # Chapter 11) instead (S10b-1).
         voices = list(m21_measure.voices)
+        for voice in voices:
+            self._merge_interrupted_chord_continuations(voice)
         chord_track_entries: list = []
         if voices:
             voice_items = [
@@ -584,6 +599,58 @@ class MusicXMLTranslator:
         for sp in el.getSpannerSites(music21.spanner.Ottava):
             return sp.interval().semitones // 12
         return 0
+
+    def _merge_interrupted_chord_continuations(self, stream_obj) -> None:
+        """Repair chord notes that a <direction>/<harmony> element (or any
+        other non-note element) split away from their chord (S10d-5).
+
+        Under normal parsing, every <chord/>-tagged continuation note gets
+        folded into one music21.chord.Chord together with its anchor, so a
+        single-note Chord object never appears in a measure's notesAndRests
+        -- a real one-note "chord" is just a Note. Confirmed against the
+        MusicXML Test Suite's own 21f-Chord-ElementInBetween.xml: an
+        intervening <direction> makes music21 fail that grouping, so each
+        continuation note surfaces as its own single-note Chord at its own
+        (wrongly, sequentially advanced) offset instead of stacking on the
+        anchor. A single-note Chord is therefore an unambiguous signal that
+        this happened, regardless of what its (corrupted) offset says.
+
+        Mutates `stream_obj` (a Measure or Voice) in place: removes each
+        such orphaned continuation and the note/chord anchor it belongs
+        with, then re-inserts one merged Chord at the anchor's original
+        offset, so measureNumber/offset/getSpannerSites all resolve
+        normally afterward (this only works by going through
+        stream.remove()/insert() -- a freshly constructed, unattached
+        Chord's measureNumber is not derivable at all).
+        """
+        elements = list(stream_obj.notesAndRests)
+        groups: list[list] = []
+        for el in elements:
+            is_orphaned_continuation = (
+                isinstance(el, music21.chord.Chord)
+                and len(el.notes) == 1
+                and not el.duration.isGrace
+                and groups
+                and not (len(groups[-1]) == 1 and isinstance(groups[-1][0], music21.note.Rest))
+                and not groups[-1][-1].duration.isGrace
+            )
+            if is_orphaned_continuation:
+                groups[-1].append(el)
+            else:
+                groups.append([el])
+
+        for group in groups:
+            if len(group) < 2:
+                continue
+            anchor = group[0]
+            anchor_offset = anchor.offset
+            all_notes = list(anchor.notes) if isinstance(anchor, music21.chord.Chord) else [anchor]
+            for continuation in group[1:]:
+                all_notes.extend(continuation.notes)
+            for el in group:
+                stream_obj.remove(el)
+            merged = music21.chord.Chord(all_notes)
+            stream_obj.insert(anchor_offset, merged)
 
     def _translate_note_stream(self, elements, clef_name: str, dynamic_offsets: dict) -> list:
         """Translate one flat sequence of music21 notes/rests/chords (a whole

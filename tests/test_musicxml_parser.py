@@ -513,6 +513,70 @@ def test_musicxml_augmented_seventh_chord_kind():
     assert chord.extensions == [(7, None)]
 
 
+def test_musicxml_chord_with_interrupting_direction_element_imports_as_one_chord():
+    # Regression test (S10d-5, found via the MusicXML Test Suite's own
+    # 21f-Chord-ElementInBetween.xml): a <direction> (or <harmony>) element
+    # sitting between the first note of a chord and its <chord/>-tagged
+    # continuation notes makes music21 fail to group them into one Chord --
+    # each continuation surfaces as its own single-note Chord at its own
+    # wrongly-advanced offset instead of stacking on the anchor, splitting
+    # one simultaneous beat into three sequential ones (confirmed: measure
+    # beat count came out 6.0 instead of 4.0 before this fix). Uses the raw
+    # XML (not an in-memory music21.stream construction) because the bug is
+    # specifically in how music21's own MusicXML importer resolves offsets
+    # around an interrupting element -- building the stream directly in
+    # Python wouldn't reproduce it.
+    xml = """<?xml version="1.0"?>
+<score-partwise>
+    <part-list><score-part id="P0"><part-name>Test</part-name></score-part></part-list>
+    <part id="P0">
+        <measure number="1">
+            <attributes>
+                <divisions>1</divisions>
+                <time><beats>4</beats><beat-type>4</beat-type></time>
+                <clef><sign>G</sign><line>2</line></clef>
+            </attributes>
+            <note>
+                <pitch><step>A</step><octave>4</octave></pitch>
+                <duration>1</duration><voice>1</voice><type>quarter</type>
+            </note>
+            <direction><direction-type><segno/></direction-type></direction>
+            <note>
+                <chord/>
+                <pitch><step>F</step><alter>1</alter><octave>4</octave></pitch>
+                <duration>1</duration><voice>1</voice><type>quarter</type>
+            </note>
+            <direction><direction-type><dynamics><p/></dynamics></direction-type></direction>
+            <note>
+                <chord/>
+                <pitch><step>D</step><octave>4</octave></pitch>
+                <duration>1</duration><voice>1</voice><type>quarter</type>
+            </note>
+            <note><rest/><duration>1</duration><voice>1</voice><type>quarter</type></note>
+            <note><rest/><duration>2</duration><voice>1</voice><type>half</type></note>
+        </measure>
+    </part>
+</score-partwise>
+"""
+    import warnings
+    from dottednotes.models.chord import Chord
+    from dottednotes.models.note import Rest
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = load_musicxml(xml)
+        beat_warnings = [str(w.message) for w in caught if "expected" in str(w.message)]
+
+    measure = score.staves[0].measures[0]
+    assert len(measure.notes) == 3
+    chord_item, rest1, rest2 = measure.notes
+    assert isinstance(chord_item, Chord)
+    assert {n.note_name for n in chord_item.notes} == {'A', 'F', 'D'}
+    assert isinstance(rest1, Rest)
+    assert isinstance(rest2, Rest)
+    assert beat_warnings == []
+
+
 def test_musicxml_unrecognized_chord_kind_raises():
     from dottednotes.exceptions import DottedNotesError
 

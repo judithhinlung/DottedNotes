@@ -7750,21 +7750,44 @@ chord", splitting a single 3-note chord into `Note(A)` + `Chord([F])` +
 of one simultaneous beat. Confirmed via direct inspection: the measure's
 resolved beat count comes out to 6.0 instead of the correct 4.0.
 
-**Steps:**
-1. In `_translate_note_stream`, when scanning `elements` for chord
-   grouping, skip over non-`Note`/`Rest`/`Chord` stream elements (e.g.
-   `music21.dynamics.Dynamic`, spanner boundary markers) rather than
-   letting them terminate the current chord group -- confirm exactly
-   which element types `music21`'s own stream iteration surfaces here
-   before writing the skip condition, rather than guessing.
-2. Add a regression test using `21f-Chord-ElementInBetween.xml` (or a
-   minimal equivalent) asserting the measure imports as one `Chord` with
-   3 notes, and that the resolved beat count matches the time signature.
+**Update:** Confirmed via direct inspection that music21 itself, not
+DottedNotes' own stream-iteration loop, is where the grouping actually
+breaks: `m21_measure.notesAndRests` for this fixture already comes back as
+three separate objects (`Note A4`, `Chord F#4` (one note), `Chord D4` (one
+note)) at three separate, wrongly-advanced offsets (0.0, 1.0, 2.0) --
+`_translate_note_stream`'s own loop never gets a chance to see them as one
+event, there is nothing to "skip over" there. Fixed one level up instead:
+added `_merge_interrupted_chord_continuations()` (`musicxml_parser.py`),
+run against `m21_measure` (and each `Voice` sub-stream) before
+`notesAndRests` is extracted. It detects the unambiguous signal that this
+happened -- a single-note `music21.chord.Chord` (real, uninterrupted
+`<chord/>` grouping never produces a one-note Chord; that shape is only
+possible when the grouping already failed) -- and repairs it by
+`stream.remove()`-ing the anchor and its orphaned continuations, then
+`stream.insert()`-ing one properly merged multi-note Chord back at the
+anchor's original offset (using remove+insert rather than constructing a
+detached replacement object, since a detached Chord's `measureNumber` isn't
+derivable at all -- confirmed empirically). `_translate_note_stream` itself
+needed no changes. Verified: the fixture now imports as a single 3-note
+Chord, 0 beat-count warnings (was 1, "expected 4.0 counted 6.0"). Also
+checked the surrounding basic-chord test-suite files
+(`21a-Chord-Basic.xml`, `21e-Chords-PickupMeasures.xml`) for regressions --
+both have pre-existing, unrelated beat-count warnings confirmed identical
+before and after this change (not caused or masked by it).
+
+Regression test added in `tests/test_musicxml_parser.py`
+(`test_musicxml_chord_with_interrupting_direction_element_imports_as_one_chord`),
+using the raw XML directly (not an in-memory `music21.stream`
+construction), since the bug is specifically in how music21's own
+MusicXML importer resolves offsets around an interrupting element --
+building the stream by hand in Python wouldn't reproduce it.
 
 **Definition of Done:**
 - [ ] A chord followed by a non-note element mid-sequence still imports
-  as one `Chord`, not several.
-- [ ] New tests pass; existing test suite has no regressions.
+  as one `Chord`, not several. (Implemented -- see Update above -- awaiting
+  developer sign-off.)
+- [ ] New tests pass; existing test suite has no regressions. (Confirmed
+  -- full suite, 1021 tests, passes.)
 
 ---
 
