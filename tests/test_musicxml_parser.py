@@ -388,6 +388,87 @@ def test_musicxml_multi_voice_single_staff_imports_as_in_accord():
     assert [n.note_name for n in top_voice] == ['G', 'A']
     assert [n.note_name for n in bottom_voice] == ['C']
 
+def test_musicxml_partial_backup_imports_as_part_measure_sections():
+    # Regression test (S10d-6, found via the MusicXML Test Suite's own
+    # 03b-Rhythm-Backup.xml): a <backup> that only partially rewinds --
+    # voice 1 plays 2 quarter notes (C4, C4) filling beats 1-2, then a
+    # backup of only 1 beat (not the full 2 voice 1 consumed) lets voice 2
+    # start partway through voice 1's material, playing 2 quarter notes
+    # (A3, A3) across beats 2-3 -- must NOT collapse into one full-measure
+    # in-accord (which would misrepresent both voices as starting
+    # together). BANA 11.1.2 instead wants three temporal sections: voice
+    # 1 alone (beat 1), both voices overlapping as a part-measure in-accord
+    # (beat 2), voice 2 alone (beat 3).
+    from dottednotes.models.note import Note
+
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.TrebleClef())
+
+    voice1 = music21.stream.Voice()
+    voice1.id = '1'
+    voice1.append(music21.note.Note('C4', quarterLength=1))
+    voice1.append(music21.note.Note('C4', quarterLength=1))
+
+    voice2 = music21.stream.Voice()
+    voice2.id = '2'
+    voice2.insert(1.0, music21.note.Note('A3', quarterLength=1))
+    voice2.insert(2.0, music21.note.Note('A3', quarterLength=1))
+
+    measure.insert(0, voice1)
+    measure.insert(0, voice2)
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    m = score.staves[0].measures[0]
+
+    assert len(m.notes) == 3
+    section1, section2, section3 = m.notes
+
+    assert isinstance(section1, Note) and section1.note_name == 'C'
+    assert isinstance(section3, Note) and section3.note_name == 'A'
+
+    assert isinstance(section2, InAccord)
+    assert section2.in_accord_type == 'part_measure'
+    assert len(section2.parts) == 2
+    top, bottom = section2.parts
+    assert [n.note_name for n in top] == ['C']
+    assert [n.note_name for n in bottom] == ['A']
+
+
+def test_musicxml_lockstep_voices_still_import_as_full_measure_in_accord():
+    # Regression guard: normal voices that DO all start at 0 and cover the
+    # same range must still take the original single full-measure
+    # in-accord path (BANA 11.1.1), not the new S10d-6 sectioning logic.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.TrebleClef())
+
+    voice1 = music21.stream.Voice()
+    voice1.id = '1'
+    voice1.append(music21.note.Note('C4', quarterLength=2))
+
+    voice2 = music21.stream.Voice()
+    voice2.id = '2'
+    voice2.append(music21.note.Note('G4', quarterLength=1))
+    voice2.append(music21.note.Note('A4', quarterLength=1))
+
+    measure.insert(0, voice1)
+    measure.insert(0, voice2)
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    m = score.staves[0].measures[0]
+
+    assert len(m.notes) == 1
+    assert isinstance(m.notes[0], InAccord)
+    assert m.notes[0].in_accord_type == 'full_measure'
+
+
 def test_musicxml_transposing_instrument_resolved_from_structured_data():
     # Real-world part names for transposing instruments vary a lot ("Bb
     # Clarinet", "Clarinet in Bb 1", etc.) and won't reliably match

@@ -7806,6 +7806,77 @@ import always uses `'full_measure'`, so a partially-offset backup like
 this one gets combined as if both voices started together, misrepresenting
 the actual rhythm.
 
+**Update:** Fetched BANA 2015 Par. 11.1-11.1.3 directly (PDF text-extracted
+locally, cross-checked Table 11's ASCII-braille signs against
+`ASCII_TO_DOTS` in `parser/input_pipeline.py` -- confirmed the existing
+`in_accord.py` separator dict, `⠣⠜`/`⠐⠂`/`⠨⠅`, is already correct, so no
+new dot patterns were needed here). Par. 11.1.2's actual prescription: "it
+is advisable to divide the measure into convenient sections, each section
+being treated as an isolated unit. The measure-division sign stands
+between the sections... The part-measure in-accord sign joins the parts
+of the resulting section." So a partial-overlap case is NOT "one ordinary
+item + one full_measure in-accord" (the ticket's own guessed alternative)
+-- it is however many temporal sections the voices' actual overlap
+pattern requires, each either a single voice's notes (no in-accord needed)
+or a `part_measure` in-accord of whichever voices are simultaneously
+active in that section specifically.
+
+Implemented as `_voices_span_measure_in_lockstep()` (a cheap guard: if
+every voice covers the identical `[start, end)` range, nothing changed,
+keep the existing single full-measure in-accord path untouched -- zero
+regression risk for the overwhelmingly common case) and
+`_split_voices_into_sections()` (`musicxml_parser.py`): computes each
+voice's offset range, collects every voice-start/voice-end as a
+breakpoint, and for each breakpoint-to-breakpoint window determines which
+voices are active, merging adjacent windows with an identical active-voice
+set into one section. `translate_measure` adds each section's single
+voice directly (no in-accord) or wraps multiple active voices as
+`InAccord(parts=..., in_accord_type='part_measure')`, matching exactly the
+section-then-in-accord-or-flat shape `braille_parser.py`'s own
+`_finalize_measure` already builds for the reverse (BRF -> Score)
+direction (confirmed by reading it -- this is not a new shape invented for
+MusicXML, it reuses the codebase's own established convention). Verified
+on `03b-Rhythm-Backup.xml`: 3 sections now (voice 1 alone / both voices as
+a part-measure in-accord / voice 2 alone), resolved beat count improved
+from an under-counted 2.0 (the old full-measure path silently dropped
+voice 2's actual timing) to 3.0 -- still short of the nominal 4.0 because
+this fixture's own last beat genuinely has no content in either voice
+(confirmed against the raw XML: voice 1 spans offset 0-4, voice 2 spans
+2-6, out of an 8-tick/4-beat measure -- nothing to do with this fix).
+
+**Known limitation, not attempted:** a note that straddles a section
+boundary (e.g. a half note starting before an overlap begins and ending
+after it ends) is not split into tied fragments -- `_split_voices_into_sections`
+only cuts at offsets that are already real note/rest boundaries. Not
+reachable by `03b-Rhythm-Backup.xml` (all quarter notes, cleanly aligned);
+flagging as a gap for whatever future fixture exercises it, rather than
+guessing at a tie-insertion scheme now.
+
+**Residual limitation found, not fixed here (needs its own ticket):**
+confirmed, independent of MusicXML, that `Measure.to_braille()` /
+`_render_note_list_to_braille()` never actually emits the measure-division
+sign (`⠨⠅`) between adjacent sections at all -- round-tripping
+`tests/test_parser.py`'s own existing `_PART_MEASURE_ACCORD` fixture
+(`⠐⠝⠐⠂⠫⠻⠨⠅⠳⠪⠀`, parsed then re-rendered via `Score.to_braille()`) drops
+the division sign entirely and runs section 2's single voice straight
+into section 1's in-accord with no separator, an ambiguous/wrong braille
+result. This is a pre-existing gap in the *renderer*, not something this
+ticket's parser-side fix introduces: `braille_parser.py` already builds
+the same section-then-in-accord-or-flat `Measure.notes` shape this ticket
+now also builds for MusicXML import, and neither path can currently
+re-render its own section boundaries correctly, because nothing in
+`Measure.notes` records where one section ends and the next begins once
+a single-voice section's notes are flattened directly into the list.
+Fixing it properly likely needs a lightweight sentinel model class (e.g.
+`MeasureDivision`, alongside `MeasureRepeat`) inserted between sections by
+both `braille_parser.py` and this ticket's new MusicXML code, with
+`_render_note_list_to_braille` taught to render it as `⠨⠅` and skip it for
+beat-tracking/`curr_prev`/`curr_measure_start` purposes. Left unimplemented
+here since it is a materially larger, separate change (touches the model,
+parser, and renderer, not just the MusicXML importer this ticket scoped
+to) -- flagging for a dedicated ticket rather than expanding this one's
+scope silently.
+
 **Steps:**
 1. In `translate_measure`'s voice-handling branch (`musicxml_parser.py`),
    detect when a `<backup>` (surfaced via `music21`'s voice/offset
@@ -7824,8 +7895,14 @@ the actual rhythm.
 **Definition of Done:**
 - [ ] A partially-rewound `<backup>` imports as a part-measure in-accord
   (or whatever the manual actually prescribes), not a naive full-measure
-  combination.
-- [ ] New tests pass; existing test suite has no regressions.
+  combination. (Implemented -- see Update above -- awaiting developer
+  sign-off. Beat count improves 2.0 -> 3.0, not all the way to 4.0, because
+  this specific fixture is itself missing its last beat -- see Update.)
+- [ ] New tests pass; existing test suite has no regressions. (Confirmed
+  -- full suite, 1023 tests, passes. Note: the *rendered BRF* still will
+  not show the measure-division sign correctly -- see the Residual
+  limitation above; this ticket fixed the internal Score model, not the
+  renderer.)
 
 ---
 

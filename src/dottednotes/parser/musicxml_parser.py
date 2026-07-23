@@ -398,12 +398,29 @@ class MusicXMLTranslator:
             self._merge_interrupted_chord_continuations(voice)
         chord_track_entries: list = []
         if voices:
-            voice_items = [
-                self._translate_note_stream(voice.notesAndRests, clef_name, dynamic_offsets)
-                for voice in voices
-            ]
-            ordered = self._order_voices_by_bana_convention(voice_items, clef_name)
-            measure.add_note(InAccord(parts=ordered, in_accord_type='full_measure'))
+            if self._voices_span_measure_in_lockstep(voices):
+                voice_items = [
+                    self._translate_note_stream(voice.notesAndRests, clef_name, dynamic_offsets)
+                    for voice in voices
+                ]
+                ordered = self._order_voices_by_bana_convention(voice_items, clef_name)
+                measure.add_note(InAccord(parts=ordered, in_accord_type='full_measure'))
+            else:
+                # A <backup> that does not fully rewind to the measure start
+                # (BANA Par. 11.1.2, S10d-6): voices do not all cover the
+                # same time range, so a single full-measure in-accord would
+                # misrepresent the rhythm (every voice appearing to start
+                # together). Divide the measure into temporal sections
+                # instead -- each section either a single voice's notes
+                # (added directly) or a part-measure in-accord of the
+                # voices actually overlapping in that section.
+                for section_parts in self._split_voices_into_sections(voices, clef_name, dynamic_offsets):
+                    if len(section_parts) == 1:
+                        for item in section_parts[0]:
+                            measure.add_note(item)
+                    else:
+                        ordered = self._order_voices_by_bana_convention(section_parts, clef_name)
+                        measure.add_note(InAccord(parts=ordered, in_accord_type='part_measure'))
             # Lead-sheet chord symbols (BANA 27.1) are only defined for a
             # single melody line, matching lead_sheet_parser.py's identical
             # restriction on the BRF side -- a multi-voice measure has no
@@ -568,6 +585,72 @@ class MusicXMLTranslator:
 
         reverse = clef_name not in ("bass", "tenor")
         return sorted(voice_items, key=avg_pitch, reverse=reverse)
+
+    def _voices_span_measure_in_lockstep(self, voices) -> bool:
+        """True when every voice's notesAndRests covers the exact same
+        [start, end) time range -- the normal case a plain full-measure
+        in-accord (BANA 11.1.1) is for. A <backup> that does not fully
+        rewind (S10d-6) breaks this: the affected voice starts later than
+        the others, so its range differs and this returns False, routing
+        the measure through `_split_voices_into_sections` instead."""
+        ranges = set()
+        for voice in voices:
+            elements = list(voice.notesAndRests)
+            if not elements:
+                continue
+            start = elements[0].offset
+            end = elements[-1].offset + elements[-1].duration.quarterLength
+            ranges.add((start, end))
+        return len(ranges) <= 1
+
+    def _split_voices_into_sections(self, voices, clef_name: str, dynamic_offsets: dict) -> list[list[list]]:
+        """Partition a measure's voices into temporal sections per BANA
+        11.1.2, for the case where they do not all cover the same time
+        range (S10d-6). Returns a list of sections in time order, each
+        section a list of "parts" -- one already-translated DN item list
+        per voice active during that section (not yet BANA-ordered; the
+        caller orders each section's parts itself).
+
+        Only splits sections at existing note/rest boundaries (the offsets
+        already present in the voices) -- a note that straddles a section
+        boundary (e.g. a half note starting before an overlap begins and
+        ending after it ends) is not split into tied fragments; this is a
+        known limitation, not attempted here.
+        """
+        voice_data = []
+        for voice in voices:
+            elements = list(voice.notesAndRests)
+            if not elements:
+                voice_data.append((0.0, 0.0, []))
+                continue
+            start = elements[0].offset
+            end = elements[-1].offset + elements[-1].duration.quarterLength
+            voice_data.append((start, end, elements))
+
+        breakpoints = sorted({t for start, end, _ in voice_data for t in (start, end)})
+
+        raw_sections: list[tuple[list[int], float, float]] = []
+        for t0, t1 in zip(breakpoints, breakpoints[1:]):
+            active = [
+                idx for idx, (start, end, elements) in enumerate(voice_data)
+                if elements and start <= t0 and end >= t1
+            ]
+            if not active:
+                continue
+            if raw_sections and raw_sections[-1][0] == active:
+                raw_sections[-1] = (active, raw_sections[-1][1], t1)
+            else:
+                raw_sections.append((active, t0, t1))
+
+        result: list[list[list]] = []
+        for active, t0, t1 in raw_sections:
+            parts = []
+            for idx in active:
+                _, _, elements = voice_data[idx]
+                sliced = [el for el in elements if t0 <= el.offset < t1]
+                parts.append(self._translate_note_stream(sliced, clef_name, dynamic_offsets))
+            result.append(parts)
+        return result
 
     def _ottava_octave_shift(self, el) -> int:
         """Return the signed number of octaves to shift `el`'s pitch by, from
