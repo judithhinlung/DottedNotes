@@ -433,6 +433,50 @@ def test_tuplet_three_note_group_always_uses_single_cell_sign():
     assert '⠸' not in braille
 
 
+def test_musicxml_sound_only_tempo_does_not_create_spurious_none_marking():
+    # Regression test (found via a real Bach cello suite MusicXML fixture):
+    # a bare <sound tempo="72"/> with no visible <metronome>/text gives
+    # music21 a MetronomeMark with both .text and .number None (only
+    # .numberSounding, the playback-only BPM, is set) -- the old
+    # `m.text or f"{m.number}"` fallback still produced the literal string
+    # "None", transcribing a spurious tempo marking that was never actually
+    # printed in the score.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    mm = music21.tempo.MetronomeMark()
+    mm.text = None
+    mm.numberImplicit = True
+    mm.numberSounding = 72
+    measure.insert(0, mm)
+    measure.append(music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    m = score.staves[0].measures[0]
+    assert all(tm.text != "None" for tm in m.text_markings)
+
+
+def test_musicxml_metronome_mark_with_real_number_still_transcribes():
+    # A genuine printed metronome mark with a number but no text label
+    # (e.g. "♩ = 120") must still transcribe as "120", not be swept up by
+    # the None-guard above.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    mm = music21.tempo.MetronomeMark(number=120)
+    mm.text = None
+    measure.insert(0, mm)
+    measure.append(music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    m = score.staves[0].measures[0]
+    assert any(tm.text == "120" for tm in m.text_markings)
+
+
 def test_musicxml_dynamics_and_articulations():
     m21_score = music21.stream.Score()
     part = music21.stream.Part()

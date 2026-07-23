@@ -385,7 +385,21 @@ class MusicXMLTranslator:
             measure.text_markings.append(TextMarking(text=text_val, type=tm_type))
             
         for m in m21_measure.getElementsByClass(music21.tempo.MetronomeMark):
-            text_val = m.text or f"{m.number}"
+            # A bare <sound tempo="..."/> (playback-only, e.g. no visible
+            # <metronome>/text in the print) surfaces in music21 as a
+            # MetronomeMark with both .text and .number None -- only
+            # .numberSounding (the MIDI-playback BPM) is set. Previously
+            # `m.text or f"{m.number}"` still produced the literal string
+            # "None" for this case (Python stringifying the None fallback),
+            # transcribing a spurious tempo marking that was never actually
+            # printed. Skip creating a marking at all when there is no
+            # genuine printed text or number to show.
+            if m.text:
+                text_val = m.text
+            elif m.number is not None:
+                text_val = str(m.number)
+            else:
+                continue
             measure.text_markings.append(TextMarking(text=text_val, type=TextMarkingType.TEMPO))
             
         # Collect dynamics in the measure

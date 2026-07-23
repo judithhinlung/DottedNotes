@@ -345,7 +345,23 @@ class Measure:
         time_signature: Optional["TimeSignature"] = None,
         compression_level: str = "full",
     ) -> tuple[str, Optional[Note]]:
-        marking_strs = "".join(m.to_braille(inline=True) for m in self.text_markings)
+        # BANA Par. 22.3's general rule: "Any number of single words,
+        # abbreviations, and other expressions that do not contain spaces
+        # may be brailled without interruption, each being introduced by
+        # the word sign" -- adjacent single-word/abbreviation markings get
+        # no separator. Par. 22.3.8 narrows this for "longer expressions"
+        # specifically: "Two or more unrelated longer expressions should be
+        # enclosed in separate pairs of word signs with an intervening
+        # space" -- an intervening space is needed between two adjacent
+        # markings whenever at least one of the pair is a longer
+        # (multi-word) expression, since its own closing word sign would
+        # otherwise run straight into the next marking's opening one.
+        marking_parts: list[str] = []
+        for idx, m in enumerate(self.text_markings):
+            if idx > 0 and (m.is_longer_expression() or self.text_markings[idx - 1].is_longer_expression()):
+                marking_parts.append('⠀')  # blank braille cell (U+2800), not a literal ASCII space
+            marking_parts.append(m.to_braille(inline=True))
+        marking_strs = "".join(marking_parts)
 
         from .key_signature import KeySignature
         key_sig_obj = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=self.key_signature)
