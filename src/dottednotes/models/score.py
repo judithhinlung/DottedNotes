@@ -24,6 +24,32 @@ class Score:
     def add_staff(self, staff: Staff) -> None:
         self.staves.append(staff)
 
+    def extract_part(self, part_idx_or_name: int | str) -> Score:
+        from dottednotes.exceptions import DottedNotesError
+        if isinstance(part_idx_or_name, int):
+            idx = part_idx_or_name
+            if not (0 <= idx < len(self.staves)):
+                raise DottedNotesError(f"Invalid part index {idx + 1}. Score has {len(self.staves)} parts.")
+        else:
+            idx = -1
+            for i, staff in enumerate(self.staves):
+                if staff.name.lower() == part_idx_or_name.lower():
+                    idx = i
+                    break
+            if idx == -1:
+                valid_names = ", ".join(f"'{s.name}'" for s in self.staves)
+                raise DottedNotesError(f"Part '{part_idx_or_name}' not found. Available parts: {valid_names}")
+
+        selected_staff = self.staves[idx]
+        return Score(
+            title=f"{self.title} - {selected_staff.name}" if self.title else selected_staff.name,
+            composer=self.composer,
+            copyright=self.copyright,
+            tagline=self.tagline,
+            staves=[selected_staff],
+            chord_names=self.chord_names if idx == 0 else None,
+        )
+
     def to_braille(
         self,
         compression_level: str = "full",

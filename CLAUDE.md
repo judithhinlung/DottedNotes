@@ -218,6 +218,7 @@ DottedNotes/
     `to_lilypond()`. `--compile` is rejected with a plain-text error if combined
     with a `.brf`/`.brl` output path (compiling needs a `.ly` file). No output
     path (stdout) always defaults to LilyPond.
+11. **Part-level score rendering and downloading:** Multi-staff scores can have individual parts (staves) rendered on-demand. To avoid parsing the input file twice, the parsed `Score` object is cached in memory on the backend (with fallback to re-parsing). We construct a temporary single-staff `Score` and run it through the renderers, which naturally output single-part formats without format-specific slicing logic. In the CLI, the `--part` and `--list-parts` options allow selecting a part and listing parts respectively.
 
 ---
 

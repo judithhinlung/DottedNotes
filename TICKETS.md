@@ -8293,5 +8293,37 @@ target.
   Chapter 34, verified tests pass, existing test suite has no
   regressions. (N/A -- deferred.)
 
+---
+
+### [ ] S10d-12: Implement part-level rendering and downloading for multi-staff scores
+
+**Why:** Multi-staff scores (e.g. orchestral or chamber music) need to have individual parts extracted and rendered separately. To optimize performance and avoid parsing the input file twice, the parsed in-memory `Score` object should be cached, and single parts should be extracted as single-staff `Score` copies and rendered dynamically.
+
+**Steps:**
+1. **Model/Sub-score Helper**:
+   Implement a helper function/method (e.g., `Score.extract_part(part_index)`) that returns a new `Score` instance containing only the `Staff` at `part_index`, preserving metadata (title, composer) but adapting staff-specific components (like chord names or lyrics).
+2. **Backend Cache & Fallback**:
+   In `src/dottednotes/web.py`, implement an in-memory cache (`score_cache` dictionary or LRU cache) keyed by `job_id`. When a part-specific translation is requested, look up the `Score` object in the cache. Fall back to re-parsing the original input file saved in `/tmp/dottednotes-jobs/{job_id}/input.{ext}` if the cache misses.
+3. **Web API endpoints**:
+   - Update `/api/convert`'s response to include a `parts` list containing the names of the staves: `[staff.name for staff in score.staves]`.
+   - Implement `GET /api/jobs/{job_id}/parts/{part_index}/{file_type}` which retrieves/renders the single-staff `Score` and returns the compiled/rendered file. Cache the output file under the job directory.
+4. **Web UI Dropdown**:
+   - In `src/dottednotes/static/index.html` and `src/dottednotes/static/app.js`, display a styled dropdown in the "Generated Downloads" card if `parts` has more than 1 item.
+   - When the selection changes, dynamically update the download links to target the part-specific download endpoints.
+5. **CLI options**:
+   - In `src/dottednotes/cli.py`, add `--list-parts` to print all available parts/staves and their indices.
+   - Add `--part <index_or_name>` to specify a 1-based index or part name to filter the `Score` staves before outputting.
+6. **Tests**:
+   - Write unit tests for part extraction and single-part rendering for all formats (LilyPond, Braille, MusicXML).
+   - Write integration tests for the CLI options.
+
+**Definition of Done:**
+- [ ] Backend caching and part-extraction logic implemented and verified.
+- [ ] Web API endpoints return the list of parts and successfully generate single-part downloads.
+- [ ] Web UI dropdown dynamically changes links based on selection.
+- [ ] CLI options `--list-parts` and `--part` are fully functional.
+- [ ] All tests pass without regressions.
+
+
 
 

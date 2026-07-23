@@ -107,6 +107,13 @@ dottednotes convert piece.brf piece.brf --compression minimal
 # of renumbering sequentially from 1
 dottednotes convert piece.musicxml piece.brf --measure-numbers --measure-numbering print_score
 
+# List all available parts (staves) in a multi-staff score
+dottednotes convert piece.musicxml --list-parts
+
+# Convert only a specific part (by 1-based index or name)
+dottednotes convert piece.musicxml piece.ly --part 2
+dottednotes convert piece.musicxml piece.ly --part "Soprano"
+
 # Show version
 dottednotes --version
 ```
@@ -200,6 +207,12 @@ dottednotes --version
   in braille music). Off by default. When on, the clef is stated once,
   right after the first measure's number — not glued onto the key/time
   signature line. Has no effect on `.ly` output.
+
+* **`--list-parts`**:
+  Prints a list of all available parts (staves) in the score and their indices, then exits.
+
+* **`--part <IndexOrName>`**:
+  Filters the score to include only the specified part before rendering. Accepts a 1-based index (e.g. `2`) or a case-insensitive part name (e.g. `Soprano`).
 
 ## Background
 

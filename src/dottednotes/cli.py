@@ -173,6 +173,22 @@ def _run_convert(args: argparse.Namespace) -> None:
         else:
             score = _parse_score(text, category_override=category_override)
 
+    if getattr(args, "list_parts", False):
+        if not score.staves:
+            print("No parts found in the score.", file=sys.stderr)
+        else:
+            print("Available parts:", file=sys.stderr)
+            for i, staff in enumerate(score.staves):
+                print(f"  {i+1}. {staff.name}", file=sys.stderr)
+        sys.exit(0)
+
+    if getattr(args, "part", None) is not None:
+        try:
+            part_val = int(args.part) - 1
+        except ValueError:
+            part_val = args.part
+        score = score.extract_part(part_val)
+
     if getattr(args, 'report', False):
         from dottednotes.validation.validator import BANAValidator
         # For MusicXML/LilyPond input there is no source braille text at
@@ -389,6 +405,15 @@ def main() -> None:
         choices=["standard", "strict"],
         default="standard",
         help="Set the validation profile (standard, strict) for formatting checks",
+    )
+    convert_parser.add_argument(
+        "--part",
+        help="Filter the score to only output the specified part (1-based index or name)",
+    )
+    convert_parser.add_argument(
+        "--list-parts",
+        action="store_true",
+        help="List all available parts/staves and exit",
     )
     convert_parser.set_defaults(func=_run_convert)
 

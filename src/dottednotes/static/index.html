@@ -167,6 +167,12 @@
 
                 <div class="download-container">
                     <h3>Generated Downloads</h3>
+                    <div class="part-selector-container hidden" id="part-selector-container">
+                        <label for="part-selector">Select Part to Download:</label>
+                        <select id="part-selector" class="part-selector">
+                            <option value="full" selected>Full Score (All Parts)</option>
+                        </select>
+                    </div>
                     <div id="download-status-region" aria-live="polite" class="status-msg">No file uploaded.</div>
                     <div class="download-links hidden" id="download-links">
                         <!-- Populated by JavaScript -->

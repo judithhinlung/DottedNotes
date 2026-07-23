@@ -43,6 +43,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const validationStatusRegion = document.getElementById('validation-status-region');
     const validationTableWrapper = document.getElementById('validation-table-wrapper');
 
+    // Part selection
+    let currentJobId = null;
+    const partSelectorContainer = document.getElementById('part-selector-container');
+    const partSelector = document.getElementById('part-selector');
+
     function updateSectionState(section, state, details = {}) {
         if (section === 'validation') {
             if (state === 'no_file') {
@@ -184,6 +189,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update form options visibility when target format is changed
     targetFormatSelect.addEventListener('change', () => {
         updateOptionVisibility();
+    });
+
+    // Update link hrefs when part is selected
+    partSelector.addEventListener('change', () => {
+        const val = partSelector.value;
+        const jobId = currentJobId;
+        if (!jobId) return;
+        const links = downloadLinks.querySelectorAll('.download-btn');
+        links.forEach(link => {
+            const fileType = link.getAttribute('data-file-type');
+            if (val === 'full') {
+                link.href = `/api/jobs/${jobId}/${fileType}`;
+            } else {
+                link.href = `/api/jobs/${jobId}/parts/${val}/${fileType}`;
+            }
+        });
     });
 
     function handleFileSelected(file) {
@@ -400,6 +421,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function showResults(data) {
+        currentJobId = data.job_id;
+
+        // Reset and populate part selector
+        partSelector.innerHTML = '<option value="full" selected>Full Score (All Parts)</option>';
+        if (data.parts && data.parts.length > 1) {
+            data.parts.forEach((name, idx) => {
+                const option = document.createElement('option');
+                option.value = idx;
+                option.textContent = name;
+                partSelector.appendChild(option);
+            });
+            partSelectorContainer.classList.remove('hidden');
+        } else {
+            partSelectorContainer.classList.add('hidden');
+        }
+
         // 1. Compile status check and state transitions
         let badgeText = 'Success';
         let badgeClass = 'success';
@@ -435,12 +472,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 'brl': { text: '⠃ BANA Braille (BRL)', title: 'Download formatted Unicode braille music file' },
                 'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' }
             };
-
+ 
             for (const [key, url] of Object.entries(files)) {
                 const info = buttonInfo[key] || { text: `Download ${key.toUpperCase()}`, title: 'Download file' };
                 const link = document.createElement('a');
                 link.href = url;
                 link.className = 'download-btn';
+                link.setAttribute('data-file-type', key);
                 link.textContent = info.text;
                 link.title = info.title;
                 link.setAttribute('aria-label', info.title);

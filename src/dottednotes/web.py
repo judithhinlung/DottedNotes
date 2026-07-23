@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import re
 import shutil
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .exceptions import DottedNotesError, LilyPondCompileError
+from .models.score import Score
 from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, has_ensemble_header
 from .parser.input_pipeline import BRLInputPipeline
@@ -27,6 +29,23 @@ from .parser.tokenizer import BrailleTokenizer
 from .validation.validator import BANAValidator
 
 JOBS_DIR = Path("/tmp/dottednotes-jobs")
+
+SCORE_CACHE: dict[str, Score] = {}
+CACHE_KEYS_FIFO: list[str] = []
+MAX_CACHE_SIZE = 50
+
+def cache_score(job_id: str, score: Score) -> None:
+    if job_id in SCORE_CACHE:
+        SCORE_CACHE[job_id] = score
+        return
+    if len(SCORE_CACHE) >= MAX_CACHE_SIZE:
+        oldest = CACHE_KEYS_FIFO.pop(0)
+        SCORE_CACHE.pop(oldest, None)
+    SCORE_CACHE[job_id] = score
+    CACHE_KEYS_FIFO.append(job_id)
+
+def get_cached_score(job_id: str) -> Optional[Score]:
+    return SCORE_CACHE.get(job_id)
 
 # Render Starter's 512MB is tight enough that a single large conversion request
 # can threaten the whole process's memory budget once music21 builds an
@@ -67,6 +86,38 @@ def _parse_score(text: str, category_override: str | None = None):
         return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)
     return BrailleParser(tokens=tokens, category_override=category_override).parse()
+
+def _get_or_parse_score(job_id: str) -> Score:
+    score = get_cached_score(job_id)
+    if score is not None:
+        return score
+
+    job_dir = JOBS_DIR / job_id
+    meta_path = job_dir / "metadata.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Job metadata not found.")
+    
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    
+    input_path = job_dir / meta["input_filename"]
+    category = meta.get("category")
+    
+    ext = input_path.suffix.lower()
+    if ext in (".musicxml", ".xml", ".mxl"):
+        from .parser.musicxml_parser import load_musicxml
+        score = load_musicxml(str(input_path))
+    elif ext == ".ly":
+        from .parser.lilypond_parser import LilypondParser
+        raw_ly = input_path.read_text(encoding="utf-8", errors="replace")
+        score = LilypondParser().parse(raw_ly)
+    else:
+        from .parser.input_pipeline import BRLInputPipeline
+        raw_brl_text = BRLInputPipeline().load(str(input_path))
+        score = _parse_score(raw_brl_text, category_override=category)
+        
+    cache_score(job_id, score)
+    return score
 
 def _parse_format(format_str: str) -> dict[str, Union[float, str]]:
     overrides = {}
@@ -194,6 +245,23 @@ async def convert_file(
 
     input_path.write_bytes(contents)
 
+    meta = {
+        "input_filename": input_filename,
+        "category": category,
+        "format_overrides": format_overrides,
+        "compression": compression,
+        "profile": profile,
+        "measure_numbers": measure_numbers,
+        "page_numbers": page_numbers,
+        "measure_numbering": measure_numbering,
+        "octave_mark_every_measure": octave_mark_every_measure,
+        "full_measure_repeat": full_measure_repeat,
+        "min_repeated_measures": min_repeated_measures,
+        "include_clef_sign": include_clef_sign,
+    }
+    with open(job_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(meta, f)
+
     input_type = "braille"
     if ext in (".musicxml", ".xml", ".mxl"):
         input_type = "musicxml"
@@ -235,6 +303,8 @@ async def convert_file(
         else:
             raw_brl_text = BRLInputPipeline().load(str(input_path))
             score = _parse_score(raw_brl_text, category_override=category)
+
+        cache_score(job_id, score)
 
         # 2. Run BANA validation
         # For MusicXML/LilyPond input there is no source braille text at
@@ -324,6 +394,7 @@ async def convert_file(
             "files": available_files,
             "compile_success": compile_success,
             "compile_error": compile_error,
+            "parts": [staff.name for staff in score.staves],
         }
 
     except DottedNotesError as e:
@@ -377,3 +448,141 @@ def get_job_file(job_id: str, file_type: str):
         media_type=media_type,
         filename=target_file.name
     )
+
+@app.get("/api/jobs/{job_id}/parts/{part_idx}/{file_type}")
+def get_part_file(job_id: str, part_idx: int, file_type: str):
+    if not re.fullmatch(r"[A-Za-z0-9-]+", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+    
+    job_dir = JOBS_DIR / job_id
+    meta_path = job_dir / "metadata.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Job directory not found or expired.")
+        
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+        
+    # Get the base score
+    score = _get_or_parse_score(job_id)
+    
+    # Extract the requested part
+    try:
+        part_score = score.extract_part(part_idx)
+    except DottedNotesError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    # Determine target filename and output path for this specific part
+    part_dir = job_dir / "parts" / str(part_idx)
+    part_dir.mkdir(parents=True, exist_ok=True)
+    
+    input_stem = Path(meta["input_filename"]).stem
+    
+    valid_suffixes = {
+        "ly": (".ly", "text/plain"),
+        "pdf": (".pdf", "application/pdf"),
+        "midi": (".midi", "audio/midi"),
+        "brf": (".brf", "text/plain"),
+        "brl": (".brl", "text/plain"),
+        "musicxml": (".musicxml", "application/xml"),
+    }
+    
+    if file_type not in valid_suffixes:
+        raise HTTPException(status_code=400, detail=f"Invalid file type requested. Valid types: {list(valid_suffixes.keys())}")
+        
+    suffix, media_type = valid_suffixes[file_type]
+    
+    # Output file name: append part name (slugified)
+    part_name_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", part_score.staves[0].name)
+    output_filename = f"{input_stem}_{part_name_slug}{suffix}"
+    if file_type in ("brf", "brl"):
+        output_filename = f"{input_stem}_{part_name_slug}_output{suffix}"
+        
+    output_path = part_dir / output_filename
+    
+    # Check if already generated
+    if output_path.exists():
+        return FileResponse(path=output_path, media_type=media_type, filename=output_filename)
+        
+    # Otherwise, render it on-demand!
+    try:
+        if file_type == "ly":
+            parsed_format_overrides = _parse_format(meta["format_overrides"]) if meta.get("format_overrides") else None
+            rendered = part_score.to_lilypond(
+                category_override=meta.get("category"),
+                format_overrides=parsed_format_overrides,
+                measure_numbers=meta.get("measure_numbers", False)
+            )
+            output_path.write_text(rendered, encoding="utf-8")
+            
+        elif file_type == "pdf":
+            # We first need the .ly file to compile
+            ly_filename = f"{input_stem}_{part_name_slug}.ly"
+            ly_path = part_dir / ly_filename
+            if not ly_path.exists():
+                parsed_format_overrides = _parse_format(meta["format_overrides"]) if meta.get("format_overrides") else None
+                rendered = part_score.to_lilypond(
+                    category_override=meta.get("category"),
+                    format_overrides=parsed_format_overrides,
+                    measure_numbers=meta.get("measure_numbers", False)
+                )
+                ly_path.write_text(rendered, encoding="utf-8")
+            
+            compile_with_lilypond(ly_path)
+            # Find generated PDF
+            if not output_path.exists():
+                raise HTTPException(status_code=500, detail="PDF compilation failed to produce output file.")
+                
+        elif file_type == "midi":
+            # We first need the .ly file to compile
+            ly_filename = f"{input_stem}_{part_name_slug}.ly"
+            ly_path = part_dir / ly_filename
+            if not ly_path.exists():
+                parsed_format_overrides = _parse_format(meta["format_overrides"]) if meta.get("format_overrides") else None
+                rendered = part_score.to_lilypond(
+                    category_override=meta.get("category"),
+                    format_overrides=parsed_format_overrides,
+                    measure_numbers=meta.get("measure_numbers", False)
+                )
+                ly_path.write_text(rendered, encoding="utf-8")
+            
+            compile_with_lilypond(ly_path)
+            # Find generated MIDI
+            midi_path = part_dir / f"{input_stem}_{part_name_slug}.midi"
+            mid_path = part_dir / f"{input_stem}_{part_name_slug}.mid"
+            if mid_path.exists() and not midi_path.exists():
+                mid_path.rename(midi_path)
+            
+            if not midi_path.exists():
+                raise HTTPException(status_code=500, detail="MIDI compilation failed to produce output file.")
+            
+        elif file_type in ("brf", "brl"):
+            from .renderers.brf_writer import BRFWriter
+            writer = BRFWriter(
+                line_width=40,
+                show_measure_numbers=meta.get("measure_numbers", False),
+                compression_level=meta.get("compression", "full"),
+                page_numbers=meta.get("page_numbers", True),
+                measure_numbering=meta.get("measure_numbering", "auto"),
+                octave_mark_every_measure=meta.get("octave_mark_every_measure", False),
+                full_measure_repeat=meta.get("full_measure_repeat", "single-voice"),
+                min_repeated_measures=meta.get("min_repeated_measures", 2),
+                include_clef_sign=meta.get("include_clef_sign", False),
+            )
+            if file_type == "brl":
+                writer.write_unicode(part_score, output_path)
+            else:
+                writer.write(part_score, output_path)
+                
+        elif file_type == "musicxml":
+            from .renderers.musicxml_renderer import export_musicxml
+            export_musicxml(part_score, str(output_path))
+            
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: '{file_type}'")
+            
+        return FileResponse(path=output_path, media_type=media_type, filename=output_filename)
+        
+    except DottedNotesError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal part conversion error: {str(e)}")
