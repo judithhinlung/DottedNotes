@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from .key_signature import KeySignature
 
 from .chord import Chord
+from .duration import TICKS_PER_QUARTER
 from .in_accord import InAccord
 from .measure_repeat import MeasureRepeat
 from .note import Note, Rest
@@ -99,28 +100,80 @@ def _render_note_list_to_braille(
 ) -> str:
     n_items = len(items)
 
-    # 1. 16th-note runs (consecutive 3+ 16th notes/chords)
+    # 1. 16th-note runs (consecutive 3+ 16th notes/chords, split at beat
+    # boundaries -- BANA Par. 8.1: "a regular group consists of three or
+    # more notes of the same value that occupy a full beat or a natural
+    # division of a beat," and Par. 8.1.1(a) prohibits grouping notes that
+    # are "not contained entirely within the same beat." A run of 16th
+    # notes spanning several beats must therefore restart at each beat
+    # boundary (e.g. 16 sixteenth notes in 4/4 need a full cell at
+    # positions 1, 5, 9, and 13, not just position 1) -- this mirrors
+    # BrailleParser._resolve_measure_durations' own beat_progress_ticks
+    # state machine for the read direction, which already treats one beat
+    # as one quarter note (TICKS_PER_QUARTER), the same convention used
+    # here.
     is_16th_continuation = [False] * n_items
-    i = 0
-    while i < n_items:
-        def is_16th_note(item):
-            if hasattr(item, 'notes') and item.notes:
-                d = item.notes[0].duration
-            elif hasattr(item, 'duration'):
-                d = item.duration
-            else:
-                return False
-            return d.value == 16 and not d.is_triplet
 
-        if is_16th_note(items[i]):
-            j = i
-            while j < n_items and is_16th_note(items[j]):
-                j += 1
-            if j - i >= 3:
-                for k in range(i + 1, j):
-                    is_16th_continuation[k] = True
-            i = j
+    def is_16th_note(item):
+        if hasattr(item, 'notes') and item.notes:
+            d = item.notes[0].duration
+        elif hasattr(item, 'duration'):
+            d = item.duration
         else:
+            return False
+        return d.value == 16 and not d.is_triplet
+
+    def item_ticks_for_beat_tracking(item) -> int:
+        # Only used for items that already failed is_16th_note (so never a
+        # plain Note/Chord/Rest already handled by _item_ticks directly) --
+        # covers the two shapes that can otherwise appear at this level and
+        # have no `.duration` of their own: InAccord (mirrors
+        # Measure.total_ticks' own longest-voice rule) and MeasureRepeat (a
+        # whole-measure placeholder with no note-level content at all, so
+        # there is nothing meaningful to add).
+        if isinstance(item, InAccord):
+            if not item.parts:
+                return 0
+            return max(sum(_item_ticks(n) for n in part) for part in item.parts)
+        if isinstance(item, MeasureRepeat):
+            return 0
+        return _item_ticks(item)
+
+    i = 0
+    ticks_from_measure_start = 0
+    while i < n_items:
+        if is_16th_note(items[i]):
+            run_end = i
+            while run_end < n_items and is_16th_note(items[run_end]):
+                run_end += 1
+            # Split [i, run_end) into beat-aligned groups, starting from
+            # wherever ticks_from_measure_start currently sits within the
+            # beat -- the run doesn't necessarily begin exactly on a beat.
+            pos = i
+            beat_ticks = ticks_from_measure_start
+            while pos < run_end:
+                ticks_left_in_beat = TICKS_PER_QUARTER - (beat_ticks % TICKS_PER_QUARTER)
+                group_end = pos
+                group_ticks = 0
+                while group_end < run_end and group_ticks + _item_ticks(items[group_end]) <= ticks_left_in_beat:
+                    group_ticks += _item_ticks(items[group_end])
+                    group_end += 1
+                if group_end == pos:
+                    # This single note's own value already exceeds the
+                    # remaining beat space -- advance by one note so the
+                    # loop always progresses; it isn't grouped with
+                    # anything either side (matches Par. 8.1.1(a)).
+                    group_end = pos + 1
+                    group_ticks = _item_ticks(items[pos])
+                if group_end - pos >= 3:
+                    for k in range(pos + 1, group_end):
+                        is_16th_continuation[k] = True
+                beat_ticks += group_ticks
+                pos = group_end
+            ticks_from_measure_start = beat_ticks
+            i = run_end
+        else:
+            ticks_from_measure_start += item_ticks_for_beat_tracking(items[i])
             i += 1
 
     # 2. Repeated tremolo runs (consecutive 3+ notes/chords with identical repeated tremolo subdivision)
