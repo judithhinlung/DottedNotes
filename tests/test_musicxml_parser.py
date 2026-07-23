@@ -303,6 +303,92 @@ def test_musicxml_tuplet_grouping():
     assert len(tuplet.items) == 3
     assert all(n.duration.is_triplet for n in tuplet.items)
 
+
+def test_musicxml_quintuplet_ratio_beyond_three_two():
+    # Regression test (S10d-4, found via a real solo flute piece and the
+    # MusicXML Test Suite's 23a/23b files): a 5-in-the-time-of-4 tuplet
+    # used to fall through to a nearest-power-of-2 duration approximation
+    # with an "unsupported tuplet ratio" warning -- BANA 8.5's three-cell
+    # irregular-group sign covers any note count other than three, with no
+    # ratio restriction, so this should group and render correctly instead.
+    from dottednotes.models.tuplet import Tuplet
+
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+
+    notes = [music21.note.Note(p) for p in ['C4', 'D4', 'E4', 'F4', 'G4']]
+    for i, n in enumerate(notes):
+        n.duration.type = 'eighth'
+        ti = music21.duration.Tuplet(5, 4)
+        ti.setDurationType('eighth')
+        if i == 0:
+            ti.type = 'start'
+        elif i == 4:
+            ti.type = 'stop'
+        n.duration.appendTuplet(ti)
+        measure.append(n)
+
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    m = score.staves[0].measures[0]
+
+    assert len(m.notes) == 1
+    tuplet = m.notes[0]
+    assert isinstance(tuplet, Tuplet)
+    assert tuplet.ratio == (5, 4)
+    assert len(tuplet.items) == 5
+
+    # BANA 8.5: dots 4,5,6 (⠸) + lower-cell numeral for 5 (⠢) + dot 3 (⠄),
+    # not the classic single-cell triplet sign (⠆), since the group is 5
+    # notes, not 3.
+    braille = tuplet.to_braille()
+    assert braille.startswith('⠸⠢⠄')
+    assert '⠆' not in braille
+
+    ly, _ = tuplet.to_relative_lilypond(60)
+    assert ly.startswith(r'\tuplet 5/4 {')
+
+
+def test_tuplet_irregular_group_sign_uses_four_cell_form_beyond_nine():
+    # BANA 8.5: "the three-cell sign (or four-cell if the number is
+    # greater than nine)" -- an 11-note irregular group needs two
+    # lower-cell numeral digits (⠂⠂ for "11"), not one.
+    from dottednotes.models.tuplet import Tuplet
+    from dottednotes.models.note import Note
+    from dottednotes.models.duration import Duration
+
+    items = [
+        Note(dots=frozenset(), category=None, raw_brl='', note_name='C', octave=4, duration=Duration(value=16))
+        for _ in range(11)
+    ]
+    tuplet = Tuplet(items=items, ratio=(11, 8))
+    braille = tuplet.to_braille()
+    assert braille.startswith('⠸⠂⠂⠄')
+
+
+def test_tuplet_three_note_group_always_uses_single_cell_sign():
+    # A group of exactly 3 notes uses the classic single-cell triplet sign
+    # regardless of the ratio's denominator (BANA 8.4 ties the sign to the
+    # note count, not to a strictly-2 denominator) -- confirmed no real
+    # fixture pairs actual==3 with a normal other than 2, but the model
+    # itself should not special-case that assumption.
+    from dottednotes.models.tuplet import Tuplet
+    from dottednotes.models.note import Note
+    from dottednotes.models.duration import Duration
+
+    items = [
+        Note(dots=frozenset(), category=None, raw_brl='', note_name='C', octave=4, duration=Duration(value=8))
+        for _ in range(3)
+    ]
+    tuplet = Tuplet(items=items, ratio=(3, 4))
+    braille = tuplet.to_braille()
+    assert braille.startswith('⠆')
+    assert '⠸' not in braille
+
+
 def test_musicxml_dynamics_and_articulations():
     m21_score = music21.stream.Score()
     part = music21.stream.Part()

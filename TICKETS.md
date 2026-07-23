@@ -7705,34 +7705,90 @@ whatever scratchpad this ticket was written from, or re-download) before
 implementing; don't guess the dot pattern the way this project never
 guesses BANA cells from memory.
 
-**Steps:**
-1. Fetch and read BANA Par. 8.5 (irregular groups) directly from the
-   manual. Confirm whether it covers arbitrary N:M ratios or only specific
-   ones (quintuplets, septuplets, etc.), and what the actual dot pattern/
-   placement convention is.
-2. Extend `models/tuplet.py`'s `Tuplet` (or add a sibling model, if the
-   BANA sign differs enough structurally from the existing 3:2 case) to
-   carry an arbitrary ratio, not just `is_triplet: bool`.
-3. Extend `_translate_note_stream`/`map_duration` (`musicxml_parser.py`)
-   to group these into the new model instead of falling through to the
-   plain-item/approximation path, using the *exact* ratio from
-   `m21_duration.tuplets[0]` instead of only special-casing 3:2.
-4. Implement `to_braille()`/`to_lilypond()` for the new ratio(s), verified
-   against a real `lilypond` binary compile (LilyPond already supports
-   arbitrary tuplet ratios via `\tuplet n/m`) and against the BANA-derived
-   dot pattern from step 1.
-5. Add tests: a 5:4 and a 7:4 fixture (both real ratios confirmed in the
-   flute piece) round-tripping through MusicXML import with a correct,
-   exact (not approximated) duration and the correct BANA sign.
+**Update:** Fetched BANA 2015 Par. 8.4/8.5/Table 8 directly (PDF text-
+extracted locally, cross-checked ASCII patterns against `ASCII_TO_DOTS`).
+Par. 8.5: "The three-cell sign (or four-cell if the number is greater than
+nine), consisting of dots 456 followed by a lower-cell numeral (without a
+numeric indicator) and a dot 3, is used to indicate an irregular group
+consisting of any number of notes OTHER THAN THREE." Confirms two things
+not obvious from the ticket's own framing: (1) the sign encodes only the
+note COUNT, not the full N:M ratio -- the "time of M" half is left for the
+reader to infer from context, exactly like the existing 3:2 single-cell
+sign never spells out "2" either; (2) the single-cell sign is tied to
+"three notes", not to a strictly-2 denominator, so `is_triplet` was
+relaxed from `actual==3 and normal==2` to just `actual==3` (real fixture
+data never contradicts this -- every `actual==3` case found pairs with
+`normal==2` -- but the model itself should not assume it).
+
+Implemented generally rather than hand-listing 5:4/7:4:
+`Duration` gained `tuplet_ratio: Optional[tuple[int, int]] = None`
+(`models/duration.py`), used by `duration_in_ticks()` for an exact scale
+of any ratio, with the existing `is_triplet` 2/3 shortcut kept unchanged
+as a fallback for callers (`braille_parser.py`'s BRF -> Score direction)
+that never set it. `musicxml_parser.py`'s tuplet grouping in
+`_translate_note_stream` now groups ANY ratio into a `Tuplet` (previously
+only exactly (3, 2)), threading the group's real `(actual, normal)` ratio
+into `Tuplet(..., ratio=...)` (which was, even for the classic case,
+previously never actually passed through -- always relying on the
+dataclass default). `map_duration`'s old "unsupported ratio, approximating"
+warning (which claimed "only 3-in-the-time-of-2 is supported", no longer
+true) is replaced by a narrower one that fires only when no exact written
+value can be found for the note's true duration.
+
+`Tuplet.to_braille()` (`models/tuplet.py`) now branches on `ratio[0]`:
+exactly 3 keeps the existing single-cell sign (`⠆`) unchanged; anything
+else renders Par. 8.5's sign (dots 456 + `LOWER_DIGIT_CELLS` numeral,
+inverted from `bana_symbols.py` -- reused, not a new digit table -- + dot
+3 terminator), correctly widening to two cells for counts above nine
+(verified with an 11-note group). `to_relative_lilypond` already used
+`self.ratio` for `\tuplet {num}/{den}` generically (no change needed
+there); verified `\tuplet 5/4` and `\tuplet 7/4` compile cleanly with the
+real `lilypond` binary (`lilypond` 2.24, zero warnings, PDF produced).
+
+Verified against the real flute piece's actual 5:4 tuplets (measures 55,
+73, 150): correct grouping, correct `⠸⠢⠄...` braille prefix, correct
+`\tuplet 5/4 { ... }` LilyPond -- decoded by hand, not just "no crash".
+Also re-ran the MusicXML Test Suite's `23a`/`23b`/`23e` tuplet files: every
+per-ratio "unsupported tuplet ratio" warning is gone.
+
+**Known, deliberately unfixed limitation:** `TICKS_PER_QUARTER = 24`
+(`models/duration.py`) is only evenly divisible by ratio denominators that
+divide 24 (2, 3, 4, 6, 8, 12...) -- 5:4 and 7:4 specifically (named in
+this ticket's own Definition of Done) do NOT divide evenly, so
+`_validate_measure_beat_count`'s resolved beat count for a measure
+containing one is still an approximation, and `map_duration` still emits
+its (now more accurately worded) "could not find an exact written value"
+warning for them. This is a real, structural limit of the internal tick
+resolution, not a bug in this ticket's grouping/rendering logic -- the
+actual transcribed BANA sign and LilyPond ratio are both exactly correct
+regardless (verified above), only the internal beat-count diagnostic is
+imprecise for these two ratios. Fixing it for arbitrary ratios is
+unbounded (any prime tuplet count needs its own factor in the tick
+resolution's LCM -- the test suite alone has ratios up to 120:7); fixing
+it even just for 5 and 7 specifically means raising `TICKS_PER_QUARTER`
+project-wide, which is a much larger, higher-risk change than this ticket
+scoped for -- confirmed at least 15 existing tests hardcode absolute tick
+values tied to the current constant (`test_models.py`, `test_parser.py`),
+plus untouched call sites in `musicxml_renderer.py`, `staff.py`,
+`tremolo.py`, `validator.py` that were not audited for other hidden
+assumptions. Flagging as a separate, dedicated ticket rather than
+expanding this one's blast radius silently.
 
 **Definition of Done:**
 - [ ] At least 5:4 and 7:4 (the ratios confirmed in real repro material)
   transcribe with an exact duration and a BANA-verified sign, not an
-  approximation.
+  approximation. (The BANA sign and LilyPond ratio are exact and verified
+  -- see Update above. The internal *duration/beat-count* for 5:4 and 7:4
+  specifically remains an approximation due to `TICKS_PER_QUARTER`'s
+  resolution -- see Known limitation. Awaiting developer sign-off on
+  whether this partial result meets the ticket's intent.)
 - [ ] The existing "unsupported ratio" warning either narrows to whatever
   ratios remain genuinely unsupported, or is removed if this ticket
-  covers arbitrary ratios generally.
-- [ ] New tests pass; existing test suite has no regressions.
+  covers arbitrary ratios generally. (Narrowed -- now only fires when no
+  exact written value is found, which is a tick-resolution limit, not a
+  ratio-support limit; no ratio is rejected/unsupported anymore.)
+- [ ] New tests pass; existing test suite has no regressions. (Confirmed
+  -- full suite, 1034 tests, passes.)
 
 ---
 

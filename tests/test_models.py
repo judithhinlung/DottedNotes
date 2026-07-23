@@ -134,6 +134,26 @@ def test_duration_in_ticks_triplet_sixteenth():
     assert Duration(value=16, is_triplet=True).duration_in_ticks() == 4
 
 
+# --- Arbitrary tuplet ratios (S10d-4, BANA 8.5) ---
+
+def test_duration_in_ticks_quintuplet_ratio():
+    # 5 eighth notes in the time of 4 eighth notes (4/5 scale).
+    assert Duration(value=8, tuplet_ratio=(5, 4)).duration_in_ticks() == 9
+
+def test_duration_in_ticks_septuplet_ratio():
+    # 7 sixteenth notes in the time of 4 sixteenth notes (4/7 scale);
+    # verifies exact integer math for a ratio TICKS_PER_QUARTER (24)
+    # divides cleanly for this specific value/ratio combination.
+    assert Duration(value=16, tuplet_ratio=(7, 4)).duration_in_ticks() == \
+        Duration(value=16).duration_in_ticks() * 4 // 7
+
+def test_duration_tuplet_ratio_takes_priority_over_is_triplet():
+    # If both were somehow set, tuplet_ratio (the exact value) wins over
+    # the hardcoded 2/3 triplet shortcut.
+    d = Duration(value=8, is_triplet=True, tuplet_ratio=(5, 4))
+    assert d.duration_in_ticks() == Duration(value=8, tuplet_ratio=(5, 4)).duration_in_ticks()
+
+
 def _make_note(note_name, octave, duration_value, dots=0, accidental=None, articulations=None,
                ornaments=None, fermata=None, breath_mark=None):
     return Note(

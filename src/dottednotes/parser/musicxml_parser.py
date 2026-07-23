@@ -746,6 +746,7 @@ class MusicXMLTranslator:
         current_grace_notes: list[Note] = []
         current_grace_unslashed: list[bool] = []
         tuplet_group = []
+        tuplet_group_ratio: tuple[int, int] = (3, 2)
 
         for el in elements:
             # music21.harmony.ChordSymbol is itself a music21.chord.Chord
@@ -872,54 +873,47 @@ class MusicXMLTranslator:
             
             if el.duration.tuplets:
                 t = el.duration.tuplets[0]
-                if t.numberNotesActual == 3 and t.numberNotesNormal == 2:
-                    if t.type == 'start' and tuplet_group:
-                        items.append(Tuplet(items=tuplet_group))
-                        tuplet_group = []
-                    tuplet_group.append(dn_item)
-                    if t.type == 'stop':
-                        items.append(Tuplet(items=tuplet_group))
-                        tuplet_group = []
-                else:
-                    if tuplet_group:
-                        items.append(Tuplet(items=tuplet_group))
-                        tuplet_group = []
-                    items.append(dn_item)
+                # Any ratio is grouped (S10d-4, BANA 8.4/8.5) -- not just
+                # 3-in-the-time-of-2. tuplet_group_ratio tracks the ratio
+                # of whatever group is currently open, taken from its
+                # first note, so Tuplet(...) below gets the group's real
+                # ratio instead of always defaulting to (3, 2).
+                if t.type == 'start' and tuplet_group:
+                    items.append(Tuplet(items=tuplet_group, ratio=tuplet_group_ratio))
+                    tuplet_group = []
+                if not tuplet_group:
+                    tuplet_group_ratio = (t.numberNotesActual, t.numberNotesNormal)
+                tuplet_group.append(dn_item)
+                if t.type == 'stop':
+                    items.append(Tuplet(items=tuplet_group, ratio=tuplet_group_ratio))
+                    tuplet_group = []
             else:
                 if tuplet_group:
-                    items.append(Tuplet(items=tuplet_group))
+                    items.append(Tuplet(items=tuplet_group, ratio=tuplet_group_ratio))
                     tuplet_group = []
                 items.append(dn_item)
 
         if tuplet_group:
-            items.append(Tuplet(items=tuplet_group))
+            items.append(Tuplet(items=tuplet_group, ratio=tuplet_group_ratio))
 
         return items
 
     def map_duration(self, m21_duration, measure_number: "int | None" = None) -> Duration:
+        # Any tuplet ratio is supported (S10d-4, BANA 8.4/8.5), not just
+        # 3-in-the-time-of-2: is_triplet marks the classic BANA 8.4
+        # single-cell case (exactly 3 notes, regardless of what value they
+        # replace -- confirmed real fixture data never pairs actual==3 with
+        # a normal other than 2, but Par. 8.4's own wording ties the sign
+        # to the note count, not the ratio's denominator); tuplet_ratio
+        # carries the exact (actual, normal) pair so duration_in_ticks()
+        # can compute an exact scaled tick count for ANY ratio instead of
+        # only recognizing 2/3.
         is_triplet = False
+        tuplet_ratio = None
         if m21_duration.tuplets:
             t = m21_duration.tuplets[0]
-            if t.numberNotesActual == 3 and t.numberNotesNormal == 2:
-                is_triplet = True
-            else:
-                # Only 3-in-the-time-of-2 is supported (BANA 8.5's
-                # irregular-group signs for other ratios are out of scope,
-                # not yet verified against the primary source). This falls
-                # through to the nearest-power-of-2 approximation below,
-                # which under-counts the true duration -- warn so the
-                # discrepancy isn't silent, but keep converting (matching
-                # this parser's existing best-effort tolerance for large,
-                # complex real-world scores rather than hard-stopping a
-                # whole piece over one unsupported passage).
-                where = f" in measure {measure_number}" if measure_number is not None else ""
-                warnings.warn(
-                    f"Unsupported tuplet ratio {t.numberNotesActual}:{t.numberNotesNormal}"
-                    f"{where} -- DottedNotes only supports 3-in-the-time-of-2 "
-                    "tuplets (BANA 8.4). Duration approximated; the surrounding "
-                    "measure(s) may not add up to the time signature.",
-                    stacklevel=2,
-                )
+            is_triplet = (t.numberNotesActual == 3)
+            tuplet_ratio = (t.numberNotesActual, t.numberNotesNormal)
 
         m21_type = m21_duration.type
         val = M21_DURATION_MAP.get(m21_type)
@@ -933,7 +927,7 @@ class MusicXMLTranslator:
         # quarterLength instead. Otherwise the mismatched duration survives
         # into export and desyncs the measure.
         actual_ticks = round(m21_duration.quarterLength * TICKS_PER_QUARTER)
-        if val is None or Duration(value=val, dots=dots, is_triplet=is_triplet).duration_in_ticks() != actual_ticks:
+        if val is None or Duration(value=val, dots=dots, is_triplet=is_triplet, tuplet_ratio=tuplet_ratio).duration_in_ticks() != actual_ticks:
             # Search for an exact (value, dots) match against the note's
             # true duration before falling back to an imprecise
             # nearest-power-of-2 guess -- the previous code always reset
@@ -943,7 +937,7 @@ class MusicXMLTranslator:
             match = None
             for candidate_val in sorted(VALID_DURATIONS, reverse=True):
                 for candidate_dots in (0, 1, 2):
-                    candidate = Duration(value=candidate_val, dots=candidate_dots, is_triplet=is_triplet)
+                    candidate = Duration(value=candidate_val, dots=candidate_dots, is_triplet=is_triplet, tuplet_ratio=tuplet_ratio)
                     if candidate.duration_in_ticks() == actual_ticks:
                         match = candidate
                         break
@@ -951,6 +945,16 @@ class MusicXMLTranslator:
                     break
             if match is not None:
                 return match
+
+            if tuplet_ratio is not None:
+                where = f" in measure {measure_number}" if measure_number is not None else ""
+                warnings.warn(
+                    f"Could not find an exact written value for tuplet ratio "
+                    f"{tuplet_ratio[0]}:{tuplet_ratio[1]}{where}. Duration "
+                    "approximated; the surrounding measure(s) may not add up "
+                    "to the time signature.",
+                    stacklevel=2,
+                )
 
             val = None
             ql = m21_duration.quarterLength
@@ -964,7 +968,7 @@ class MusicXMLTranslator:
             else: val = 64
             dots = 0
 
-        return Duration(value=val, dots=dots, is_triplet=is_triplet)
+        return Duration(value=val, dots=dots, is_triplet=is_triplet, tuplet_ratio=tuplet_ratio)
 
     def translate_note_obj(self, m21_note, duration: Duration, ottava_shift: int = 0) -> Note:
         pitch = m21_note.pitch
