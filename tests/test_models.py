@@ -980,6 +980,50 @@ def test_key_signature_eleven_flats_braille():
     assert _make_ks(-11).to_braille() == '⠼⠁⠁⠣'
 
 
+# --- Non-traditional / microtonal key signatures (S10d-7, BANA 6.5.1) ---
+
+def _make_non_traditional_ks(pitches):
+    return KeySignature(dots=frozenset(), category=SymbolCategory.KEY_SIGNATURE, raw_brl='',
+                         non_traditional_pitches=pitches)
+
+def test_key_signature_requires_exactly_one_of_the_two_variants():
+    with pytest.raises(ValueError):
+        KeySignature(dots=frozenset(), category=None, raw_brl='')
+    with pytest.raises(ValueError):
+        KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=1,
+                      non_traditional_pitches=[('F', 1.0, None)])
+
+def test_key_signature_non_traditional_braille_uses_music_parenthesis_and_clef():
+    # BANA Par. 6.5.1: "music parenthesis, hand or clef sign, accidental,
+    # octave mark, note(s), closing music parenthesis" -- confirmed the
+    # music parenthesis sign (Table 1, ⠠⠄) and that the clef component
+    # matches this project's own ClefType.TREBLE cell (⠜⠌⠇) exactly.
+    ks = _make_non_traditional_ks([('F', 1.0, None)])
+    braille = ks.to_braille()
+    assert braille.startswith('⠠⠄⠜⠌⠇')
+    assert braille.endswith('⠠⠄')
+    assert '⠩' in braille  # sharp accidental present somewhere in the middle
+
+def test_key_signature_non_traditional_braille_multiple_pitches():
+    ks = _make_non_traditional_ks([('F', 1.0, None), ('A', -1.0, None), ('B', -1.0, None)])
+    braille = ks.to_braille()
+    # One parenthesis-wrapped construction per altered pitch (3 opens, 3 closes).
+    assert braille.count('⠠⠄') == 6
+
+def test_key_signature_non_traditional_braille_quarter_tone_accidentals():
+    # BANA Table 6's quarter/three-quarter step accidentals.
+    ks = _make_non_traditional_ks([('D', 0.5, None), ('G', -1.5, None)])
+    braille = ks.to_braille()
+    assert '⠈⠩' in braille  # quarter-sharp
+    assert '⠸⠣' in braille  # three-quarter-flat
+
+def test_key_signature_non_traditional_lilypond_raises_clean_error():
+    from dottednotes.exceptions import DottedNotesError
+    ks = _make_non_traditional_ks([('F', 1.0, None)])
+    with pytest.raises(DottedNotesError):
+        ks.to_lilypond()
+
+
 # --- BrailleSymbol contract ---
 
 def test_key_signature_has_raw_brl_field():

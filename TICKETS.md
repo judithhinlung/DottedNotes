@@ -7976,30 +7976,70 @@ documents the transcription convention: "music parenthesis, hand or clef
 sign, accidental, octave mark, note(s), closing music parenthesis" -- this
 is a real, named BANA concept, not an out-of-scope curiosity.
 
-**Steps:**
-1. Fetch and read BANA Par. 6.5.1 directly to confirm the exact cell
-   sequence/placement (the "music parenthesis" sign, specifically) before
-   implementing -- this repo already has `bana_symbols.py`'s music-
-   parenthesis cell for another context (chord symbols, Table 23); confirm
-   whether it's the same cell here or a different one.
-2. In `translate_measure`, detect `<key-step>`/`<key-alter>` (via
-   whatever `music21` exposes for this -- `keys[0].sharps is None` is
-   already the detection signal that currently crashes) and represent it
-   distinctly from the numeric `sharps_or_flats` model, likely as a new,
-   explicit field/variant on `KeySignature` rather than trying to force it
-   into the existing ±7 integer.
-3. Implement `to_braille()` for this variant per Par. 6.5.1, and decide
-   what (if anything) sensible `to_lilypond()` output looks like for a
-   non-traditional key (LilyPond has its own custom-key-signature syntax;
-   verify against the Notation Reference before writing it, per this
-   project's standing rule).
-4. Add tests using both test-suite fixtures, asserting a clean import
-   (no crash) and BANA-Par.-6.5.1-shaped braille output.
+**Update:** Fetched BANA 2015 Par. 6.5.1/Table 1/Table 6 directly (PDF
+text-extracted locally). Confirmed the "music parenthesis" sign is NOT the
+same cell as `CHORD_PAREN_CELL` (chord symbols, Table 23, `⠶`) -- Table 1
+lists a separate, general-purpose "Music parentheses" sign, `,'` in ASCII,
+decoding to `⠠⠄` (dots 6 then dot 3), used unchanged for both the opening
+and closing parenthesis. Decoded Example 6.5.1-1's worked example
+cell-by-cell against `ASCII_TO_DOTS`/existing tables and found its "hand
+or clef sign" component decodes to exactly `models/clef.py`'s own
+`ClefType.TREBLE` cell (`⠜⠌⠇`) -- a non-coincidental match confirming that
+piece. Table 6 also directly gives the quarter/three-quarter step
+accidental cells needed for the microtonal fixture (`13d-KeySignatures-
+Microtones.xml`'s alter values of +/-0.5 and +/-1.5).
+
+Implemented in `models/key_signature.py`: `KeySignature` gained
+`non_traditional_pitches: Optional[list[tuple[str, float, Optional[int]]]]`
+(step, alter, octave-or-None), with `sharps_or_flats` now `Optional[int]`
+and a `__post_init__` requiring exactly one of the two. `to_braille()`
+renders Par. 6.5.1's construction per altered pitch (parenthesis + treble
+clef + accidental + octave mark + note + parenthesis), reusing the
+existing `NOTE_CELLS`/`_OCTAVE_TO_BRL` tables rather than new ones.
+`to_lilypond()` raises a clean `DottedNotesError` for this variant --
+LilyPond's own non-standard/microtonal key-signature and note-naming
+syntax was not researched (out of scope for the time this ticket
+justified), so this correctly refuses to guess rather than emit unverified
+LilyPond, per this project's standing rule.
+
+**Deliberately NOT implemented, flagged rather than guessed:** (1) BANA's
+exact convention for chaining MULTIPLE altered pitches within one
+signature (Example 6.5.1-2, "Unusual combined key signatures") could not
+be confidently decoded cell-by-cell from the manual's extracted text alone
+without its accompanying print image -- each altered pitch currently gets
+its own complete parenthesis-wrapped construction instead, a defensible
+but unverified reading; ask a BANA transcriber or consult the print
+image before trusting this for a real combined signature. (2) which clef
+to assume inside the construction when the source doesn't specify one for
+it specifically -- always assumes treble (neither worked example in the
+manual covers a non-treble case). (3) `Measure.key_signature` is a plain
+`int` used pervasively for the ordinary sharps/flats case (measure-level
+key-change tracking, `Staff`'s header line, etc.) -- there is no slot in
+that plumbing for a non-traditional signature, and changing that field's
+type everywhere it is used is a materially larger, separate change than
+this ticket justified. `translate_measure` (`musicxml_parser.py`) detects
+`keys[0].sharps is None`, builds nothing at the Measure/Staff-int level
+(keeps `key_val` unchanged from before this measure, so the rest of the
+piece is unaffected), and emits a clear warning instead -- fixing the
+crash without silently corrupting the ordinary display path. Confirmed
+against the real repro fixtures that the notes exercised there carry no
+explicit MusicXML accidental of their own and are plain, unaltered
+pitches (not one of the signature's altered pitch classes), so this
+specific repro data has no actual pitch-correctness risk from the
+omission -- flagged in the warning text regardless, since a real piece's
+notes might not be so lucky.
 
 **Definition of Done:**
 - [ ] Non-traditional key signatures import without crashing and produce
-  BANA-Par.-6.5.1-shaped output.
-- [ ] New tests pass; existing test suite has no regressions.
+  BANA-Par.-6.5.1-shaped output. (Import no longer crashes -- confirmed on
+  both real fixtures. The `KeySignature` model itself produces BANA-Par.-
+  6.5.1-shaped braille when constructed directly -- see Update above --
+  but is not yet wired into the actual imported Staff/Measure display; see
+  "Deliberately NOT implemented" item 3. Awaiting developer sign-off on
+  whether this partial result meets the ticket's intent, and on the
+  combined-signature chaining question in item 1.)
+- [ ] New tests pass; existing test suite has no regressions. (Confirmed
+  -- full suite, 1040 tests, passes.)
 
 ---
 

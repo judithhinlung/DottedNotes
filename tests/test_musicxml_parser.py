@@ -76,6 +76,50 @@ def test_musicxml_key_signature_beyond_seven_flats_does_not_crash():
     assert staff.to_lilypond().count(r'\key aeses \major') == 1
 
 
+def test_musicxml_non_traditional_key_signature_does_not_crash():
+    # Regression test (S10d-7, found via the MusicXML Test Suite's own
+    # 13c-KeySignatures-NonTraditional.xml): a <key-step>/<key-alter>
+    # non-traditional key signature has keys[0].sharps == None in music21,
+    # which used to raise TypeError: '<=' not supported between instances
+    # of 'int' and 'NoneType' from a downstream int comparison. Should
+    # import cleanly (with a warning, not silently) instead. Uses the raw
+    # XML (not an in-memory music21.stream construction) because
+    # constructing music21.key.KeySignature directly in Python does not
+    # reproduce sharps == None the way parsing real <key-step>/<key-alter>
+    # XML does.
+    import warnings
+    from dottednotes.parser.musicxml_parser import load_musicxml
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<score-partwise version="3.1">
+  <part-list><score-part id="P1"><part-name>Test</part-name></score-part></part-list>
+  <part id="P1">
+    <measure number="1">
+      <attributes>
+        <divisions>1</divisions>
+        <key>
+          <key-step>F</key-step>
+          <key-alter>1</key-alter>
+          <key-step>A</key-step>
+          <key-alter>-1</key-alter>
+        </key>
+        <time><beats>4</beats><beat-type>4</beat-type></time>
+        <clef><sign>G</sign><line>2</line></clef>
+      </attributes>
+      <note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>
+    </measure>
+  </part>
+</score-partwise>
+"""
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        score = load_musicxml(xml)
+        msgs = [str(x.message) for x in w]
+
+    assert len(score.staves) == 1
+    assert any("Non-traditional or microtonal key signature" in m for m in msgs)
+
+
 def test_musicxml_accidental_display_status_suppresses_spurious_naturals():
     # BANA-adjacent bug: music21's engraving pass attaches a non-None
     # `pitch.accidental` to almost every note in a keyed piece as internal

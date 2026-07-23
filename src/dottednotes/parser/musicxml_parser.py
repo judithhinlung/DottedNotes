@@ -298,8 +298,41 @@ class MusicXMLTranslator:
         key_val = prev_key
         keys = list(m21_measure.getElementsByClass(music21.key.KeySignature))
         if keys:
-            key_val = keys[0].sharps
-            
+            if keys[0].sharps is None:
+                # A non-traditional/microtonal key signature (MusicXML's
+                # <key-step>/<key-alter> pairs instead of <fifths>, S10d-7)
+                # -- keys[0].sharps is None for this encoding, which used
+                # to crash downstream int comparisons (`'<=' not supported
+                # between instances of 'int' and 'NoneType'`). Measure's
+                # own key_signature field is a plain int (used pervasively
+                # for the ordinary sharps/flats case), with no slot for
+                # this; fully wiring a non-traditional signature through
+                # Measure/Staff display would mean changing that field's
+                # type everywhere it's used, a larger, separate change.
+                # BANAValidator.KeySignature.non_traditional_pitches/
+                # _non_traditional_to_braille() (models/key_signature.py)
+                # already implement the BANA Par. 6.5.1 braille
+                # construction and are ready for that follow-up -- this
+                # fix only prevents the crash, keeping key_val (and
+                # therefore the visible key-signature marker) unchanged
+                # from whatever it was before this measure. Any note whose
+                # correct pitch actually depends on one of this signature's
+                # alterations (rather than carrying its own explicit
+                # MusicXML accidental) will import at its plain, unaltered
+                # pitch -- flagged here rather than silently risked.
+                where = f" in measure {m21_measure.number}"
+                warnings.warn(
+                    f"Non-traditional or microtonal key signature{where} is "
+                    "not yet transcribed (BANA Par. 6.5.1's construction is "
+                    "implemented in the model but not wired into staff/measure "
+                    "display -- see S10d-7). The visible key-signature marker "
+                    "is omitted; notes relying on it without their own explicit "
+                    "MusicXML accidental may import at the wrong pitch.",
+                    stacklevel=2,
+                )
+            else:
+                key_val = keys[0].sharps
+
         time_val = prev_time
         times = list(m21_measure.getElementsByClass(music21.meter.TimeSignature))
         if times:
