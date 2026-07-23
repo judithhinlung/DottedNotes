@@ -491,6 +491,28 @@ def test_musicxml_chord_symbol_with_slash_bass():
     assert chord.bass_note == ('B', None)
 
 
+def test_musicxml_augmented_seventh_chord_kind():
+    # Regression test (found via the MusicXML Test Suite's own
+    # 71f-AllChordTypes.xml): 'augmented-seventh' is just the combination
+    # of two primitives already mapped separately elsewhere in
+    # _CHORD_KIND_TO_MODEL_FIELDS (is_augmented + a plain 7th extension --
+    # BANA Table 23's "Plus" sign plus its "Italic 7" sign), not a new BANA
+    # sign of its own.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0.0, music21.harmony.ChordSymbol('C7+'))
+    measure.insert(0.0, music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    chord = score.chord_names.entries[0][1]
+    assert chord.root == 'C'
+    assert chord.is_augmented is True
+    assert chord.extensions == [(7, None)]
+
+
 def test_musicxml_unrecognized_chord_kind_raises():
     from dottednotes.exceptions import DottedNotesError
 

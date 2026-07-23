@@ -7877,20 +7877,39 @@ e.g. `'dominant-seventh': {'extensions': [(7, None)]}` and how
 -- this ticket is "add the missing dict entry using primitives that
 already exist," not new BANA research.
 
-**Steps:**
-1. Add `'augmented-seventh': {'is_augmented': True, 'extensions': [(7,
-   None)]}` to `_CHORD_KIND_TO_MODEL_FIELDS`.
-2. Cross-check the full MusicXML 4.0 chord-kind vocabulary against this
-   dict's current keys (the spec lists ~30 standard kinds) for other
-   similarly-missing combinations while already in this area, rather than
-   fixing only the one this survey happened to hit.
-3. Add a test using `71f-AllChordTypes.xml` asserting every chord kind in
-   that fixture imports without raising.
+**Update:** `'augmented-seventh': {'is_augmented': True, 'extensions':
+[(7, None)]}` has been added (confirmed a clean combination of existing
+primitives) with a regression test. Cross-checking the rest of
+`71f-AllChordTypes.xml`'s kinds against `music21`'s own `chordKind`
+normalization (not the raw MusicXML `<kind>` string -- confirmed these
+differ, e.g. raw `half-diminished` normalizes to `chordKind ==
+'half-diminished-seventh'`, already mapped) turned up three more this
+fixture uses that are still genuinely unmapped: `other`, `pedal`, `power`.
+Unlike `augmented-seventh`, none of these are a simple combination of
+existing `ChordSymbol` fields -- there is no field today for "root +
+fifth, no third" (`power`), "sustained bass note, no chord quality at
+all" (`pedal`), or an arbitrary/custom quality with only a display-text
+override (`other`, MusicXML's `<kind text="...">`). Left open pending
+real BANA Sec. 23 research (Table 23's sign list doesn't show an obvious
+existing sign for any of the three) rather than guessing a mapping.
+
+**Steps (remaining):**
+1. Fetch and read BANA Sec. 23 directly for whether/how a power chord,
+   a pedal-point symbol, or an arbitrary/custom chord quality are
+   transcribed at all -- don't assume a sign exists.
+2. If a convention exists, add whatever new `ChordSymbol` field(s) it
+   needs and the corresponding `_CHORD_KIND_TO_MODEL_FIELDS` entries.
+3. If no BANA convention exists for one or more of these, document that
+   explicitly (a clean, specific `DottedNotesError` message already
+   covers the "unsupported" case -- no code change needed for that part).
+4. Add tests for whichever of the three get a real mapping.
 
 **Definition of Done:**
-- [ ] `71f-AllChordTypes.xml` imports without raising.
-- [ ] Any other MusicXML-spec-standard chord kinds missing from the dict
-  are filled in at the same time.
+- [ ] `augmented-seventh` (and any other simple existing-primitive
+  combinations) added; regression test passing. (Implemented -- see
+  Update above -- awaiting developer sign-off.)
+- [ ] `other`/`pedal`/`power` either get a real, BANA-verified mapping, or
+  are explicitly documented as having no BANA counterpart.
 - [ ] New tests pass; existing test suite has no regressions.
 
 ---

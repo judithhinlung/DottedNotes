@@ -462,6 +462,7 @@ class MusicXMLTranslator:
         'major': {},
         'minor': {'is_minor': True},
         'augmented': {'is_augmented': True},
+        'augmented-seventh': {'is_augmented': True, 'extensions': [(7, None)]},
         'diminished': {'is_diminished': True},
         'diminished-seventh': {'is_diminished': True, 'extensions': [(7, None)]},
         'half-diminished-seventh': {'is_half_diminished': True},
