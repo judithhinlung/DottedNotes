@@ -170,6 +170,7 @@ async def convert_file(
     octave_mark_every_measure: bool = Form(False),
     full_measure_repeat: str = Form("single-voice"),  # "off", "single-voice", "multi-voice"
     min_repeated_measures: int = Form(2),
+    include_clef_sign: bool = Form(False),
 ):
     contents = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(contents) > MAX_UPLOAD_SIZE:
@@ -295,6 +296,7 @@ async def convert_file(
                 octave_mark_every_measure=octave_mark_every_measure,
                 full_measure_repeat=full_measure_repeat,
                 min_repeated_measures=min_repeated_measures,
+                include_clef_sign=include_clef_sign,
             )
             if target_format == "brl":
                 output_brl = job_dir / f"{input_path.stem}_output.brl"

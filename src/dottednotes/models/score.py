@@ -32,6 +32,7 @@ class Score:
         octave_mark_every_measure: bool = False,
         full_measure_repeat: str = "single-voice",
         min_repeated_measures: int = 2,
+        include_clef_sign: bool = False,
     ) -> str:
         from dottednotes.renderers.braille_renderer import BrailleRenderer
         return BrailleRenderer(
@@ -41,6 +42,7 @@ class Score:
             octave_mark_every_measure=octave_mark_every_measure,
             full_measure_repeat=full_measure_repeat,
             min_repeated_measures=min_repeated_measures,
+            include_clef_sign=include_clef_sign,
         ).render(self)
 
     @staticmethod

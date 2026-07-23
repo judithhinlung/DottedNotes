@@ -375,6 +375,7 @@ class BrailleRenderer:
         octave_mark_every_measure: bool = False,
         full_measure_repeat: str = "single-voice",
         min_repeated_measures: int = 2,
+        include_clef_sign: bool = False,
     ):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
@@ -407,6 +408,21 @@ class BrailleRenderer:
                 f"least one original plus one repetition), got {min_repeated_measures!r}"
             )
         self.min_repeated_measures = min_repeated_measures
+        # BANA Par. 4.1: "Clef signs are routinely omitted in braille music
+        # transcription" -- off by default. When a caller wants a facsimile
+        # transcription (Par. 4.1's stated exception: "for the benefit of
+        # the blind teacher with sighted pupils"), the clef sign is placed
+        # once, right after the first measure's number and before that
+        # measure's own signs (dynamics/articulations/ornaments/octave
+        # mark/note) -- not glued onto the key/time signature line, per
+        # Par. 10.1.2's ordering ("measure number, hand signs, clefs...
+        # time or key signatures" all precede everything else) and Par.
+        # 6.5.1's analogous "hand or clef sign" placement before the
+        # accidental/octave-mark/note sequence. Solo output only for now
+        # (_render_solo) -- _render_piano/_render_ensemble don't emit a
+        # clef sign at all today regardless of this setting, an existing
+        # gap this doesn't attempt to close.
+        self.include_clef_sign = include_clef_sign
 
     def _detect_transcription_mode(self, score: Score) -> TranscriptionMode:
         # is_piano is computed first and independent of isinstance(score,
@@ -491,11 +507,12 @@ class BrailleRenderer:
         if score.title:
             lines.append(center_line(encode_literary_braille(score.title), self.line_width))
 
-        # Signatures line
+        # Signatures line -- clef sign deliberately excluded here (BANA
+        # Par. 4.1/10.1.2, S-facsimile-clef): it does not belong next to
+        # the key/time signature at all; see the first-measure clef
+        # injection below instead.
         staff = score.staves[0]
         signature_parts = []
-        if staff.clef:
-            signature_parts.append(staff.clef.to_braille())
         if staff.key_signature:
             signature_parts.append(staff.key_signature.to_braille())
         if staff.time_signature:
@@ -527,7 +544,22 @@ class BrailleRenderer:
                 # 29.3(b): "given without the numeric indicator").
                 num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx)))
                 prefix = (num_str + " ") if self.show_measure_numbers else ""
-                current_line = prefix + brl_start
+                # Facsimile clef sign (BANA 4.1): stated once, right after
+                # the first measure's number, before that measure's own
+                # signs -- never restated at later line starts (unlike the
+                # octave mark), so this only ever applies to idx == 0, the
+                # one time this branch fires for the very first measure of
+                # the whole staff. Par. 4.2 requires a dot-3 separator
+                # between the clef and whatever follows if that first sign
+                # contains dot 1, 2, or 3 (an octave mark alone never does
+                # -- all seven octave-mark cells use only dots 4/5/6 --
+                # but a dynamic/articulation/ornament/accidental on the
+                # very first note, rendered before its octave mark per
+                # Note.to_braille()'s own sign ordering, can).
+                clef_brl = staff.clef.to_braille() if (self.include_clef_sign and idx == 0 and staff.clef) else ""
+                if clef_brl and brl_start and (ord(brl_start[0]) - 0x2800) & 0b111:
+                    clef_brl += '⠄'
+                current_line = prefix + clef_brl + brl_start
                 prev_note = prev_start
             else:
                 if len(current_line) + len(brl_no_start) <= self.line_width:

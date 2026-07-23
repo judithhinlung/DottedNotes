@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const groupPageNumbers = document.getElementById('group-page-numbers');
     const groupMeasureNumbering = document.getElementById('group-measure-numbering');
     const groupOctaveEveryMeasure = document.getElementById('group-octave-every-measure');
+    const groupIncludeClefSign = document.getElementById('group-include-clef-sign');
     const groupFullMeasureRepeat = document.getElementById('group-full-measure-repeat');
     const groupMinRepeatedMeasures = document.getElementById('group-min-repeated-measures');
     const pageNumbersCheckbox = document.getElementById('page_numbers');
@@ -228,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
             groupPageNumbers.classList.remove('hidden');
             groupMeasureNumbering.classList.remove('hidden');
             groupOctaveEveryMeasure.classList.remove('hidden');
+            groupIncludeClefSign.classList.remove('hidden');
             groupFullMeasureRepeat.classList.remove('hidden');
             groupMinRepeatedMeasures.classList.remove('hidden');
         } else {
@@ -235,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
             groupPageNumbers.classList.add('hidden');
             groupMeasureNumbering.classList.add('hidden');
             groupOctaveEveryMeasure.classList.add('hidden');
+            groupIncludeClefSign.classList.add('hidden');
             groupFullMeasureRepeat.classList.add('hidden');
             groupMinRepeatedMeasures.classList.add('hidden');
         }

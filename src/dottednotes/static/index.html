@@ -106,6 +106,14 @@
                             <p class="help-text">Forces the octave mark on every measure's first note, not just measures that start a new braille line. Additive on top of BANA's required rules — never removes a mark that would already show.</p>
                         </div>
 
+                        <div class="form-group checkbox-group" id="group-include-clef-sign">
+                            <label for="include_clef_sign" class="checkbox-label">
+                                <input type="checkbox" id="include_clef_sign" name="include_clef_sign" value="true">
+                                <span>Include Clef Sign (Facsimile)</span>
+                            </label>
+                            <p class="help-text">Clef signs are normally omitted in braille music (BANA 4.1). Turn this on for a facsimile transcription — the clef is stated once, right after the first measure's number.</p>
+                        </div>
+
                         <div class="form-group" id="group-full-measure-repeat">
                             <label for="full_measure_repeat">Full-Measure Repeat</label>
                             <select id="full_measure_repeat" name="full_measure_repeat">

@@ -39,6 +39,7 @@ class BRFWriter:
         octave_mark_every_measure: bool = False,
         full_measure_repeat: str = "single-voice",
         min_repeated_measures: int = 2,
+        include_clef_sign: bool = False,
     ):
         self.line_width = line_width
         self.page_height = page_height
@@ -64,6 +65,8 @@ class BRFWriter:
         # See BrailleRenderer.full_measure_repeat / .min_repeated_measures.
         self.full_measure_repeat = full_measure_repeat
         self.min_repeated_measures = min_repeated_measures
+        # See BrailleRenderer.include_clef_sign (BANA Par. 4.1).
+        self.include_clef_sign = include_clef_sign
 
     def write(self, score: Score, filepath: Union[str, Path]) -> None:
         """Render a score and write it to a BRF file in ASCII braille."""
@@ -86,6 +89,7 @@ class BRFWriter:
             octave_mark_every_measure=self.octave_mark_every_measure,
             full_measure_repeat=self.full_measure_repeat,
             min_repeated_measures=self.min_repeated_measures,
+            include_clef_sign=self.include_clef_sign,
         )
         raw_music = renderer.render(score)
         music_lines = [line.rstrip() for line in raw_music.splitlines()]

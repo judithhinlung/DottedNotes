@@ -194,6 +194,13 @@ dottednotes --version
   repetition). Has no effect if `--full-measure-repeat` is `off` or on
   `.ly` output.
 
+* **`--include-clef-sign`**:
+  For `.brf`/`.brl` output, includes the clef sign for a facsimile
+  transcription (BANA Par. 4.1: clef signs are otherwise routinely omitted
+  in braille music). Off by default. When on, the clef is stated once,
+  right after the first measure's number — not glued onto the key/time
+  signature line. Has no effect on `.ly` output.
+
 ## Background
 
 This project is written by a blind composer who uses a BrailleNotetaker to

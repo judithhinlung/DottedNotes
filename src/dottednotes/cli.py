@@ -222,6 +222,7 @@ def _run_convert(args: argparse.Namespace) -> None:
                 octave_mark_every_measure=args.octave_mark_every_measure,
                 full_measure_repeat=args.full_measure_repeat,
                 min_repeated_measures=args.min_repeated_measures,
+                include_clef_sign=args.include_clef_sign,
             )
             is_brl = output_path is not None and Path(output_path).suffix.lower() == ".brl"
             if is_brl:
@@ -365,6 +366,15 @@ def main() -> None:
              ".brf/.brl output (default 2, the smallest possible repeat: "
              "one original plus one repetition). Has no effect if "
              "--full-measure-repeat is 'off' or on .ly output.",
+    )
+    convert_parser.add_argument(
+        "--include-clef-sign",
+        action="store_true",
+        help="For .brf/.brl output, include the clef sign for a facsimile "
+             "transcription (BANA Par. 4.1: clef signs are routinely "
+             "omitted otherwise). When on, the clef is stated once, right "
+             "after the first measure's number, not next to the key/time "
+             "signature. Off by default; has no effect on .ly output.",
     )
     convert_parser.add_argument(
         "--no-page-numbers",
