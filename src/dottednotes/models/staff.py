@@ -96,10 +96,18 @@ class Staff:
         Clef selection (LilyPond requires an explicit clef for almost every piece,
         even though BANA braille music rarely contains clef cells):
           1. Explicit clef cell parsed from the BRF file → use it.
-          2. Heuristic: first pitched note at octave 4+ → treble; octave 3 or
-             below → bass.  This handles the common piano/orchestra case until
-             the parser can read literary-braille part labels (a later sprint).
-          3. No notes → no \\clef directive emitted.
+          2. Conventional clef for this staff's instrument name (S10d-12), e.g.
+             Violin I/II → treble, Viola → alto, Violoncello/Double bass → bass
+             (models/instrument.py's get_default_clef()) → use it. This is a
+             fixed notational convention, not a function of register, so it
+             takes priority over the octave heuristic below -- a second violin
+             passage that dips below middle C is still written in treble clef.
+          3. Heuristic: first pitched note at octave 4+ → treble; octave 3 or
+             below → bass. get_default_clef() deliberately returns None for
+             piano/harp hands (no fixed convention -- a left hand can cross
+             into treble territory) and unpitched percussion, so this
+             heuristic remains the resolution path for those staves.
+          4. No notes → no \\clef directive emitted.
 
         include_clef=False omits the \\clef directive from this output (S5b-8's
         OrchestraScore.to_lilypond() places \\clef in the \\score block's
@@ -347,6 +355,13 @@ class Staff:
         """Return the LilyPond clef directive string, or None if there are no notes."""
         if self.clef is not None:
             return self.clef.to_lilypond()
+
+        from .clef import CLEF_TO_LILYPOND
+        from .instrument import get_default_clef
+        default_clef = get_default_clef(self.name)
+        if default_clef is not None:
+            return f'\\clef {CLEF_TO_LILYPOND[default_clef]}'
+
         octave = self._first_note_octave()
         if octave is None:
             return None

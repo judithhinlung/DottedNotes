@@ -80,6 +80,31 @@ def test_score_extract_part_name():
     assert part_alto.staves[0].name == "Alto"
 
 
+def test_score_extract_part_string_instrument_keeps_treble_clef_despite_low_register():
+    # Regression test (S10d-12): a Violin II staff whose first written note
+    # sits below middle C must still render in treble clef when extracted
+    # as a standalone part -- see Staff._resolve_clef()'s instrument-table
+    # lookup, which now takes priority over the old register-only heuristic.
+    from dottednotes.models import Measure, Note, Duration
+
+    score = Score(title="Duo")
+    v1 = Staff(name="Violin I")
+    v1.add_measure(Measure(number=1, notes=[
+        Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=5, duration=Duration(4))
+    ]))
+    v2 = Staff(name="Violin II")
+    v2.add_measure(Measure(number=1, notes=[
+        Note(dots=frozenset(), category=None, raw_brl="", note_name="G", octave=3, duration=Duration(4))
+    ]))
+    score.add_staff(v1)
+    score.add_staff(v2)
+
+    part = score.extract_part(1)
+    ly = part.to_lilypond(concert_pitch=False)
+    assert r'\clef treble' in ly
+    assert r'\clef bass' not in ly
+
+
 def test_score_extract_part_invalid():
     score = Score()
     staff = Staff(name="Violin")

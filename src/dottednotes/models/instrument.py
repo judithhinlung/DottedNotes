@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from .clef import ClefType
+
 
 class InstrumentFamily(Enum):
     WOODWIND = "Woodwind"
@@ -96,6 +98,75 @@ def get_instrument_family(name: str) -> InstrumentFamily | None:
     # continuo" or an orchestral "Bass" (double bass) shorthand.
     if any(k in lower_name for k in ['voice', 'vocal', 'soprano', 'alto', 'tenor', 'baritone', 'contralto', 'mezzo', 'cantus', 'singing', 'chorus', 'choir']):
         return InstrumentFamily.VOCAL
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Conventional clefs (S10d-12 fix): which clef an instrument is
+# *conventionally* notated in, independent of the actual register any
+# particular passage happens to sit in. Deliberately excludes Piano/Harp
+# hands and unpitched percussion -- those have no single fixed clef (a
+# piano left hand can legitimately cross into treble territory), so those
+# fall through to Staff._resolve_clef()'s existing register-based heuristic
+# instead.
+# ---------------------------------------------------------------------------
+
+_NAME_TO_CLEF: dict[str, ClefType] = {
+    'Piccolo': ClefType.TREBLE,
+    'Flute': ClefType.TREBLE,
+    'Oboe': ClefType.TREBLE,
+    'English horn': ClefType.TREBLE,
+    'Clarinet': ClefType.TREBLE,
+    'Bass clarinet': ClefType.TREBLE,
+    'Bassoon': ClefType.BASS,
+    'Double bassoon': ClefType.BASS,
+    'Horn': ClefType.TREBLE,
+    'Trumpet': ClefType.TREBLE,
+    'Trombone': ClefType.BASS,
+    'Tuba': ClefType.BASS,
+    'Kettledrums': ClefType.BASS,
+    'Violin I': ClefType.TREBLE,
+    'Violin II': ClefType.TREBLE,
+    'Viola': ClefType.ALTO,
+    'Violoncello': ClefType.BASS,
+    'Double bass': ClefType.BASS,
+    'Guitar': ClefType.TREBLE,
+    'Banjo': ClefType.TREBLE,
+    'Soprano': ClefType.TREBLE,
+    'Alto': ClefType.TREBLE,
+    'Tenor': ClefType.TREBLE,
+    'Bass': ClefType.BASS,
+    'Voice': ClefType.TREBLE,
+    'Vocal': ClefType.TREBLE,
+}
+
+
+def get_default_clef(name: str) -> ClefType | None:
+    """Resolve an instrument name to its conventional clef, or None if the
+    instrument has no single fixed convention (e.g. piano/harp hands,
+    unpitched percussion) or isn't recognized.
+
+    Uses a Table-29-style exact match first, then falls back to keyword
+    matching (mirroring get_instrument_family's fallback) for names outside
+    that roster -- e.g. a MusicXML part named "Cello" or "Vln. 2" rather
+    than the canonical "Violoncello"/"Violin II".
+    """
+    normalized_name = name.strip()
+    for known_name, clef_type in _NAME_TO_CLEF.items():
+        if known_name.lower() == normalized_name.lower():
+            return clef_type
+
+    lower_name = normalized_name.lower()
+
+    if 'viola' in lower_name:
+        return ClefType.ALTO
+
+    if any(k in lower_name for k in ['violoncello', 'cello', 'double bass', 'contrabass', 'bassoon', 'trombone', 'tuba']):
+        return ClefType.BASS
+
+    if any(k in lower_name for k in ['violin', 'guitar', 'banjo', 'trumpet', 'horn', 'flute', 'oboe', 'clarinet', 'piccolo', 'soprano', 'voice']):
+        return ClefType.TREBLE
 
     return None
 

@@ -1478,6 +1478,66 @@ def test_instrument_family_resolution():
     assert info_gtr.family == InstrumentFamily.PLUCKED_STRING
 
 
+def test_default_clef_resolution():
+    # S10d-12 fix: conventional clefs are looked up by instrument name, not
+    # inferred from register -- a second violin should be treble even if
+    # its written notes happen to sit below middle C.
+    from dottednotes.models.instrument import get_default_clef
+    from dottednotes.models.clef import ClefType
+
+    assert get_default_clef('Violin I') == ClefType.TREBLE
+    assert get_default_clef('Violin II') == ClefType.TREBLE
+    assert get_default_clef('Viola') == ClefType.ALTO
+    assert get_default_clef('Violoncello') == ClefType.BASS
+    assert get_default_clef('Double bass') == ClefType.BASS
+    assert get_default_clef('Bassoon') == ClefType.BASS
+    assert get_default_clef('Trumpet') == ClefType.TREBLE
+
+    # Fallback keyword matching for names outside the exact Table 29 roster
+    # (e.g. a MusicXML part named "Cello" rather than "Violoncello").
+    assert get_default_clef('Cello') == ClefType.BASS
+    assert get_default_clef('Violin 2') == ClefType.TREBLE
+
+    # Piano/harp hands and unrecognized names have no fixed convention --
+    # Staff._resolve_clef() falls back to its register-based heuristic.
+    assert get_default_clef('Piano right hand') is None
+    assert get_default_clef('Piano left hand') is None
+    assert get_default_clef('right hand') is None
+    assert get_default_clef('Synthesizer') is None
+
+
+def test_staff_resolve_clef_uses_instrument_convention_over_register():
+    # Regression test (S10d-12): a Violin II staff whose first written note
+    # is below middle C must still resolve to treble clef -- the old
+    # register-only heuristic (octave >= 4 -> treble, else bass) got this
+    # wrong for string instruments, which are always notated in treble
+    # clef regardless of how low a given passage sits.
+    from dottednotes.models.instrument import get_default_clef  # noqa: F401 (documents intent)
+
+    staff = Staff(name="Violin II")
+    m = Measure(number=1)
+    m.add_note(_make_note('G', 3, 4))  # below middle C
+    staff.add_measure(m)
+
+    assert staff._resolve_clef() == r'\clef treble'
+
+    # A cello staff with a high first note must still resolve to bass clef.
+    cello = Staff(name="Violoncello")
+    m2 = Measure(number=1)
+    m2.add_note(_make_note('C', 5, 4))  # well above middle C
+    cello.add_measure(m2)
+
+    assert cello._resolve_clef() == r'\clef bass'
+
+    # Piano hands keep the old register-based heuristic (no fixed convention).
+    piano_lh = Staff(name="Piano left hand")
+    m3 = Measure(number=1)
+    m3.add_note(_make_note('C', 5, 4))  # a left hand passage that crosses high
+    piano_lh.add_measure(m3)
+
+    assert piano_lh._resolve_clef() == r'\clef treble'
+
+
 def test_score_staff_grouping():
     # Helper to build a basic staff with a single C4 note
     def make_staff(name):
