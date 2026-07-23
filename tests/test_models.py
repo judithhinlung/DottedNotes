@@ -925,17 +925,39 @@ def test_key_to_lilypond_covers_all_standard_keys():
 
 # --- Validation ---
 
-def test_key_signature_sharps_out_of_range_raises():
-    with pytest.raises(ValueError):
-        _make_ks(8)
-
-def test_key_signature_flats_out_of_range_raises():
-    with pytest.raises(ValueError):
-        _make_ks(-8)
-
 def test_key_signature_boundary_values_are_valid():
     _make_ks(7)   # C# major — must not raise
     _make_ks(-7)  # Cb major — must not raise
+
+
+# --- Beyond +/-7 accidentals (S10d-8, BANA Par. 6.5: numeral-prefixed
+# form has no stated cap) ---
+
+def test_key_signature_beyond_seven_sharps_does_not_raise():
+    ks = _make_ks(8)
+    assert ks.sharps_or_flats == 8
+
+def test_key_signature_beyond_seven_flats_does_not_raise():
+    ks = _make_ks(-8)
+    assert ks.sharps_or_flats == -8
+
+def test_key_signature_eight_sharps_lilypond():
+    # G# major (8 sharps): continuing the circle of fifths past C# (7
+    # sharps) needs F## as the 8th sharp, so the tonic itself must be
+    # spelled G# (not the enharmonic Ab).
+    assert _make_ks(8).to_lilypond() == r'\key gis \major'
+
+def test_key_signature_eleven_flats_lilypond():
+    # Ab major with a double flat (11 flats overall, found via the
+    # MusicXML Test Suite's own 13aa-KeySignatures-Extreme.xml, fifths=-11).
+    assert _make_ks(-11).to_lilypond() == r'\key aeses \major'
+
+def test_key_signature_eight_sharps_braille():
+    # BANA Par. 6.5: numeral sign + digit(s) + a single sharp sign.
+    assert _make_ks(8).to_braille() == '⠼⠓⠩'
+
+def test_key_signature_eleven_flats_braille():
+    assert _make_ks(-11).to_braille() == '⠼⠁⠁⠣'
 
 
 # --- BrailleSymbol contract ---

@@ -55,6 +55,27 @@ def test_musicxml_pitch_and_octave_translation():
     assert note2.accidental.type == AccidentalType.DOUBLE_FLAT
     assert note2.duration.value == 8
 
+def test_musicxml_key_signature_beyond_seven_flats_does_not_crash():
+    # Regression test (S10d-8, found via the MusicXML Test Suite's own
+    # 13aa-KeySignatures-Extreme.xml): a <key><fifths>-11</fifths></key>
+    # used to raise ValueError: sharps_or_flats must be in -7 ... +7 --
+    # BANA Par. 6.5's numeral-prefixed form for 4+ accidentals has no
+    # stated upper limit, so this should import cleanly instead.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.TrebleClef())
+    measure.insert(0, music21.key.KeySignature(-11))
+    measure.append(music21.note.Note('C4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    staff = score.staves[0]
+    assert staff.key_signature.sharps_or_flats == -11
+    assert staff.to_lilypond().count(r'\key aeses \major') == 1
+
+
 def test_musicxml_accidental_display_status_suppresses_spurious_naturals():
     # BANA-adjacent bug: music21's engraving pass attaches a non-None
     # `pitch.accidental` to almost every note in a keyed piece as internal

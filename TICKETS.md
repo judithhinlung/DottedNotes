@@ -7962,21 +7962,50 @@ enharmonic-respelling curiosity, not something a real solo instrumental
 piece is likely to need -- but a clean, documented limit or a real
 extension is better than a raw `ValueError`.)
 
-**Steps:**
-1. Re-read BANA Par. 6.5's numeral-prefixed form for 4+ accidentals
-   (already partially quoted in this project's own `to_braille()` for the
-   4-7 case, per `key_signature.py` -- confirm whether that existing code
-   already generalizes past 7 or is itself hardcoded to the same range)
-   and either extend it past 7, or raise a clean `DottedNotesError`
-   instead of a raw `ValueError` if the decision is to keep the limit.
-2. Add a test confirming whichever behavior is chosen (extended range, or
-   a clean plain-text error) for a key signature beyond ±7.
+**Update:** Fetched BANA 2015 Par. 6.5 directly (PDF text-extracted
+locally): "When it consists of four or more accidentals, the number
+including the numeric indicator precedes a single flat or sharp sign" --
+no cap is stated anywhere for how large that number can get, confirming
+the ±7 limit is purely this project's own model artifact, not a BANA one.
+Chose the "extend it" branch over the "clean error" branch accordingly.
+
+`key_signature.py`'s old `_KEY_TO_BRL`/`KEY_TO_LILYPOND` were both flat
+lookup tables hardcoded to -7..7 -- confirmed they did NOT generalize.
+Replaced the out-of-range check with a computed fallback instead of
+enumerating more table entries: `_tonic_letter_and_accidental()` derives
+the tonic's letter and sharp/flat count from circle-of-fifths semitone
+arithmetic (verified by first reproducing all 15 of `KEY_TO_LILYPOND`'s
+existing -7..7 entries exactly via the same formula before trusting it
+past that range), and `_numeral_prefixed_braille()` spells the count using
+the *same* `LITERARY_DIGITS` letter alphabet BANA measure numbers already
+use (`bana_symbols.py`, inverted), rather than a second, separate digit
+table. `KEY_TO_LILYPOND`/`_KEY_TO_BRL` themselves are untouched and stay
+the fast path for -7..7 (an existing test asserts that dict is exactly
+that range, so it was left alone rather than folded into the generalized
+form). `KeySignature.__post_init__`'s `ValueError` was removed entirely --
+`sharps_or_flats` is now unbounded in either direction.
+
+Verified against `13aa-KeySignatures-Extreme.xml` (fifths=-11): imports
+cleanly, `\key aeses \major`, braille signature line includes `⠼⠁⠁⠣`
+(numeral sign + "11" + flat sign) -- checked by decoding the actual
+rendered output, not just absence of a crash. Also hand-verified +8 sharps
+(G# major, needing a double-sharp on F -- `gis`) since the fixture itself
+only exercises the flat side.
+
+Existing tests `test_key_signature_sharps_out_of_range_raises` and
+`test_key_signature_flats_out_of_range_raises` in `test_models.py`
+asserted the old capped behavior and were removed (they tested a
+limitation this ticket deliberately lifted, not a bug); replaced with
+tests asserting the extended range now works, plus a MusicXML-level
+regression test in `test_musicxml_parser.py` using the real repro shape.
 
 **Definition of Done:**
 - [ ] A key signature beyond ±7 either transcribes correctly (BANA Par.
   6.5) or fails with a clean, plain-text `DottedNotesError` -- never a raw
-  `ValueError` traceback.
-- [ ] New tests pass; existing test suite has no regressions.
+  `ValueError` traceback. (Implemented as the "transcribes correctly"
+  branch -- see Update above -- awaiting developer sign-off.)
+- [ ] New tests pass; existing test suite has no regressions. (Confirmed
+  -- full suite, 1028 tests, passes.)
 
 ---
 
