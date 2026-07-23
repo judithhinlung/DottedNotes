@@ -190,7 +190,27 @@ def test_web_part_rendering_endpoint():
     assert part1_response.status_code == 200
     assert "g'4 a4 b4 c4" in part1_response.text.lower()
 
-    # 3. Test caching and fallback re-parsing
+    # 3. Download part 0 (Flute) as BRF with measure numbers
+    response_mn = client.post(
+        "/api/convert",
+        files={"file": ("ensemble.brf", io.BytesIO(brf_content), "text/plain")},
+        data={
+            "target_format": "lilypond",
+            "category": "Chamber",
+            "profile": "standard",
+            "measure_numbers": "true"
+        }
+    )
+    assert response_mn.status_code == 200
+    job_id_mn = response_mn.json()["job_id"]
+
+    part0_brf_response = client.get(f"/api/jobs/{job_id_mn}/parts/0/brf")
+    assert part0_brf_response.status_code == 200
+    # In BRF/ASCII Braille, measure numbers in solo format are prepended with #
+    # Measure 1 should be #A, Measure 2 should be #B
+    assert "#A " in part0_brf_response.text
+
+    # 4. Test caching and fallback re-parsing
     # Evict score from cache to verify fallback
     if job_id in SCORE_CACHE:
         del SCORE_CACHE[job_id]
