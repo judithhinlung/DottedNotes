@@ -8277,12 +8277,21 @@ built now.
 5. Add a test using `73a-Percussion.xml` asserting Cymbals/Triangle
    measures import with real content, not empty.
 
+**Scope decision (2026-07-23):** Deferred. Developer chose to leave this as
+a documented, lower-priority gap rather than build it now, matching the
+project's current solo-instrumental focus (not yet ensemble/orchestral
+percussion) and avoiding scope creep into a feature that needs its own
+BANA Chapter 34 research pass (note-naming, octave marks, interval/in-
+accord conventions all differ from pitched instruments). No code changes
+made for this ticket. Revisit if a percussion piece becomes a near-term
+target.
+
 **Definition of Done:**
 - [ ] Explicit scope decision recorded (build now vs. defer) before any
-  code changes.
+  code changes. (Recorded above: defer.)
 - [ ] If built: unpitched percussion notes import and transcribe per BANA
   Chapter 34, verified tests pass, existing test suite has no
-  regressions.
+  regressions. (N/A -- deferred.)
 
 
 
