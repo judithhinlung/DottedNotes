@@ -53,8 +53,10 @@ def test_layout_signature_indentation():
 
 
 def test_layout_heading_spacing():
-    # Blank line between signature and music
-    brf_text = "        ⠼⠉⠲\n\n⠐⠹"
+    # Blank line between signature and music. Padded with '⠀' (U+2800,
+    # the real braille blank cell), not literal ASCII space -- matches
+    # what BRLInputPipeline normalizes real file input to (S10d-14).
+    brf_text = '⠀' * 8 + "⠼⠉⠲\n\n⠐⠹"
     score = parse_brf(brf_text)
     
     validator = BANAValidator(enabled_rules=["S11c-2"])
@@ -69,9 +71,32 @@ def test_layout_heading_spacing():
     assert '⠀⠀⠀⠀⠀⠀⠀⠀⠼⠉⠲\n⠼⠁⠀⠐⠹' in rendered
 
 
+def test_layout_title_centering_and_signature_indentation_pass_on_real_rendered_output():
+    # S10d-14 regression: _validate_page_layout()'s title-centering and
+    # signature-indentation checks measured indentation with .lstrip(' ')/
+    # .rstrip(' ') -- literal ASCII space. Real braille text (whether
+    # loaded through BRLInputPipeline or freshly rendered by
+    # BrailleRenderer/BRFWriter) is padded with '⠀' (U+2800) instead, so
+    # those checks always read 0 cells of indentation and flagged even
+    # correctly-centered/correctly-indented real output as a violation.
+    # Confirmed here against Score.to_braille()'s actual rendered output
+    # (not a hand-typed unit-test string), per the ticket's own Step 4.
+    brf_text = "⠠⠎⠕⠝⠛⠲\n⠼⠉⠲\n⠐⠹"
+    score = parse_brf(brf_text)
+    score.title = "Song"
+
+    rendered = score.to_braille()
+    validator = BANAValidator(enabled_rules=["S11c-2"])
+    result = validator.validate(score, raw_brl_text=rendered)
+
+    assert not [c for c in result.corrections if "Title Centering" in c.message]
+    assert not [c for c in result.corrections if "Signature Line Indentation" in c.message]
+
+
 def test_layout_running_head_centering():
-    # Multipage document. Page 2 starts with uncentered running head
-    brf_text = "      ⠠⠎⠕⠝⠛⠲\n⠐⠹\n\f⠠⠎⠕⠝⠛⠀⠃"
+    # Multipage document. Page 2 starts with uncentered running head.
+    # Padded with '⠀' (U+2800), not literal ASCII space (S10d-14).
+    brf_text = '⠀' * 6 + "⠠⠎⠕⠝⠛⠲\n⠐⠹\n\f⠠⠎⠕⠝⠛⠀⠃"
     score = parse_brf("⠐⠹\n⠐⠹")
     score.title = "Song"
     

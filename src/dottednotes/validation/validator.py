@@ -143,10 +143,13 @@ class BANAValidator:
                 # We strip trailing whitespaces/newlines for column check
                 stripped_line = line.rstrip('\r\n')
                 if len(stripped_line) > self.column_limit:
-                    # Look for spaces to propose a break
+                    # Look for blanks to propose a break. '⠀' (U+2800) is
+                    # the real braille blank cell BRLInputPipeline
+                    # normalizes real file input to -- not literal ASCII
+                    # space (S10d-14).
                     proposed = None
-                    if ' ' in stripped_line:
-                        parts = stripped_line.split(' ')
+                    if '⠀' in stripped_line:
+                        parts = stripped_line.split('⠀')
                         # Propose breaking at the last space within limit
                         break_pos = -1
                         accum = 0
@@ -812,8 +815,20 @@ class BANAValidator:
 
         if title_line_idx != -1 and title_brl:
             title_line = page1_lines[title_line_idx]
-            l_spaces = len(title_line) - len(title_line.lstrip(' '))
-            r_spaces = len(title_line) - len(title_line.rstrip(' '))
+            # '⠀' (U+2800), not literal ASCII space -- see the S9b-4 fix
+            # above for why (S10d-14).
+            l_spaces = len(title_line) - len(title_line.lstrip('⠀'))
+            # Not rstrip('⠀'): a rendered title line never carries trailing
+            # blank cells to strip (BrailleRenderer.center_line() only
+            # left-pads -- nothing pads a line past its own content before
+            # the newline), so rstrip-based measurement always reads 0
+            # regardless of true right margin. The real right margin is
+            # implicit: whatever's left of column_limit after the visible
+            # (left-padded) line content (S10d-14 -- found verifying this
+            # rule against real, freshly-rendered output, same root cause
+            # as the '⠀' fix above: this check could never pass for
+            # genuinely well-centered real output).
+            r_spaces = max(0, self.column_limit - len(title_line))
             is_centered = (abs(l_spaces - r_spaces) <= 1)
             has_margins = (l_spaces >= 3 and r_spaces >= 3)
             if not is_centered or not has_margins:
@@ -848,7 +863,7 @@ class BANAValidator:
 
         if sig_line_idx != -1:
             sig_line = page1_lines[sig_line_idx]
-            l_spaces = len(sig_line) - len(sig_line.lstrip(' '))
+            l_spaces = len(sig_line) - len(sig_line.lstrip('⠀'))
             if is_solo or is_piano:
                 if l_spaces != 8:
                     corrections.append(Correction(

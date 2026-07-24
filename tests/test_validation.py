@@ -216,6 +216,22 @@ def test_validation_line_length():
     assert "exceeds BANA column limit" in too_long[0].message
 
 
+def test_validation_line_length_proposes_break_at_a_blank_cell():
+    # S10d-14: the break-point proposal used to split on literal ASCII
+    # space, which a real over-length line (BRLInputPipeline-normalized,
+    # or freshly rendered by BrailleRenderer/BRFWriter) never contains --
+    # only '⠀' (U+2800). Before this fix, a real over-length line always
+    # got no break-point suggestion at all, regardless of where a blank
+    # cell actually was.
+    long_line = ('⠹' * 20) + '⠀' + ('⠹' * 25)  # 46 cells, one blank at column 20
+    score = parse_brf("⠹")
+    validator = BANAValidator(column_limit=40)
+    result = validator.validate(score, raw_brl_text=long_line)
+    too_long = [c for c in result.corrections if c.rule_id == "S9b-4"]
+    assert len(too_long) == 1
+    assert too_long[0].proposed_fix == "Break line at column 20"
+
+
 def test_validation_to_json():
     brf = "⠹"
     score = parse_brf(brf)
