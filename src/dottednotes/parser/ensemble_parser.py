@@ -912,10 +912,20 @@ class EnsembleParser:
             )
             try:
                 score = parser.parse()
-            except Exception as e:
-                print(f"FAILED INSTRUMENT: {inst.name}")
-                print(f"CELLS STREAM: {cells_stream}")
-                raise e
+            except BrailleParseError as e:
+                # Re-raise with the instrument name attached so a reader
+                # of the error knows which part failed, alongside the
+                # measure number BrailleParser's own message already
+                # carries (e.g. "Instrument 'Violin I': Measure 12: ...").
+                # type(e), not a hardcoded BrailleParseError: preserves
+                # whichever specific subclass (NumeralRepeatError,
+                # TripletDurationError, ...) BrailleParser actually raised,
+                # so callers catching a specific subclass still can. A
+                # non-BrailleParseError (TypeError, KeyError, ...) is a
+                # real bug, not malformed input -- let it keep failing
+                # loudly with its own traceback instead of being relabeled
+                # as an expected parse failure (see exceptions.py).
+                raise type(e)(f"Instrument '{inst.name}': {e}") from e
 
             if score.staves:
                 staff = score.staves[0]

@@ -450,3 +450,28 @@ def test_ensemble_parser_raises_clear_error_for_headerless_open_score():
         EnsembleParser().parse(raw)
     assert "Sec. 33.2" in str(exc.value)
     assert "v1, v2, vl, vc" in str(exc.value)
+
+
+def test_ensemble_parser_reports_instrument_name_and_measure_on_per_instrument_failure():
+    # A per-instrument parse failure (each instrument's music runs through
+    # its own BrailleParser, see EnsembleParser.parse()) must name which
+    # instrument failed, on top of the measure number BrailleParser's own
+    # error already carries -- and must preserve the specific exception
+    # subclass (NumeralRepeatError here), not just a generic
+    # BrailleParseError, so a caller catching that subclass still can.
+    from dottednotes.parser.braille_parser import NumeralRepeatError
+
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠠⠧⠊⠕⠇⠊⠝⠀⠐⠐⠀⠀⠀⠜⠧⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠣⠣⠣⠼⠙⠲\n'
+        '⠁⠀⠀⠜⠋⠇⠄⠐⠹⠱⠫⠻⠀⠐⠳⠪⠺⠹\n'
+        # Violin's 2nd measure is a numeral-repeat sign (unsupported,
+        # BANA Sec. 19) instead of real notes -- Flute's own 2 measures
+        # parse fine, isolating the failure to Violin.
+        '⠀⠀⠀⠜⠧⠇⠄⠸⠳⠪⠺⠹⠀⠼⠆\n'
+    )
+    with pytest.raises(NumeralRepeatError) as exc:
+        EnsembleParser().parse(raw)
+    assert "Instrument 'Violin'" in str(exc.value)
+    assert "Measure 2" in str(exc.value)

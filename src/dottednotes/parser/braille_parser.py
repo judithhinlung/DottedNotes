@@ -577,8 +577,8 @@ class BrailleParser:
                 self._handle_measure_number(token)
             elif token.category == SymbolCategory.NUMERAL_REPEAT:
                 raise NumeralRepeatError(
-                    f"Line {token.line}: braille numeral repeats (BANA Sec. "
-                    "19) are not supported."
+                    f"Measure {self._next_measure_number} (line {token.line}): "
+                    "braille numeral repeats (BANA Sec. 19) are not supported."
                 )
             elif token.category == SymbolCategory.WORD_SIGN:
                 piece_started = bool(right_staff.measures or left_staff.measures)
@@ -704,7 +704,8 @@ class BrailleParser:
         """
         if self._triplet_group_total_ticks > 0:
             raise TripletDurationError(
-                "Triplet group left incomplete at a bar line: "
+                f"Measure {self._next_measure_number}: triplet group left "
+                "incomplete at a bar line: "
                 f"{self._triplet_group_total_ticks} of "
                 f"{self._triplet_group_smallest_ticks * 3} ticks accumulated. "
                 "A triplet group's notes must complete within a single "
@@ -772,7 +773,8 @@ class BrailleParser:
 
         if self._triplet_group_total_ticks > target:
             raise TripletDurationError(
-                "Triplet group overshoots its target duration: "
+                f"Measure {self._next_measure_number}: triplet group "
+                "overshoots its target duration: "
                 f"{self._triplet_group_total_ticks} ticks accumulated but "
                 f"the target is {target} (3x the smallest note value, "
                 f"{smallest} ticks, seen so far). Check for a missing "

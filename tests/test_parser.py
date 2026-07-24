@@ -642,7 +642,9 @@ def test_triplet_overshoot_raises_hard_error():
     # triplet sign, C eighth, D eighth, E quarter: 8+8=16 (target 24 so
     # far), then +16 = 32, overshooting the target implied by the
     # smallest note (8) — developer-confirmed this is a hard error.
-    with pytest.raises(TripletDurationError):
+    # Reports the measure number so a reader can find the spot in their
+    # own source file, not just an internal tick count.
+    with pytest.raises(TripletDurationError, match="Measure 1"):
         _parse('⠐⠆⠙⠑⠫')
 
 
@@ -668,7 +670,19 @@ def test_a_single_triplet_group_cannot_span_a_bar_line():
     from dottednotes.parser.braille_parser import TripletDurationError
 
     tokens = BrailleTokenizer().tokenize('⠐⠆⠹⠀⠑')  # sign, C quarter | D eighth
-    with pytest.raises(TripletDurationError):
+    # The group started in measure 1, so the error must report that
+    # measure, not measure 2 (where the offending bar line is reached).
+    with pytest.raises(TripletDurationError, match="Measure 1"):
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_triplet_error_reports_a_later_measure_number():
+    # Same shape as the incomplete-group case above, but preceded by two
+    # complete, unrelated measures -- confirms the reported measure number
+    # tracks real position in the piece, not just always "1".
+    tokens = BrailleTokenizer().tokenize('⠹⠀⠱⠀⠐⠆⠹⠀⠑')
+    from dottednotes.parser.braille_parser import TripletDurationError
+    with pytest.raises(TripletDurationError, match="Measure 3"):
         BrailleParser(tokens=tokens).parse()
 
 
@@ -699,7 +713,7 @@ def test_unclosed_triplet_group_at_end_of_input_raises():
     from dottednotes.parser.braille_parser import TripletDurationError
 
     tokens = BrailleTokenizer().tokenize('⠐⠆⠹')  # sign, C quarter — never closes
-    with pytest.raises(TripletDurationError):
+    with pytest.raises(TripletDurationError, match="Measure 1"):
         BrailleParser(tokens=tokens).parse()
 
 
@@ -1068,7 +1082,7 @@ def test_whole_measure_repeat_with_no_previous_measure_raises():
     from dottednotes.parser.braille_parser import MeasureRepeatError
 
     tokens = BrailleTokenizer().tokenize('⠶')
-    with pytest.raises(MeasureRepeatError):
+    with pytest.raises(MeasureRepeatError, match="Measure 1"):
         BrailleParser(tokens=tokens).parse()
 
 
@@ -1111,7 +1125,18 @@ def test_backward_numeral_repeat_raises_braille_parse_error():
 
     tokens = BrailleTokenizer().tokenize('⠼⠃')
     assert issubclass(NumeralRepeatError, BrailleParseError)
-    with pytest.raises(NumeralRepeatError, match="numeral repeat"):
+    with pytest.raises(NumeralRepeatError, match="Measure 1.*numeral repeat"):
+        BrailleParser(tokens=tokens).parse()
+
+
+def test_numeral_repeat_error_reports_a_later_measure_number():
+    # Two complete, unrelated measures before the numeral repeat sign --
+    # confirms the reported measure number tracks real position, not just
+    # always "1".
+    from dottednotes.parser.braille_parser import NumeralRepeatError
+
+    tokens = BrailleTokenizer().tokenize('⠹⠀⠱⠀⠼⠃')
+    with pytest.raises(NumeralRepeatError, match="Measure 3"):
         BrailleParser(tokens=tokens).parse()
 
 
