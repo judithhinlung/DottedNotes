@@ -483,15 +483,36 @@ class BrailleRenderer:
             return TranscriptionMode.ENSEMBLE
         return TranscriptionMode.SOLO
 
-    def _display_measure_number(self, measure: Measure, position: int) -> int:
-        """The number to show at `measure`'s margin/heading position.
+    @staticmethod
+    def _measure_span(measure: Measure) -> int:
+        """How many real BANA measures `measure` stands for. Always 1,
+        except a `_compress_multi_measure_rests`-merged measure (S11c-7):
+        one rendered Measure slot representing `multi_measure_count`
+        real, consecutive whole-measure rests collapsed into BANA Par.
+        5.3's compact sign."""
+        if (
+            len(measure.notes) == 1
+            and isinstance(measure.notes[0], Rest)
+            and measure.notes[0].multi_measure_count > 1
+        ):
+            return measure.notes[0].multi_measure_count
+        return 1
 
-        "auto" renumbers sequentially from 1 by `position` (the measure's
-        0-based index within its staff), ignoring whatever `Measure.number`
-        carries in from the source. "print_score" uses `Measure.number`
-        as-is -- the source parser's own numbering, however it was
-        assigned (see MEASURE_NUMBERING_MODES above for what that means
-        per input format).
+    def _display_measure_number(self, measures: list[Measure], position: int) -> int:
+        """The number to show at `measures[position]`'s margin/heading
+        position.
+
+        "auto" renumbers sequentially from 1, ignoring whatever
+        `Measure.number` carries in from the source -- not simply
+        `position + 1`: a `_compress_multi_measure_rests`-merged measure
+        earlier in `measures` (S11c-7) stands for more than one real
+        measure (`_measure_span`), so every measure after it must count
+        that span, not just its own single list slot, to keep numbering
+        real measures rather than rendered slots. "print_score" uses
+        `Measure.number` as-is -- the source parser's own numbering,
+        however it was assigned (see MEASURE_NUMBERING_MODES above for
+        what that means per input format) -- unaffected by list
+        compaction, since it's read straight off the surviving measure.
 
         TODO(lilypond-roundtrip): `to_lilypond()` doesn't currently emit
         anything (e.g. `\\set Score.currentBarNumber`) that would let
@@ -504,8 +525,8 @@ class BrailleRenderer:
         this renderer.
         """
         if self.measure_numbering == "auto":
-            return position + 1
-        return measure.number
+            return 1 + sum(self._measure_span(m) for m in measures[:position])
+        return measures[position].number
 
     def render(self, score: Score) -> str:
         if not score.staves:
@@ -513,6 +534,19 @@ class BrailleRenderer:
 
         import copy
         score = copy.deepcopy(score)
+
+        if len(score.staves) == 1:
+            # BANA Par. 5.3 (S11c-7): mandatory, unconditional multi-
+            # measure-rest compaction -- see _compress_multi_measure_rests's
+            # own docstring for why this needs to run only when there is
+            # exactly one staff (no cross-staff measure-index alignment to
+            # desync), regardless of whether that one staff ends up
+            # rendered as SOLO or as a single-staff ENSEMBLE layout
+            # (S10d-13). Runs before hairpin-terminator omission just
+            # below so a hairpin ending right before a rest run it merges
+            # is correctly seen as needing an "extensive_rest" (BANA Par.
+            # 22.3.3(b)) via multi_measure_count, not just is_full_measure.
+            self._compress_multi_measure_rests(score.staves[0])
 
         if self.omit_redundant_hairpin_terminators:
             self._omit_redundant_hairpin_terminators(score)
@@ -586,7 +620,7 @@ class BrailleRenderer:
                 # this margin number with the numeral sign (⠼), unlike a
                 # keyboard bar-over-bar parallel's margin number (BANA
                 # 29.3(b): "given without the numeric indicator").
-                num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx)))
+                num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(staff.measures, idx)))
                 prefix = (num_str + '⠀') if self.show_measure_numbers else ""
                 # Facsimile clef sign (BANA 4.1): stated once, right after
                 # the first measure's number, before that measure's own
@@ -611,7 +645,7 @@ class BrailleRenderer:
                     prev_note = prev_no_start
                 else:
                     lines.append(current_line)
-                    num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx)))
+                    num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(staff.measures, idx)))
                     prefix = (num_str + '⠀') if self.show_measure_numbers else ""
                     current_line = prefix + brl_start
                     prev_note = prev_start
@@ -659,7 +693,7 @@ class BrailleRenderer:
                 rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
                 lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
                 
-                m_num = self._display_measure_number(rh_staff.measures[idx], idx)
+                m_num = self._display_measure_number(rh_staff.measures, idx)
                 test_rh = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
                 test_lh = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
                 
@@ -676,7 +710,7 @@ class BrailleRenderer:
                 # Force at least one measure to avoid infinite loop
                 rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
                 lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
-                m_num = self._display_measure_number(rh_staff.measures[idx], idx)
+                m_num = self._display_measure_number(rh_staff.measures, idx)
                 best_rh_lines = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
                 best_lh_lines = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
                 fit_size = 1
@@ -891,7 +925,7 @@ class BrailleRenderer:
                 col = max_prefix_len + 1
                 for k in range(fit_size):
                     m = score.staves[0].measures[idx + k]
-                    num_str = "⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx + k)))
+                    num_str = "⠼" + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(score.staves[0].measures, idx + k)))
                     for char_idx, char in enumerate(num_str):
                         if col + char_idx < self.line_width:
                             heading_chars[col + char_idx] = char
@@ -1056,3 +1090,105 @@ class BrailleRenderer:
                         measures[k].notes = [MeasureRepeat(count=1, line=1)]
                 i = j
         return original_notes
+
+    def _compress_multi_measure_rests(self, staff: Staff) -> None:
+        """BANA Music Braille Code 2015, Par. 5.3: 2 or more consecutive
+        whole-measure rests always braille as one compact sign
+        (`Rest.to_braille()` branches on `multi_measure_count`), never one
+        whole-rest cell per measure -- mandatory transcription, not an
+        optional `compression_level`/`full_measure_repeat`-style shorthand,
+        so this always runs regardless of those settings. Confirmed with a
+        real-world repro (S11c-7): a 78-measure rest run in an extracted
+        orchestral part braille'd as 78 individual `⠍` cells instead of
+        BANA's `78m` count sign.
+
+        Mutates `staff.measures` in place, REMOVING the run's later
+        measures rather than keeping one list slot per real measure (unlike
+        `_compress_measure_repeats` above, which always keeps every slot --
+        a measure-repeat sign still occupies its own one measure, while
+        BANA's compact rest sign genuinely collapses N real measures into
+        one rendered unit with one margin number). `_display_measure_number`
+        accounts for the resulting shorter list in "auto" numbering mode via
+        `_measure_span`.
+
+        Only ever called (from `render()`) when `score` has exactly one
+        staff -- covering both a plain SOLO score and a single-staff
+        ENSEMBLE layout (S10d-13, an extracted orchestral part that still
+        needs BANA 33.4.2's "read upward" convention -- exactly the
+        real-world repro this ticket confirmed, a Piccolo/Flutes I/II part
+        with both a long rest run and ensemble-resolved interval chords).
+        A *multi*-staff PIANO/ENSEMBLE score is deliberately left alone:
+        `_render_piano`/`_render_ensemble` walk several staves in lockstep
+        by shared measure index (e.g. `rh_staff.measures[idx]`/
+        `lh_staff.measures[idx]`, or `score.staves[0].measures` as the
+        authority for every staff's system boundaries) -- removing
+        measures from just one staff's list would desync that alignment
+        for every other staff. Compacting a rest run that one staff shares
+        with real content in a piano/ensemble partner staff needs its own
+        design (rendering the compact sign across a multi-measure-wide
+        column span without shortening any staff's list), not attempted
+        here -- filed as a follow-up.
+        """
+        def is_mergeable(m: Measure) -> bool:
+            return (
+                len(m.notes) == 1
+                and isinstance(m.notes[0], Rest)
+                and m.notes[0].is_full_measure
+                and m.notes[0].pedal_sustain is None
+                and not m.text_markings
+                and not m.ending_numbers
+            )
+
+        measures = staff.measures
+        n = len(measures)
+        merged: list[Measure] = []
+        i = 0
+        while i < n:
+            run: list[Measure] = []
+            j = i
+            while j < n:
+                m = measures[j]
+                if not is_mergeable(m):
+                    break
+                if run and m.notes[0].duration != run[0].notes[0].duration:
+                    break
+                run.append(m)
+                if m.bar_line_type != 'measure_separator':
+                    # A special bar line (repeat/double bar) mid-run still
+                    # needs its own sign after the compact rest content --
+                    # keep it as the run's last member, then stop (mirrors
+                    # Staff.to_lilypond()'s equivalent lookahead pass).
+                    j += 1
+                    break
+                j += 1
+
+            if len(run) >= 2:
+                first_rest = run[0].notes[0]
+                last = run[-1]
+                compressed_rest = Rest(
+                    dots=first_rest.dots,
+                    category=first_rest.category,
+                    raw_brl=first_rest.raw_brl,
+                    duration=first_rest.duration,
+                    is_full_measure=True,
+                    multi_measure_count=len(run),
+                )
+                merged.append(Measure(
+                    number=run[0].number,
+                    notes=[compressed_rest],
+                    time_signature=run[0].time_signature,
+                    key_signature=run[0].key_signature,
+                    clef=run[0].clef,
+                    bar_line_type=last.bar_line_type,
+                    bar_line_fermata=last.bar_line_fermata,
+                    line=run[0].line,
+                ))
+                i = j
+            elif run:
+                merged.append(run[0])
+                i = j
+            else:
+                merged.append(measures[i])
+                i += 1
+
+        staff.measures = merged

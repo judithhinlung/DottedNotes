@@ -111,6 +111,38 @@ def test_full_measure_breve_rest_keeps_double_whole_rest_sign():
     assert r.to_braille() == '⠍⠅'
 
 
+def test_multi_measure_rest_two_or_three_uses_unspaced_repeated_whole_rests():
+    # BANA Music Braille Code 2015, Par. 5.3: "When a silence is prolonged
+    # for two or three measures, two or three successive whole rests are
+    # written unspaced" -- no numeral, just the whole-rest cell repeated.
+    r2 = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(4), is_full_measure=True, multi_measure_count=2)
+    assert r2.to_braille() == '⠍⠍'
+    r3 = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(4), is_full_measure=True, multi_measure_count=3)
+    assert r3.to_braille() == '⠍⠍⠍'
+
+
+def test_multi_measure_rest_four_or_more_uses_numeral_and_one_whole_rest():
+    # Par. 5.3: "When it extends for four or more measures, one whole
+    # rest is written, preceded by the appropriate number including the
+    # numeric indicator." Digits use the same literary-digit alphabet as
+    # measure numbers (⠼ + digit cells), confirmed against the real-world
+    # repro fixture (S11c-7): a 78-measure rest run in an extracted
+    # orchestral part.
+    r4 = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(4), is_full_measure=True, multi_measure_count=4)
+    assert r4.to_braille() == '⠼⠙⠍'  # NUMBER_SIGN + digit 4 (⠙) + whole rest
+    r78 = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(4), is_full_measure=True, multi_measure_count=78)
+    assert r78.to_braille() == '⠼⠛⠓⠍'  # digits 7 (⠛), 8 (⠓)
+
+
+def test_multi_measure_breve_rest_always_uses_numeral_form():
+    # Par. 5.3.1: "When consecutive measures of silence are shown by
+    # double whole rests, the two-cell breve sign must be used with the
+    # appropriate number" -- unconditional, unlike the plain whole-rest
+    # 2-3-unspaced shorthand above, even for a count of only 2.
+    r2 = Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(0), is_full_measure=True, multi_measure_count=2)
+    assert r2.to_braille() == '⠼⠃⠍⠅'  # digit 2 (⠃) + double-whole-rest sign
+
+
 def test_chord_to_braille():
     n1 = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(value=4, dots=0))
     n2 = Note(dots=frozenset(), category=None, raw_brl="", note_name="E", octave=4, duration=Duration(value=4, dots=0))

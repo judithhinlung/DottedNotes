@@ -490,7 +490,27 @@ class Rest(BrailleSymbol):
             # beat count/time signature (e.g. a 2/4 measure of rest is
             # NOT the half-rest sign) -- only a genuine breve (double
             # whole) rest in the source keeps its own sign.
-            cell = '⠍⠅' if self.duration.value == 0 else '⠍'
+            base_cell = '⠍⠅' if self.duration.value == 0 else '⠍'
+            if self.multi_measure_count > 1:
+                # Par. 5.3, "Multiple-Measure Rests": "When a silence is
+                # prolonged for two or three measures, two or three
+                # successive whole rests are written unspaced... When it
+                # extends for four or more measures, one whole rest is
+                # written, preceded by the appropriate number including
+                # the numeric indicator." Par. 5.3.1 makes the numeral
+                # form unconditional for a run of double whole (breve)
+                # rests instead ("must be used with the appropriate
+                # number"), regardless of count -- unlike the plain
+                # whole-rest 2-3 case, which has no numeral at all.
+                if self.duration.value == 0 or self.multi_measure_count >= 4:
+                    from dottednotes.bana_symbols import LITERARY_DIGITS
+                    digit_to_cell = {v: k for k, v in LITERARY_DIGITS.items()}
+                    digits = ''.join(digit_to_cell[int(d)] for d in str(self.multi_measure_count))
+                    cell = '⠼' + digits + base_cell
+                else:
+                    cell = base_cell * self.multi_measure_count
+            else:
+                cell = base_cell
         elif self.duration.value == 0:
             cell = '⠍⠅'
         elif self.duration.value in (1, 16):
