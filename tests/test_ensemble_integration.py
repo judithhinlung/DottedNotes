@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from dottednotes.parser.ensemble_parser import EnsembleParser
 from dottednotes.parser.input_pipeline import BRLInputPipeline
 
@@ -49,6 +51,37 @@ def test_bartok_smoke_parses_without_crashing():
     for staff, expected_first_word in zip(score.staves, expected_first_words):
         assert staff.name.split()[0] == expected_first_word
         assert len(staff.measures) == 247
+
+def test_tchaikovsky_quartet_header_is_found_and_parsing_reaches_real_music():
+    """Tchaikovsky_String_Quartet_No_1_with_header.brf originally had no
+    genuine BANA Sec. 33.2 instrument-list header at all -- it went
+    straight from the title into per-line abbreviation-prefixed music
+    (v1'/v2'/vl'/vc'). Before the bounded instrument-list scan
+    (EnsembleParser.parse()), the old unbounded loop wandered deep into
+    the piece and silently produced a single fake staff with a collapsed
+    whole-piece rest, dropping 3 of the 4 real parts with no error at all.
+
+    The fixture now has a real Sec. 33.2 header added (Violin I/II, Viola,
+    Violoncello, using Table 29's verified abbreviations), so parsing
+    correctly finds it and proceeds into real per-instrument content --
+    this test locks that in. Full parsing still doesn't succeed, but for
+    an entirely separate, pre-existing reason unrelated to this fixture's
+    header: the cello part's pizzicato ostinato uses a genuine BANA Sec.
+    19 numeral-repeat sign (`>vc'_:99e.c7.ce_8e9c7 7`, the trailing "7"),
+    a real BANA feature this codebase doesn't implement yet
+    (`NumeralRepeatError`'s own docstring: "layout-specific, involve
+    parsing complexity this parser does not implement" -- a documented
+    scope boundary, not a bug). Asserting that specific, later error
+    (rather than the old "no instrument list header found" one) proves
+    the header bug is fixed without claiming full parsing works.
+    """
+    from dottednotes.parser.braille_parser import NumeralRepeatError
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / "Tchaikovsky_String_Quartet_No_1_with_header.brf")
+    with pytest.raises(NumeralRepeatError, match="numeral repeats"):
+        EnsembleParser().parse(text)
+
 
 # Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf and
 # Faure_Gabriel_Morceau_de_Concours.brf have been removed from tests/fixtures/

@@ -130,6 +130,18 @@ def _parse_line(line: str) -> InstrumentInfo | None:
         return None
 
     abbreviation, part_number, sub_number = _decode_abbreviation(abbrev_cells)
+    if not abbreviation or '?' in abbreviation:
+        # A real BANA abbreviation is always clean letters (+ optional
+        # digit), per Sec. 33.2.1 ("limited to two or three letters").
+        # An empty or '?'-containing decode (decode_literary_braille's
+        # placeholder for a cell it can't read as a letter) means `end`
+        # actually landed on a stray dot-3 cell inside real musical
+        # content rather than a genuine abbreviation -- e.g. a per-line
+        # abbreviation prefix (">v1'") followed later on the same line by
+        # an unrelated word-sign expression (a dynamic like "dolce"),
+        # whose own end-word-sign this backward scan can otherwise latch
+        # onto. Not a real instrument line.
+        return None
     return InstrumentInfo(
         name=name,
         abbreviation=abbreviation,

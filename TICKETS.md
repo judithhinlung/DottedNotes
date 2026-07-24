@@ -7219,7 +7219,7 @@ to be rediscovered.
 **Sprint 11c: BRF Reformatting & Malformed Input Robustness (future sprint)**
 - [ ] S11c-1: Add test cases and validator rules for malformed .brf music files, such as having measure numbers or notes in the left margins when the score is an ensemble score.
 - [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
-- [ ] S11c-7: Teach `BrailleRenderer`/`Rest.to_braille()` to emit BANA's compact multi-measure-rest sign (Table 18) for a run of consecutive full-measure rests, instead of one whole-rest cell per measure -- found while working S10b-7; affects BRF round-trip, LilyPond import, and MusicXML import equally, not source-specific. Needs a design decision on how a merged run interacts with `_render_solo`/`_render_piano`/`_render_ensemble`'s per-measure line-packing and measure-number prefixing, alongside the existing `_compress_articulations`/`_compress_measure_repeats` passes.
+- [ ] S11c-7: Teach `BrailleRenderer`/`Rest.to_braille()` to emit BANA's compact multi-measure-rest sign (Table 18) for a run of consecutive full-measure rests, instead of one whole-rest cell per measure -- found while working S10b-7; affects BRF round-trip, LilyPond import, and MusicXML import equally, not source-specific. Needs a design decision on how a merged run interacts with `_render_solo`/`_render_piano`/`_render_ensemble`'s per-measure line-packing and measure-number prefixing, alongside the existing `_compress_articulations`/`_compress_measure_repeats` passes. **Confirmed with a real-world repro:** the developer extracted the Piccolo/Flutes I/II part from `tests/fixtures/Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl` (`dottednotes convert ... --part 1 out.brl`) and found a 78-measure rest run printed as 78 individual `⠍` cells instead of BANA's consolidated `78m` count sign -- the same underlying gap, now also surfacing through the newer part-extraction feature (S10d-12/S10d-13), confirmed independently reproducible via `PYTHONPATH=src python3 -m dottednotes.cli convert tests/fixtures/Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl /tmp/out.brl --part 1`.
 
 **Sprint 12: OMR Import via Audiveris (shelved 2026-07-19 -- see tickets)**
 - [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step (CLI + web backend)
@@ -8323,6 +8323,168 @@ target.
 - [ ] Web UI dropdown dynamically changes links based on selection.
 - [ ] CLI options `--list-parts` and `--part` are fully functional.
 - [ ] All tests pass without regressions.
+
+---
+
+### [ ] S10d-13: Extracted parts' braille re-export silently misreads ensemble-resolved chord/interval-shorthand content
+
+**Why:** BANA §33.4.2 states that intervals and in-accords are read
+*upward* in every part of an ensemble score, overriding the normal
+clef-based rule used in solo braille (treble/alto → downward, bass/tenor
+→ upward). `BrailleParser._is_ensemble`
+(`src/dottednotes/parser/braille_parser.py`) correctly implements this at
+parse time -- proven by two existing tests parsing the *identical* braille
+`⠐⠹⠬` (C4 + a 3rd-interval sign) to two different real pitches depending
+on context: **A3** (3rd below) via
+`test_no_instruments_keeps_clef_based_direction` and **E4** (3rd above)
+via `test_ensemble_treble_clef_interval_reads_upward`
+(both `tests/test_parser.py`). The resulting `Note`/`Chord` objects always
+carry the correct absolute pitch.
+
+The bug is downstream, in braille re-export. `Score.extract_part()`
+(`src/dottednotes/models/score.py`) preserves those correct pitches, but
+always wraps the extracted staff in a plain `Score(...)`, never an
+`OrchestraScore` -- regardless of the original score's type.
+`BrailleRenderer._detect_transcription_mode()`
+(`src/dottednotes/renderers/braille_renderer.py`) picks SOLO vs. ENSEMBLE
+layout purely from `isinstance(score, OrchestraScore)` or
+`len(score.staves) > 2`, so an extracted (always single-staff, always
+plain `Score`) part **always** renders as SOLO -- with no instrument-list
+header or other cue telling a reader "read intervals upward here." A
+blind reader of the exported `.brf` will apply the normal solo/clef-based
+convention instead. Meanwhile `Chord.to_braille()`
+(`src/dottednotes/models/chord.py`) computes its interval sign and
+octave-mark override purely from a self-referential comparison against
+the *actual* resolved pitch (`descending = self.notes[1]._midi_pitch() <
+self.notes[0]._midi_pitch()`, then `calc_octave` derived from that same
+flag) -- which is tautological: `calc_octave` always equals the real
+note's octave by construction, so the "does this interval need an
+explicit octave-mark override" check can never trigger, regardless of
+whether the reading convention a solo-context reader would actually apply
+matches how the pitch was resolved.
+
+**Net effect:** plain melodic notes in an extracted part are unaffected
+(always fully disambiguated via explicit/tracked octave marks). But any
+chord/interval-shorthand content -- double/triple stops, routine in
+string parts, exactly the case S5b-3 built ensemble-upward handling for
+-- will be silently misread by a braille reader applying normal solo
+conventions to the exported file: the reconstructed pitch comes out as a
+full interval-and-direction flip away from the intended note, not merely
+off by an octave. LilyPond (`.ly`) output of extracted parts is
+unaffected -- LilyPond pitch names are absolute/unambiguous, so this
+direction ambiguity never surfaces there.
+
+**Steps:**
+1. Confirm scope: does this also affect `InAccord` voice *order* (BANA
+   §33.4.2 covers both intervals and in-accords), or is in-accord safe
+   because each voice's notes are written out in full with their own
+   explicit octave tracking (no shorthand-direction ambiguity) -- verify
+   against `InAccord.to_braille()` (`src/dottednotes/models/in_accord.py`)
+   before assuming voice order is purely cosmetic.
+2. Decide the fix shape -- candidates to evaluate:
+   (a) track on `Chord` (and any affected `InAccord` path) whether its
+   interval was resolved under the ensemble-upward rule vs. the
+   clef-based rule at parse time, and have `Chord.to_braille()` compare
+   that against the *actual* render-time context (solo vs. ensemble)
+   passed down from `BrailleRenderer`, forcing an explicit octave-mark
+   override whenever they disagree, rather than deriving purely from the
+   tautological self-comparison it does today; or
+   (b) make `Score.extract_part()`/`BrailleRenderer` refuse to silently
+   downgrade to SOLO layout when the extracted staff contains
+   ensemble-resolved shorthand, and instead force disambiguating octave
+   marks on every interval note in that case.
+3. Add regression tests: parse an ensemble score containing a string
+   double-stop (interval-shorthand `Chord`) built under the
+   ensemble-upward rule, extract that part, render to `.brf`, and assert
+   the interval note now carries whatever disambiguation the fix adds
+   (e.g. an explicit octave mark) so re-parsing the exported `.brf` in
+   isolation reconstructs the original pitch.
+4. No LilyPond-side changes needed -- confirmed unaffected.
+
+**Definition of Done:**
+- [ ] Scope decision recorded for `InAccord` voice order (affected or
+      not, with reasoning)
+- [ ] Extracted-part braille export of chord/interval-shorthand content
+      round-trips to the correct pitch when re-parsed standalone
+- [ ] Regression tests added per Steps 3
+- [ ] `pytest tests/` passes with no regressions
+
+---
+
+### [ ] S10d-14: BANAValidator's title-centering and signature-indentation checks (S11c-2) use ASCII space instead of braille blank, so they never fire against real file input
+
+**Why:** Found while confirming that round-tripping a `.brf` file through
+`EnsembleParser.parse()` -> `Score.to_braille()` fixes the errors BANA's
+own report surfaces (line-length overflow, wrong guide-dot cell -- both
+confirmed fixed by round-tripping, see S10d-13's neighboring investigation
+and the `braille_renderer.py`/`brf_writer.py` ASCII-space fix already
+landed in this same session). While verifying that fix, `BANAValidator.
+_validate_page_layout()` (`src/dottednotes/validation/validator.py`) was
+found to check line indentation with `.lstrip(' ')`/`.rstrip(' ')`
+(lines ~815-816, ~851) -- literal ASCII space (U+0020), not the actual
+braille blank cell (`⠀`, U+2800) that real braille text uses.
+
+Confirmed empirically: a real `.brf` fixture loaded through
+`BRLInputPipeline` (`tests/fixtures/fengyang_flower_drum.brf`) already
+normalizes its indentation to `⠀` (U+2800), never ASCII space --
+`BRLInputPipeline._ascii_to_unicode()` maps the source file's ASCII-braille
+blank cell to the real Unicode braille blank, not a literal space
+character. This means `_validate_page_layout()`'s title-centering and
+signature-indentation checks (`l_spaces = len(title_line) -
+len(title_line.lstrip(' '))` and the signature-line equivalent) have
+likely **never correctly measured indentation against real file-sourced
+`raw_brl_text`** -- `.lstrip(' ')` finds nothing to strip against `⠀`
+padding, so `l_spaces` always computes as 0, regardless of the line's
+actual indentation.
+
+Before this session's `braille_renderer.py`/`brf_writer.py` fix (which
+corrected ~12 places that were incorrectly emitting literal ASCII spaces
+instead of `⠀` for title/signature-line padding), this bug was masked for
+the specific case of validating freshly-*rendered* output: the renderer's
+own bug happened to also produce ASCII space, accidentally matching the
+validator's (wrong) expectation. Now that the renderer correctly emits
+`⠀`, that accidental agreement is gone -- running `--report` against
+freshly-converted output will presumably misjudge these two checks (most
+likely always reporting "not centered"/"not indented" false positives,
+since `l_spaces`/`r_spaces` will read as 0 for correctly-padded output).
+The S9b-4 line-length rule's break-point *suggestion* logic
+(`stripped_line.split(' ')`, used only to propose where to break an
+over-length line, not to detect the overflow itself) has the same
+ASCII-space assumption and the same fix shape, though it's lower severity
+since a wrong/missing suggestion doesn't affect whether the overflow is
+correctly detected.
+
+**Steps:**
+1. In `src/dottednotes/validation/validator.py`'s `_validate_page_layout()`,
+   change the title-centering (`l_spaces`/`r_spaces` via `.lstrip(' ')`/
+   `.rstrip(' ')`) and signature-indentation (`l_spaces` via `.lstrip(' ')`)
+   checks to measure against `'⠀'` instead of `' '`.
+2. Same fix for the S9b-4 line-length rule's break-point suggestion
+   (`' ' in stripped_line` / `stripped_line.split(' ')`, near the top of
+   `validate()`) -- lower priority than Step 1, but the same bug.
+3. Update `tests/test_layout_validation.py`'s hand-constructed
+   `raw_brl_text`/`brf_text` fixtures, which currently embed literal ASCII
+   spaces directly as Python string literals (bypassing
+   `BRLInputPipeline` normalization entirely) rather than the `⠀` real
+   braille text actually uses -- decide whether to keep them as
+   direct-tokenizer-input strings (and just switch their padding
+   characters to `⠀` to match reality) or route them through
+   `BRLInputPipeline` for a more end-to-end-realistic test.
+4. Re-verify against a real fixture: parse `fengyang_flower_drum.brf`,
+   render it via `Score.to_braille()`, and confirm `BANAValidator`'s S11c-2
+   title-centering/signature-indentation checks now correctly pass (or
+   correctly flag genuine violations) against that real, freshly-rendered
+   output -- not just the hand-typed unit-test strings.
+
+**Definition of Done:**
+- [ ] Title-centering and signature-indentation checks measure indentation
+      against `⠀`, not `' '`
+- [ ] S9b-4's break-point suggestion updated to match (lower priority)
+- [ ] `test_layout_validation.py` fixtures updated to reflect real braille
+      text, not literal ASCII spaces
+- [ ] Verified against a real round-tripped fixture (Step 4), not just
+      unit-test strings
+- [ ] `pytest tests/` passes with no regressions
 
 
 

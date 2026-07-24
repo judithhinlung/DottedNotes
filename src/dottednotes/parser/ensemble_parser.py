@@ -10,6 +10,9 @@ from ..bana_symbols import (
     LOWER_DIGIT_CELLS,
     LITERARY_DIGITS,
     NUMBER_SIGN,
+    KEY_SIGNATURE_CELLS,
+    TIME_SIGNATURE_CELLS,
+    TABLE_29_ENGLISH,
 )
 from ..exceptions import BrailleParseError
 from ..models.instrument import InstrumentInfo, InstrumentFamily
@@ -148,22 +151,133 @@ def _line_has_word_sign(line: str) -> bool:
     return any(t.category == SymbolCategory.WORD_SIGN for t in tokens)
 
 
-def has_ensemble_header(text: str) -> bool:
-    """True if `text` (normalized Unicode braille) contains a BANA §33.2
-    instrument-list header line. Used to dispatch between EnsembleParser
-    and the solo BrailleParser/tokenizer path (see cli.py).
+_SIGNATURE_CELLS = tuple(KEY_SIGNATURE_CELLS) + tuple(TIME_SIGNATURE_CELLS)
 
-    Both checks below are required, for the same two independent
-    false-positive reasons documented on EnsembleParser.parse()'s own
-    instrument-collection loop -- this dispatch decision must not be looser
-    than that loop's, or a line can slip past here (e.g. a title line like
-    "Children's Piece", whose apostrophe shares END_WORD_SIGN's dot pattern)
-    only to have the whole file misrouted to EnsembleParser."""
-    for line in text.splitlines():
+
+def _is_music_heading_line(line: str) -> bool:
+    """True if `line` contains a key- or time-signature cell sequence.
+
+    This is the one unambiguous structural signal of BANA Sec. 1.7's Music
+    Heading (tempo/mood text, optional metronome, then key and time
+    signature together) -- a key/time signature can only ever appear
+    there, never in Sec. 1.4's preliminary/title-page text. Deliberately a
+    raw substring check rather than routing through `BrailleTokenizer`:
+    the tokenizer's bare-capital-indicator literary-text path (used for
+    tempo text not wrapped in a word sign, e.g. a plain "Moderato e
+    simplice") only terminates on a literary period or newline, so it
+    swallows a same-line, unseparated key/time signature into the
+    preceding WORD_SIGN token instead of emitting it as its own token --
+    a raw scan sidesteps that without touching the shared tokenizer.
+    """
+    return any(cell in line for cell in _SIGNATURE_CELLS)
+
+
+def _find_instrument_list(lines: list[str]) -> tuple[list[str], int]:
+    """Scan `lines` for a BANA Sec. 33.2 instrument-list header, bounded to
+    the region between the title (Sec. 1.4) and the Music Heading (Sec.
+    1.7). Sec. 33.2: "Immediately following the title, a two-column table
+    lists all of the instruments" -- a real header, if present, is a short
+    block right after the title, never something found deep inside actual
+    measures. Bounding the search this way (rather than scanning the whole
+    file for anything that merely looks header-shaped) is what lets a
+    headerless ensemble score be reliably detected as such, instead of
+    accidentally matching scattered mid-piece lines that share a header
+    entry's word-sign-wrapped-abbreviation shape (a per-line abbreviation
+    prefix followed later on the same line by an unrelated word-sign
+    expression, e.g. a dynamic like "dolce", can otherwise look like one).
+
+    Returns `(inst_lines, i)`: the collected header lines (empty if none
+    found) and the index of the first unconsumed line in `lines` -- either
+    right after a genuine header, or at the Music Heading line itself if
+    no header was found (left unconsumed for the caller's own heading
+    handling).
+
+    Both checks in the loop's match condition are required, for two
+    independent false-positive reasons:
+     - _line_has_word_sign (tokenizer-based) rules out a hand-sign line
+       (⠨⠜/⠸⠜) whose second cell is the same dot pattern as WORD_SIGN,
+       which _parse_instrument_line's raw substring search alone can't
+       tell apart from a real word-sign (S7-2).
+     - _parse_instrument_line rules out a free-text title/attribution line
+       above the real instrument list, which also tokenizes as WORD_SIGN
+       (any literary text does) but doesn't parse as a genuine
+       NAME...ABBREV entry -- found via
+       Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl, whose title
+       line was getting collected as a fake "instrument" (S5b-9).
+    """
+    inst_lines: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         m_num, _ = extract_measure_number(line)
-        if m_num is None and _line_has_word_sign(line) and _parse_instrument_line(line) is not None:
-            return True
+        if (
+            m_num is None
+            and _line_has_word_sign(line)
+            and _parse_instrument_line(line) is not None
+        ):
+            inst_lines.append(line)
+        elif inst_lines:
+            break
+        elif _is_music_heading_line(line):
+            break
+        i += 1
+    return inst_lines, i
+
+
+_KNOWN_ABBREVIATION_PREFIXES = {
+    re.sub(r'[0-9]+$', '', abbrev) for abbrev in TABLE_29_ENGLISH.values()
+}
+
+
+def _has_known_abbreviation_prefixes(text: str) -> bool:
+    """True if at least two lines in `text` begin (after margin blanks)
+    with a per-line instrument-abbreviation prefix matching a known BANA
+    Table 29 abbreviation (e.g. "v1'", "vl'"), ignoring any part number.
+
+    This is a narrow, low-false-positive signal that `text` is BANA §33.4
+    ensemble body content -- a per-line abbreviation prefix followed by
+    music, repeated system after system -- even when no §33.2 header is
+    present. Used so a score like a headerless "open score" string
+    quartet still routes to `EnsembleParser` (whose `parse()` then raises
+    a clear, BANA-cited error naming the missing header) instead of being
+    silently misrouted to the solo `BrailleParser`, which would misparse
+    it differently. Requires *two distinct* known abbreviations (not just
+    one) so a single incidental line elsewhere in solo content can't
+    trigger it -- confirmed against `children_s_piece.brf` and
+    `fingering_melody.brf` (no match) and the existing
+    `test_ensemble_parser_raises_clear_error_on_hand_sign_only_text`
+    input (no match, since it has no genuine abbreviations at all).
+    """
+    seen: set[str] = set()
+    for line in text.splitlines():
+        abbrev_cells, _ = extract_line_abbreviation(line)
+        if not abbrev_cells:
+            continue
+        prefix, _digits = decode_instrument_abbreviation(abbrev_cells)
+        if prefix in _KNOWN_ABBREVIATION_PREFIXES:
+            seen.add(prefix)
+            if len(seen) >= 2:
+                return True
     return False
+
+
+def has_ensemble_header(text: str) -> bool:
+    """True if `text` (normalized Unicode braille) looks like a BANA §33
+    ensemble score -- either a genuine §33.2 instrument-list header, or
+    (its header missing) recognizable per-line instrument-abbreviation
+    prefixes in the body. Used to dispatch between EnsembleParser and the
+    solo BrailleParser/tokenizer path (see cli.py): either way, this must
+    route to EnsembleParser, whose `parse()` raises a clear, BANA-cited
+    error if the header itself turns out to be missing -- never silently
+    fall through to the solo parser, which would misparse ensemble body
+    content in a different, equally silent way. The header-shaped check
+    shares `_find_instrument_list`'s bounded scan with
+    `EnsembleParser.parse()` itself, so it's never looser than what
+    `parse()` will actually find."""
+    inst_lines, _ = _find_instrument_list(text.splitlines())
+    if inst_lines:
+        return True
+    return _has_known_abbreviation_prefixes(text)
 
 
 def decode_instrument_abbreviation(cells: str) -> tuple[str, list[str]]:
@@ -544,37 +658,32 @@ class EnsembleParser:
             normalized = text
 
         lines = normalized.splitlines()
-        inst_lines = []
-        i = 0
-        while i < len(lines):
-            line = lines[i]
-            m_num, _ = extract_measure_number(line)
-            # Both checks are required, for two independent false-positive
-            # reasons:
-            #  - _line_has_word_sign (tokenizer-based) rules out a hand-sign
-            #    line (⠨⠜/⠸⠜) whose second cell is the same dot pattern as
-            #    WORD_SIGN, which _parse_instrument_line's raw substring
-            #    search alone can't tell apart from a real word-sign (S7-2).
-            #  - _parse_instrument_line rules out a free-text title/
-            #    attribution line above the real instrument list, which
-            #    also tokenizes as WORD_SIGN (any literary text does) but
-            #    doesn't parse as a genuine NAME...ABBREV entry -- found via
-            #    Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl, whose
-            #    title line was getting collected as a fake "instrument",
-            #    then stopping this loop at the next blank line before ever
-            #    reaching the real instrument list below it.
-            if (
-                m_num is None
-                and _line_has_word_sign(line)
-                and _parse_instrument_line(line) is not None
-            ):
-                inst_lines.append(line)
-            elif inst_lines:
-                break
-            i += 1
+        inst_lines, i = _find_instrument_list(lines)
 
         if not inst_lines:
-            raise BrailleParseError("No instrument list header found in ensemble score.")
+            hint = ""
+            seen: list[str] = []
+            for line in lines[i:]:
+                abbrev_cells, _ = extract_line_abbreviation(line)
+                if not abbrev_cells:
+                    continue
+                prefix, digits = decode_instrument_abbreviation(abbrev_cells)
+                if prefix in _KNOWN_ABBREVIATION_PREFIXES:
+                    display = prefix + "".join(digits)
+                    if display not in seen:
+                        seen.append(display)
+                if len(seen) >= 8:
+                    break
+            if seen:
+                hint = f" Found per-line abbreviation prefixes: {', '.join(seen)}."
+            raise BrailleParseError(
+                "No instrument list header found before the music heading "
+                '(BANA Music Braille Code 2015, Sec. 33.2: "Immediately '
+                "following the title, a two-column table lists all of the "
+                'instruments included in the score."). Add the '
+                "instrument-list header to the source file before "
+                "converting." + hint
+            )
 
         instruments = parse_instrument_list("\n".join(inst_lines))
 

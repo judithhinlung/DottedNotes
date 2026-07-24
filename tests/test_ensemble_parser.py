@@ -419,3 +419,34 @@ def test_ensemble_parser_skips_title_line_before_instrument_list():
     )
     score = EnsembleParser().parse(raw)
     assert [s.name for s in score.staves] == ['Flute', 'Violin']
+
+
+def test_ensemble_parser_raises_clear_error_for_headerless_open_score():
+    # A real-world "open score" quartet transcription (found via
+    # Tchaikovsky_String_Quartet_No_1_with_header.brf) can have title-page
+    # text and a music heading (tempo + key/time signature) but never
+    # include a genuine BANA Sec. 33.2 instrument-list header, going
+    # straight into per-line abbreviation-prefixed music instead. This
+    # must be detected and reported clearly, not silently misparsed by
+    # letting the old unbounded instrument-collection loop wander into the
+    # music body and mistake scattered per-line abbreviation prefixes
+    # (each followed on its own line only by notes, no embedded second
+    # word-sign expression here) for header entries.
+    from dottednotes.exceptions import BrailleParseError
+
+    title_line = '⠠⠞⠊⠞⠇⠑'  # bare prose title, no header anywhere below it
+    raw = (
+        title_line + '\n'
+        '\n'
+        '⠠⠍⠕⠙⠑⠗⠁⠞⠕⠀⠩⠩⠼⠉⠲\n'  # "Moderato" + 2 sharps + 3/4 time (the Music Heading)
+        '⠀⠀⠀⠀⠼⠁\n'
+        '⠜⠧⠂⠄⠐⠹⠱⠫\n'
+        '⠜⠧⠆⠄⠐⠹⠱⠫\n'
+        '⠜⠧⠇⠄⠐⠹⠱⠫\n'
+        '⠜⠧⠉⠄⠸⠹⠱⠫\n'
+    )
+    assert has_ensemble_header(raw) is True  # still routes to EnsembleParser
+    with pytest.raises(BrailleParseError, match="No instrument list header found") as exc:
+        EnsembleParser().parse(raw)
+    assert "Sec. 33.2" in str(exc.value)
+    assert "v1, v2, vl, vc" in str(exc.value)
