@@ -6098,6 +6098,56 @@ This also explains why no existing test caught it: `test_vocal.py`'s `to_lilypon
 
 ---
 
+### [ ] S8b-14: Support full UEB Grade 1 (uncontracted) punctuation, numbers, and accent modifiers in lyric parsing (BANA §35.1.1)
+
+**Why:** BANA Music Braille Code 2015 §35.1.1 specifies that vocal lyrics are written in "uncontracted Unified English Braille" (Grade 1) by default. The sole lyric decoder, `parse_lyrics()` (`src/dottednotes/parser/ensemble_parser.py:501-599`, used both directly by `EnsembleParser` and by `strophic_song_parser.py`), only recognizes the A-Z alphabet, single/double-letter capitalization, the hyphen, the word-repetition sign, and two punctuation marks hardcoded as `_LYRIC_PUNCTUATION = {'1': ',', '4': '.'}` (`ensemble_parser.py:495-498`) — comma and period, chosen because they happen to share dot patterns with the "lower digit cell" slots already in `ASCII_TO_DOTS`. Everything else UEB Grade 1 requires — the numeric indicator and digits, question mark, exclamation point, apostrophe, and quotation marks — is unimplemented.
+
+This isn't just a missing-feature gap: unrecognized cells are currently **silently mis-decoded**, not rejected (`ensemble_parser.py:566-572` falls through to treating any unmatched cell as an ordinary lowercase letter via `ASCII_TO_DOTS`). A real UEB question-mark cell would silently become `"8"` in the output lyric text; a number-sign cell would become a literal `"#"` followed by letters instead of digits. Any lyric with real-world punctuation beyond a comma or period currently produces wrong, not missing, text — with no error or warning to signal it.
+
+The existing strophic/vocal fixtures (`vocal_test.brf`/`.ly`, `strophic_song_test.brf`/`.ly`, per `tests/fixtures/README.md`) only exercise letters, hyphenated syllables, single-letter capitalization, commas, and periods — the exact subset already implemented — so extending punctuation/number coverage should be additive and shouldn't change either fixture's decoded output.
+
+Originally scoped out: accented letters and foreign-language text
+(§35.1.1(d)/(e)) and contracted Grade 2 braille for chants/hymnals/school
+materials (§35.1.1(b)/(c)). Per developer direction during implementation,
+accent modifiers for foreign words in an English-language lyric
+(§35.1.1(d), i.e. UEB's own accent-modifier signs, Section 4.2) were pulled
+into scope alongside punctuation and numbers. Grade 2 contractions and full
+foreign-language braille codes (§35.1.1(e)/UEB §13.6, which require a
+different braille alphabet *per language*, sourced from *World Braille
+Usage*) remain explicitly out of scope.
+
+**Steps:**
+1. Before writing any dot-pattern constants, confirm the exact UEB Grade 1 cells for the numeric indicator + digits 0-9, question mark, exclamation point, apostrophe, quotation marks, and the Section 4.2 accent-modifier signs against *The Rules of Unified English Braille* (per CLAUDE.md's "never guess dot patterns" policy — these are literary UEB signs, not in `bana_symbols.py`'s BANA music tables, so they need the same developer-confirmation treatment as any other new symbol).
+2. Extend `parse_lyrics()` (`ensemble_parser.py`) to recognize each confirmed cell, replacing the ad hoc `_LYRIC_PUNCTUATION` dict with a more complete UEB Grade 1 punctuation/number/accent-modifier table.
+3. Make the fallback case (currently a silent mis-decode at `ensemble_parser.py:566-572`) raise a `BrailleParseError` for any cell still unrecognized after this change, instead of guessing — consistent with the project's "no silent failures" rule (CLAUDE.md Key Design Decision 7).
+4. Add unit tests to `tests/test_vocal.py` for each newly supported sign (numbers, question mark, exclamation point, apostrophe, quotation marks, accent modifiers), plus a test confirming an unrecognized cell now raises rather than silently mis-decoding.
+5. Re-run `pytest tests/` and confirm `vocal_test.brf`/`strophic_song_test.brf` and their ground-truth `.ly` files are unaffected, since neither fixture uses any of the newly supported signs.
+6. Check whether `docs/bana_reference.md` documents the lyrics-decoding subset; if so, update it (it may currently cover only music signs, not literary UEB).
+
+**Implementation note:** Extending `parse_lyrics()`'s numeral-sign handling
+surfaced a real conflict with `clean_and_parse_verse_number()`/
+`extract_stanza_prefix()` (same file), which parsed the *old*, untranslated
+`"#" + raw letter` text `parse_lyrics()` used to leave behind for
+verse-number-prefix lines. Once `parse_lyrics()` started translating `#`
+sequences into real digit text itself, that pipeline broke on the
+bracketed-verse-number fixture (`strophic_song_test.brf`, S8b-11) — its
+`⠶` bracket cell is BANA's `MEASURE_REPEAT_CELL`/`CHORD_PAREN_CELL`
+(`bana_symbols.py`), reused here as a verse-number bracket, and my
+"raise on any unrecognized cell" step (#3 above) hit it before it ever
+reached the numeral logic. Fixed by giving `⠶` an explicit literary-context
+rendering (`'['`/`']'`, disambiguated by word-start position, matching this
+file's existing `.strip('.:,;()[]')` convention) rather than raising on it
+or leaving it as an untranslated `'7'` that would collide with real digit 7.
+
+**Definition of Done:**
+- [ ] `parse_lyrics()` correctly decodes UEB Grade 1 numbers, question mark, exclamation point, apostrophe, quotation marks, and Section 4.2 accent modifiers, with dot patterns confirmed against *The Rules of Unified English Braille*.
+- [ ] Unrecognized cells raise a plain-text `BrailleParseError` instead of silently mis-decoding.
+- [ ] New unit tests cover each newly supported sign and the new error path.
+- [ ] Existing `vocal_test.brf` and `strophic_song_test.brf` fixtures still parse and compile identically (no regression).
+- [ ] `pytest tests/` passes.
+
+---
+
 # Sprint 9: Reverse Direction — LilyPond to BRF
 
 Estimated time: 1.5–2 weeks.

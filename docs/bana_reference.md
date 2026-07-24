@@ -279,6 +279,96 @@ new cell families (checking for collisions with existing overloaded cells,
 per this file's usual caution) is unscoped follow-up work, not covered by
 Sprint 10b/10c.
 
+## Vocal Lyrics — UEB Grade 1 Literary Text (Sprint 8b, S8b-14)
+
+BANA §35.1.1 specifies that vocal lyrics are written in uncontracted
+Unified English Braille (UEB Grade 1), not BANA's own music-sign tables.
+`parse_lyrics()` (`parser/ensemble_parser.py`) decodes this UEB Grade 1
+subset. Dot patterns below are digitized directly from the actual Unicode
+braille glyphs in *Rules of Unified English Braille*, 3rd ed. 2024
+(iceb.org), converted through this repo's own `ASCII_TO_DOTS` -- not
+guessed, per CLAUDE.md's rule for new symbols.
+
+### Punctuation (UEB Section 7)
+
+Comma/period/semicolon/colon/exclamation reuse the same one-cell dot
+patterns as `LOWER_DIGIT_CELLS` 1-6 (UEB 7.1's own convention: a digit-shaped
+cell reads as punctuation outside a numeral-sign context, and lyrics are
+always literary prose):
+
+| Sign | Dots      | ASCII | UEB rule |
+|------|-----------|-------|----------|
+| ,    | 2         | `1`   | 7.1 |
+| ;    | 2,3       | `2`   | 7.1 |
+| :    | 2,5       | `3`   | 7.1 |
+| .    | 2,5,6     | `4`   | 7.1 |
+| !    | 2,3,5     | `6`   | 7.1 |
+| '    | 3         | `'`   | 7.6.6 (apostrophe / nondirectional single quote) |
+
+Quotation marks (UEB 7.6): the one-cell double quote (dots 2,3,6, ASCII
+`8`) is a question mark unless it's the first cell of a word, per UEB 7.6.7
+-- approximated here as "nothing accumulated into the current word yet",
+which doesn't handle a question mark "standing alone" as its own word (UEB
+7.5.3; would need the grade 1 symbol indicator, which this decoder doesn't
+track). The one-cell closing double quote (dots 3,5,6, ASCII `0`) is
+unambiguous. The two-cell escapes (`^8`/`^0`, dots 4,5 + 2,3,6/3,5,6, UEB
+7.6.7/7.6.8) and single quotes (`,8`/`,0`, dot 6 + the same cells, UEB
+7.6.2) are always unambiguous.
+
+Note: dots 2,3,6 (ASCII `8`) and dots 3,5,6 (ASCII `0`) are also
+`LOWER_DIGIT_CELLS` 8 and 0 -- same digit-cell-reuse convention as the
+plain punctuation above.
+
+### Numbers (UEB Section 6)
+
+Numeral sign `#` (dots 3,4,5,6) followed by one or more a-j-shaped letter
+cells reads as digits 1-9,0 (the digit reuses each letter's own dot
+pattern -- `a`=1 ... `j`=0), terminated by the first cell that isn't one of
+those ten (UEB 6.5.1: a space, hyphen, or dash).
+
+### Accent modifiers for foreign words (UEB 4.2)
+
+BANA §35.1.1(d): accented letters in a foreign word inside an
+English-language lyric use UEB's own accent-modifier signs -- a 1- or
+2-cell prefix written before the (separately encoded) base letter, composed
+here via Unicode NFC normalization so common precomposed letters (é, ñ, ü,
+ç, ...) come out as one codepoint:
+
+| Accent | ASCII prefix+selector | Combining mark |
+|--------|------------------------|-----------------|
+| grave        | `^*` | U+0300 |
+| acute        | `^/` | U+0301 |
+| circumflex   | `^%` | U+0302 |
+| tilde        | `^]` | U+0303 |
+| macron       | `@-` | U+0304 |
+| breve        | `@+` | U+0306 |
+| ring (circle)| `^$` | U+030A |
+| cedilla      | `^&` | U+0327 |
+| caron        | `^+` | U+030C |
+| diaeresis    | `^3` | U+0308 |
+| solidus overlay          | `@*` | U+0338 |
+| horizontal stroke overlay| `@3` | U+0336 |
+
+A capitalized accented letter places the dot-6 capital indicator *before*
+the modifier prefix (UEB 4.2.2); a modifier inside a whole-word-cap run
+doesn't need its own dot-6 at all (UEB 4.2.3 -- modifiers don't terminate
+capitalized-word mode).
+
+### Explicit scope exclusions
+
+- **Grade 2 (contracted) UEB** -- BANA §35.1.1(b)/(c) permits it only for
+  chants, hymnals, and school materials K-6; not implemented.
+- **Full foreign-language braille codes** -- BANA §35.1.1(e)/UEB §13.6: a
+  lyric entirely in another language uses *that language's own* braille
+  alphabet (per *World Braille Usage*), not UEB's accent-modifier signs
+  above. Out of scope; would need a per-language table, confirmed against
+  *World Braille Usage* one language at a time, not guessed or bulk-imported.
+- **IPA lyrics** -- BANA §35.1.1(f). Not implemented.
+- **UEB transcriber-defined modifiers** (⠘⠸⠂/⠆/⠤) -- require a
+  transcriber's-note/symbols-page description this decoder has no way to
+  surface. Not implemented; an unrecognized modifier selector raises
+  `BrailleParseError` rather than guessing.
+
 ---
 
 ## BANA Formatting, Validation & Compression Rules (Sprint 9c)

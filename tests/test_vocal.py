@@ -3,10 +3,18 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from dottednotes.exceptions import BrailleParseError
 from dottednotes.models import Score, Staff, Note, Duration
 from dottednotes.parser.ensemble_parser import EnsembleParser, parse_lyrics
-from dottednotes.parser.input_pipeline import BRLInputPipeline
+from dottednotes.parser.input_pipeline import BRLInputPipeline, ascii_braille_char_to_unicode
 from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
+
+
+def _cells(ascii_braille: str) -> str:
+    """Build a Unicode braille cell sequence from ASCII braille characters,
+    for lyric-decoding tests where writing out literal braille glyphs by hand
+    would be error-prone (e.g. accent-modifier and punctuation sequences)."""
+    return "".join(ascii_braille_char_to_unicode(c) for c in ascii_braille)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -45,6 +53,74 @@ def test_parse_lyrics_capitals_and_spaces():
         ("Sing", False),
         ("SONG", False),
     ]
+
+
+def test_parse_lyrics_ueb_punctuation():
+    # UEB 7.1: semicolon (dots 2,3 / ASCII '2'), colon (dots 2,5 / ASCII '3'),
+    # exclamation mark (dots 2,3,5 / ASCII '6'). Comma/period already covered
+    # by test_parse_lyrics_simple via other fixtures.
+    syllables = parse_lyrics(_cells("A2B3C6"))
+    assert syllables == [("a;b:c!", False)]
+
+
+def test_parse_lyrics_apostrophe():
+    # UEB 7.6.6: apostrophe (dot 3, ASCII "'").
+    syllables = parse_lyrics(_cells("DON'T"))
+    assert syllables == [("don't", False)]
+
+
+def test_parse_lyrics_question_mark_vs_opening_quote():
+    # UEB 7.6.7: the single cell (dots 2,3,6 / ASCII '8') is a question mark
+    # unless it's the first cell of a word, in which case it's an opening
+    # double quotation mark; UEB 7.6.1's closing double quote (dots 3,5,6 /
+    # ASCII '0') is unambiguous.
+    syllables = parse_lyrics(_cells("WHY8"))
+    assert syllables == [("why?", False)]
+
+    syllables = parse_lyrics(_cells("8YES6 0"))
+    assert syllables == [("“yes!", False), ("”", False)]
+
+
+def test_parse_lyrics_two_cell_and_single_quotes():
+    # UEB 7.6.7/7.6.8 unambiguous two-cell quotes (ASCII '^8'/'^0') and
+    # UEB 7.6.2 single quotes (ASCII ',8'/',0').
+    syllables = parse_lyrics(_cells("^8HI^0"))
+    assert syllables == [("“hi”", False)]
+
+    syllables = parse_lyrics(_cells(",8HI,0"))
+    assert syllables == [("‘hi’", False)]
+
+
+def test_parse_lyrics_numbers():
+    # UEB Section 6: numeral sign '#' (dots 3,4,5,6) + a-j-shaped letter
+    # cells reads as digits 1-9,0, terminated by a space or hyphen.
+    syllables = parse_lyrics(_cells("VERSE #AB"))
+    assert syllables == [("verse", False), ("12", False)]
+
+
+def test_parse_lyrics_accented_letters():
+    # UEB 4.2: "café" is c-a-f-[acute accent, ASCII '^/']-e.
+    syllables = parse_lyrics(_cells("CAF^/E"))
+    assert syllables == [("café", False)]
+
+    # UEB 4.2.2: a capitalized accented letter places the capital indicator
+    # (dot 6) before the modifier: "Étienne" is [cap][grave? no, acute]-e...
+    # -t-i-e-n-n-e, matching the rulebook's own "Étienne" example.
+    syllables = parse_lyrics(_cells(",^/ETIENNE"))
+    assert syllables == [("Étienne", False)]
+
+    # UEB 4.2.3: modifiers don't break whole-word capitalization -- "AOÛT"
+    # (French for "August") is the rulebook's own example: ,,A O [circumflex]U T
+    syllables = parse_lyrics(_cells(",,AO^%UT"))
+    assert syllables == [("AOÛT", False)]
+
+
+def test_parse_lyrics_unrecognized_cell_raises():
+    # dots 1,2,3,4,5,6 (ASCII '=') has no assigned meaning in this decoder's
+    # UEB Grade 1 subset and isn't a letter -- it must raise rather than
+    # silently mis-decode, per BANA's "no silent failures" policy.
+    with pytest.raises(BrailleParseError):
+        parse_lyrics(_cells("A=B"))
 
 
 def test_vocal_lyrics_mapping_integration():

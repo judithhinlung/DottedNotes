@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+import unicodedata
 import warnings
 
 from ..bana_symbols import (
@@ -489,22 +490,105 @@ class ParallelSystem:
         return False
 
 
-# ASCII BRF characters for punctuation cells that double as LOWER_DIGIT_CELLS
-# in a numbering context -- lyrics are always literary prose, so these
-# always read as punctuation. Verified against vocal_test.brf.
+# ASCII BRF characters for one-cell UEB literary punctuation signs that
+# double as LOWER_DIGIT_CELLS in a numbering context (UEB 2024 3rd ed.,
+# Section 7 "Punctuation"). Lyrics are always literary prose, never a
+# numbering context outside an explicit numeral sign ('#', handled
+# separately below), so these always read as punctuation. Dot patterns
+# confirmed against the actual Unicode braille glyphs in the official
+# rulebook (iceb.org), converted through this module's own ASCII_TO_DOTS --
+# not guessed. Comma and period were already confirmed against a real
+# fixture (vocal_test.brf); the rest follow the identical digit-cell reuse
+# pattern documented in UEB 7.1's own examples.
 _LYRIC_PUNCTUATION = {
-    '1': ',',  # dot 2       -- comma
-    '4': '.',  # dots 2,5,6  -- period
+    '1': ',',   # dot 2       -- comma (UEB 7.1)
+    '2': ';',   # dots 2,3    -- semicolon (UEB 7.1)
+    '3': ':',   # dots 2,5    -- colon (UEB 7.1)
+    '4': '.',   # dots 2,5,6  -- period (UEB 7.1)
+    '6': '!',   # dots 2,3,5  -- exclamation mark (UEB 7.1)
+    "'": "'",   # dot 3       -- apostrophe / nondirectional single quote (UEB 7.6.6)
+}
+
+# UEB 7.6.7: the single cell '⠦' (dots 2,3,6, ASCII '8') is read as an
+# opening double quotation mark only at the start of a word; anywhere else
+# it is a question mark. We approximate "start of a word" as "nothing
+# accumulated into the current word yet" -- this matches ordinary usage but,
+# per 7.5.3, doesn't attempt to disambiguate a question mark "standing
+# alone" as its own word (that case would need the grade 1 symbol
+# indicator, which this decoder doesn't track).
+_AMBIGUOUS_QUESTION_OR_OPEN_QUOTE = '8'  # dots 2,3,6
+
+# UEB Section 4.2 "Modifiers": each accent is a 1- or 2-cell prefix written
+# immediately before the (separately encoded) base letter it applies to.
+# Values are Unicode combining marks; _decode_accented_letter() below
+# composes base letter + mark and NFC-normalizes so common precomposed
+# letters (é, ñ, ü, ç, ...) come out as a single codepoint. Digitized from
+# the actual glyphs in "Rules of Unified English Braille", 3rd ed. 2024
+# (iceb.org), converted through ASCII_TO_DOTS -- not guessed. Per UEB 4.2.7,
+# these are for occasional foreign words/names in an English-language lyric
+# (BANA §35.1.1(d)), not full foreign-language braille codes (§35.1.1(e),
+# which uses that language's own braille alphabet entirely -- out of scope
+# here) and not the three transcriber-defined modifiers (⠘⠸⠂/⠆/⠤), which
+# require a symbols-page note we have no way to surface from this decoder.
+_ACCENT_MODIFIERS = {
+    '@': {  # dots 4 prefix group (UEB 4.2)
+        '*': '̸',  # solidus overlay
+        '3': '̶',  # horizontal stroke overlay (e.g. ø)
+        '+': '̆',  # breve
+        '-': '̄',  # macron
+    },
+    '^': {  # dots 4,5 prefix group (UEB 4.2)
+        '&': '̧',  # cedilla
+        '*': '̀',  # grave accent
+        '%': '̂',  # circumflex
+        '$': '̊',  # ring (circle)
+        ']': '̃',  # tilde
+        '3': '̈',  # diaeresis (umlaut)
+        '/': '́',  # acute accent
+        '+': '̌',  # caron (hacek, wedge)
+    },
+}
+
+# UEB Section 6: a numeral sign ('#', dots 3,4,5,6) followed by one or more
+# a-j-shaped letter cells reads as digits 1-9,0; numeral mode ends at the
+# first cell that isn't one of these (UEB 6.5.1: space, hyphen, or dash).
+_DIGIT_CELLS = {
+    'A': '1', 'B': '2', 'C': '3', 'D': '4', 'E': '5',
+    'F': '6', 'G': '7', 'H': '8', 'I': '9', 'J': '0',
 }
 
 
+def _decode_accented_letter(ascii_str: str, i: int, n: int) -> tuple[str, int]:
+    """Consume a UEB 4.2 accent-modifier prefix at ascii_str[i] (one of the
+    keys of _ACCENT_MODIFIERS) plus the base letter it applies to, and
+    return (composed_letter, index_just_past_the_base_letter).
+    """
+    group = _ACCENT_MODIFIERS[ascii_str[i]]
+    if i + 1 >= n or ascii_str[i + 1] not in group:
+        raise BrailleParseError(
+            "Unrecognized UEB accent-modifier selector in lyric text "
+            f"after {ascii_str[i]!r}"
+        )
+    combining_mark = group[ascii_str[i + 1]]
+    if i + 2 >= n or not ascii_str[i + 2].isalpha():
+        raise BrailleParseError(
+            "UEB accent modifier in lyric text is not followed by a letter"
+        )
+    composed = unicodedata.normalize('NFC', ascii_str[i + 2].lower() + combining_mark)
+    return composed, i + 3
+
+
 def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
-    """Decode a sequence of BANA Unicode braille cells as uncontracted literary lyrics.
-    Returns a list of (syllable_text, has_hyphen) tuples.
+    """Decode a sequence of BANA Unicode braille cells as uncontracted (UEB
+    Grade 1) literary lyrics per BANA §35.1.1: the full alphabet,
+    capitalization, hyphens, word repetition, UEB Section 7 punctuation,
+    UEB Section 6 numbers, and UEB 4.2 accent modifiers for foreign words in
+    an English-language lyric. Contracted (Grade 2) braille is not
+    supported. Returns a list of (syllable_text, has_hyphen) tuples.
     """
     from .input_pipeline import ASCII_TO_DOTS
     dots_to_ascii = {v: k for k, v in ASCII_TO_DOTS.items()}
-    
+
     ascii_chars = []
     for c in lyric_cells:
         offset = ord(c) - 0x2800
@@ -512,9 +596,9 @@ def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
             ascii_chars.append(dots_to_ascii.get(offset, ' '))
         else:
             ascii_chars.append(' ')
-            
+
     ascii_str = "".join(ascii_chars)
-    
+
     # Process capital indicators and reconstruct words
     words = []
     current_word = []
@@ -522,10 +606,10 @@ def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
     n = len(ascii_str)
     cap_next_char = False
     cap_all_word = False
-    
+
     while i < n:
         char = ascii_str[i]
-        
+
         if char == ' ':
             if current_word:
                 words.append("".join(current_word))
@@ -534,16 +618,35 @@ def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
             cap_next_char = False
             i += 1
             continue
-            
-        if char == ',':  # UEB Capital indicator (dot 6)
-            if i + 1 < n and ascii_str[i + 1] == ',':
+
+        if char == ',':  # UEB Capital indicator (dot 6), also the prefix for
+            # several two-cell signs (UEB 4.2.2, 7.6.2, 7.6.5)
+            nxt = ascii_str[i + 1] if i + 1 < n else ''
+            if nxt == ',':
                 cap_all_word = True
                 i += 2
-            else:
-                cap_next_char = True
-                i += 1
+                continue
+            if nxt == '8':  # UEB 7.6.2 -- opening single quotation mark ⠠⠦
+                current_word.append('‘')
+                i += 2
+                continue
+            if nxt == '0':  # UEB 7.6.2 -- closing single quotation mark ⠠⠴
+                current_word.append('’')
+                i += 2
+                continue
+            if nxt == '7':  # UEB 7.6.5 -- nondirectional double quotation mark ⠠⠶ (rare)
+                current_word.append('"')
+                i += 2
+                continue
+            if nxt in _ACCENT_MODIFIERS:  # UEB 4.2.2 -- capitalized accented letter
+                accented, i = _decode_accented_letter(ascii_str, i + 1, n)
+                current_word.append(accented.upper())
+                cap_next_char = False
+                continue
+            cap_next_char = True
+            i += 1
             continue
-            
+
         if char == '-':
             current_word.append('-')
             cap_all_word = False
@@ -551,26 +654,81 @@ def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
             i += 1
             continue
 
+        if char == '^' and i + 1 < n and ascii_str[i + 1] in ('8', '0'):
+            # UEB 7.6.7/7.6.8 -- unambiguous two-cell open/close double
+            # quote (⠘⠦/⠘⠴). Shares the dots-4,5 prefix with the accent
+            # group below, but '8'/'0' are never valid accent selectors,
+            # so there's no ambiguity.
+            current_word.append('“' if ascii_str[i + 1] == '8' else '”')
+            i += 2
+            continue
+
+        if char in _ACCENT_MODIFIERS:  # UEB 4.2 -- accented letter
+            accented, i = _decode_accented_letter(ascii_str, i, n)
+            if cap_all_word:
+                accented = accented.upper()
+            current_word.append(accented)
+            continue
+
+        if char == '#':  # UEB Section 6 -- numeral sign
+            i += 1
+            digits = []
+            while i < n and ascii_str[i] in _DIGIT_CELLS:
+                digits.append(_DIGIT_CELLS[ascii_str[i]])
+                i += 1
+            if not digits:
+                raise BrailleParseError(
+                    "Numeral sign in lyric text is not followed by a digit cell"
+                )
+            current_word.append("".join(digits))
+            continue
+
+        if char == '0':  # UEB 7.6.1 -- closing double quotation mark ⠴
+            current_word.append('”')
+            i += 1
+            continue
+
+        if char == _AMBIGUOUS_QUESTION_OR_OPEN_QUOTE:  # UEB 7.6.7
+            current_word.append('“' if not current_word else '?')
+            i += 1
+            continue
+
+        if char == '7':  # dots 2,3,5,6 -- BANA_symbols.MEASURE_REPEAT_CELL /
+            # CHORD_PAREN_CELL, not a UEB literary sign at all: this
+            # codebase's own verse-number-prefix convention (S8b-11) reuses
+            # it as a bracket around the verse digit, e.g. "⠶⠼⠁⠶" = "[1]".
+            # Rendered as '[' at the start of a word and ']' otherwise, so
+            # clean_and_parse_verse_number()'s existing
+            # .strip('.:,;()[]') already strips it correctly.
+            current_word.append('[' if not current_word else ']')
+            i += 1
+            continue
+
         if char in _LYRIC_PUNCTUATION:
-            # These cells are the same dot patterns as LOWER_DIGIT_CELLS
-            # 1/4 (§33.2.2 part-numbering context), reused in plain literary
-            # text for comma/period -- lyrics are always literary prose,
-            # never a numbering context, so always read them that way.
-            # Only comma and period are confirmed against a real fixture
-            # (vocal_test.brf) so far; treat the rest of the digit-shaped
-            # cells with the same caution as any un-exercised entry.
             current_word.append(_LYRIC_PUNCTUATION[char])
             i += 1
             continue
 
-        char_lower = char.lower()
-        if cap_all_word or cap_next_char:
-            current_word.append(char_lower.upper())
-            cap_next_char = False
-        else:
-            current_word.append(char_lower)
-        i += 1
-        
+        if char.isalpha():
+            char_lower = char.lower()
+            if cap_all_word or cap_next_char:
+                current_word.append(char_lower.upper())
+                cap_next_char = False
+            else:
+                current_word.append(char_lower)
+            i += 1
+            continue
+
+        if char == '9':  # dots 3,5 -- word/phrase repetition marker
+            # (BANA §35.4), expanded in the pass below
+            current_word.append('9')
+            i += 1
+            continue
+
+        raise BrailleParseError(
+            f"Unrecognized braille cell in lyric text: ASCII braille {char!r}"
+        )
+
     if current_word:
         words.append("".join(current_word))
         
