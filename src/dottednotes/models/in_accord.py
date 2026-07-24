@@ -19,6 +19,17 @@ class InAccord:
         'full_measure'      — full-measure in-accord (BANA 11.1.1): each part fills a whole measure.
         'part_measure'      — part-measure in-accord (BANA 11.1.2): each part fills one temporal
                               section of a measure; sections are concatenated by the caller.
+
+    S10d-13 scope decision: BANA 33.4.2's ensemble "read upward" rule also
+    covers in-accord voice order, but that's cosmetic here, not a pitch
+    ambiguity like `Chord.resolved_ensemble_upward` -- `to_braille()`
+    below writes every voice's notes out in full (each with its own
+    explicit/tracked octave marks via `_render_note_list_to_braille`),
+    never as interval shorthand. Which voice comes first in `parts` never
+    changes what pitch a reader reconstructs, only which voice they read
+    first, so extracting a part with in-accord content needs no equivalent
+    fix. A `Chord` nested inside a voice (`parts[i]`) is still covered by
+    the existing check, same as one at the top level of a measure.
     """
 
     parts: list[list] = field(default_factory=list)

@@ -341,6 +341,37 @@ class TranscriptionMode(Enum):
     ENSEMBLE = auto()
 
 
+def _item_has_ensemble_resolved_chord(item: Any) -> bool:
+    """True if `item` is (or contains) a Chord whose interval note(s) were
+    resolved under BANA 33.4.2's ensemble "read upward" rule -- recurses
+    into InAccord voices and Tuplet items, the two MeasureItem containers
+    a Chord can be nested inside (see measure.py's MeasureItem union)."""
+    if isinstance(item, Chord):
+        return item.resolved_ensemble_upward
+    if isinstance(item, InAccord):
+        return any(
+            _item_has_ensemble_resolved_chord(sub)
+            for part in item.parts
+            for sub in part
+        )
+    if isinstance(item, Tuplet):
+        return any(_item_has_ensemble_resolved_chord(sub) for sub in item.items)
+    return False
+
+
+def _staff_has_ensemble_resolved_chord(staff: Staff) -> bool:
+    """True if any measure in `staff` contains a Chord/interval resolved
+    under the ensemble-upward rule (see `Chord.resolved_ensemble_upward`).
+    Used by `_detect_transcription_mode` (S10d-13) to keep a single
+    extracted part in ENSEMBLE transcription when downgrading it to SOLO
+    would misread that content."""
+    return any(
+        _item_has_ensemble_resolved_chord(item)
+        for measure in staff.measures
+        for item in measure.notes
+    )
+
+
 # "auto": engine numbers measures sequentially from 1, ignoring whatever
 # Measure.number carries in from the source file. "print_score": use
 # Measure.number as the source parser assigned it -- MusicXML's own
@@ -436,6 +467,19 @@ class BrailleRenderer:
         if is_piano:
             return TranscriptionMode.PIANO
         if isinstance(score, OrchestraScore) or len(score.staves) > 2:
+            return TranscriptionMode.ENSEMBLE
+        # S10d-13: a single staff can still need ENSEMBLE transcription --
+        # Score.extract_part() always wraps its result in a plain
+        # single-staff Score, regardless of the original score's type, but
+        # if that staff carries any Chord resolved under BANA 33.4.2's
+        # ensemble "read upward" rule (Chord.resolved_ensemble_upward),
+        # downgrading it to SOLO's clef-based direction would have a
+        # reader reconstruct the wrong pitch letter for that interval, not
+        # just the wrong octave. Rendering it as ENSEMBLE instead (its own
+        # one-row instrument-list header + per-line abbreviation prefix)
+        # keeps the "always read upward" convention intact for the reader,
+        # which is what the chord's actual pitches were built under.
+        if len(score.staves) == 1 and _staff_has_ensemble_resolved_chord(score.staves[0]):
             return TranscriptionMode.ENSEMBLE
         return TranscriptionMode.SOLO
 

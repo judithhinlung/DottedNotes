@@ -1676,7 +1676,7 @@ class BrailleParser:
                         accidental=iacc,
                         fingerings=list(ifings),
                     ))
-                items.append(Chord(notes=chord_notes))
+                items.append(Chord(notes=chord_notes, resolved_ensemble_upward=self._is_ensemble))
                 divisi_partners.append(None)
             else:
                 items.append(written)

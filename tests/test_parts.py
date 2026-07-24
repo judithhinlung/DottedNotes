@@ -105,6 +105,54 @@ def test_score_extract_part_string_instrument_keeps_treble_clef_despite_low_regi
     assert r'\clef bass' not in ly
 
 
+def test_score_extract_part_with_ensemble_resolved_chord_keeps_ensemble_transcription():
+    # S10d-13: an extracted part containing a Chord resolved under BANA
+    # 33.4.2's ensemble "read upward" rule must not silently render under
+    # SOLO's clef-based-direction convention -- that would have a reader
+    # reconstruct the wrong pitch letter for the interval note, not just
+    # the wrong octave (see Chord.resolved_ensemble_upward's docstring).
+    from dottednotes.models import Measure, Chord, Note, Duration
+    from dottednotes.parser.ensemble_parser import EnsembleParser
+
+    score = Score(title="Duo")
+    v1 = Staff(name="Violin I")
+    written = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(4))
+    # A 3rd above C4 = E4 under the ensemble-upward rule this chord was
+    # resolved under (same pitch pair as test_ensemble_treble_clef_interval_reads_upward
+    # in test_parser.py) -- treble-clef SOLO convention would instead read
+    # this interval sign as a 3rd *below*, reconstructing A3.
+    interval_note = Note(dots=frozenset(), category=None, raw_brl="", note_name="E", octave=4, duration=Duration(4))
+    chord = Chord(notes=[written, interval_note], resolved_ensemble_upward=True)
+    v1.add_measure(Measure(number=1, notes=[chord]))
+    v2 = Staff(name="Violin II")
+    v2.add_measure(Measure(number=1, notes=[
+        Note(dots=frozenset(), category=None, raw_brl="", note_name="G", octave=3, duration=Duration(4))
+    ]))
+    score.add_staff(v1)
+    score.add_staff(v2)
+
+    part0 = score.extract_part(0)
+    out0 = part0.to_braille()
+    # ENSEMBLE layout: a one-row instrument-list header naming "Violin I"
+    # and its Table 29 abbreviation, not a bare SOLO margin-number line.
+    assert '⠠⠧⠊⠕⠇⠊⠝' in out0  # "Violin" (capitalized)
+    assert '⠜⠧⠂⠄' in out0      # ⠜ + "v1" (Table 29) + ⠄
+
+    # Round-trips correctly when re-parsed standalone: the interval note
+    # is still E4, not A3 (what SOLO/clef-based reading would produce).
+    reparsed = EnsembleParser().parse(out0)
+    reparsed_chord = reparsed.staves[0].measures[0].notes[0]
+    assert reparsed_chord.notes[1].note_name == 'E'
+    assert reparsed_chord.notes[1].octave == 4
+
+    # A part with no ensemble-resolved shorthand content (Violin II here,
+    # a plain melodic note) is unaffected -- still renders as plain SOLO.
+    part1 = score.extract_part(1)
+    out1 = part1.to_braille()
+    assert '⠜⠧⠆⠄' not in out1
+    assert '⠼⠁⠀' in out1  # plain SOLO margin-number prefix, no instrument header
+
+
 def test_score_extract_part_invalid():
     score = Score()
     staff = Staff(name="Violin")
