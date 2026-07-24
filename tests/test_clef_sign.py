@@ -57,7 +57,7 @@ def test_clef_appears_once_after_first_measure_number():
     assert output.count('⠜⠌⠇') == 1
     # Right after the measure-1 number, before the note's own content.
     idx = output.index('⠼⠁')
-    assert output[idx:idx + 10].startswith('⠼⠁ ⠜⠌⠇')
+    assert output[idx:idx + 10].startswith('⠼⠁⠀⠜⠌⠇')
 
 
 def test_clef_not_restated_on_line_wrap():

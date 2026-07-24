@@ -32,7 +32,7 @@ def test_layout_title_centering():
     
     # Rendering should center the title automatically
     rendered = score.to_braille()
-    assert "      ⠠⠎⠕⠝⠛⠲" in rendered
+    assert '⠀⠀⠀⠀⠀⠀⠠⠎⠕⠝⠛⠲' in rendered
 
 
 def test_layout_signature_indentation():
@@ -49,7 +49,7 @@ def test_layout_signature_indentation():
     
     # Rendering should indent signature line by 8 spaces
     rendered = score.to_braille()
-    assert "        ⠼⠉⠲" in rendered
+    assert '⠀⠀⠀⠀⠀⠀⠀⠀⠼⠉⠲' in rendered
 
 
 def test_layout_heading_spacing():
@@ -66,7 +66,7 @@ def test_layout_heading_spacing():
     # Rendering should not have any blank line between signatures and first music line.
     # BANA 24.1.1: single-line solo margin numbers carry the number sign (⠼).
     rendered = score.to_braille()
-    assert "        ⠼⠉⠲\n⠼⠁ ⠐⠹" in rendered
+    assert '⠀⠀⠀⠀⠀⠀⠀⠀⠼⠉⠲\n⠼⠁⠀⠐⠹' in rendered
 
 
 def test_layout_running_head_centering():
@@ -90,7 +90,7 @@ def test_layout_running_head_centering():
     pages = rendered.split('\f')
     assert len(pages) > 1
     assert pages[1].startswith('\n')
-    expected_header = "                 ⠠⠎⠕⠝⠛                 ⠃"
+    expected_header = '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⠎⠕⠝⠛⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠃'
     assert pages[1].splitlines()[1] == expected_header
 
 

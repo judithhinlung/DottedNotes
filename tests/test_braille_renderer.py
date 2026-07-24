@@ -32,7 +32,7 @@ def test_solo_renderer():
     # Check that it contains title and measure 1
     # Title "Solo Piece" -> '⠠⠎⠕⠇⠕⠀⠠⠏⠊⠑⠉⠑⠲'
     assert '⠠⠎⠕⠇⠕⠀⠠⠏⠊⠑⠉⠑⠲' in output
-    assert '⠁ ⠐⠹' in output
+    assert '⠁⠀⠐⠹' in output
 
 
 def test_piano_renderer():
@@ -55,10 +55,10 @@ def test_piano_renderer():
     renderer = BrailleRenderer(line_width=40)
     output = renderer.render(score)
     # RH line: starts with '⠁ ' (measure 1 prefix) followed by RH hand sign '⠨⠜' and note
-    assert '⠁ ⠨⠜⠐⠹' in output
+    assert '⠁⠀⠨⠜⠐⠹' in output
     # LH line: starts with spaces, followed by LH hand sign '⠸⠜' and note
     # Prefix '⠁ ' is 2 chars, so LH line starts with 2 spaces
-    assert '  ⠸⠜⠸⠹' in output
+    assert '⠀⠀⠸⠜⠸⠹' in output
 
 
 def test_orchestra_score_with_two_piano_staves_uses_piano_layout():
@@ -82,8 +82,8 @@ def test_orchestra_score_with_two_piano_staves_uses_piano_layout():
 
     renderer = BrailleRenderer(line_width=40)
     output = renderer.render(score)
-    assert '⠁ ⠨⠜⠐⠹' in output
-    assert '  ⠸⠜⠸⠹' in output
+    assert '⠁⠀⠨⠜⠐⠹' in output
+    assert '⠀⠀⠸⠜⠸⠹' in output
 
 
 def test_orchestra_score_with_three_staves_uses_ensemble_layout():
@@ -115,7 +115,7 @@ def test_renderer_with_measure_numbers_turned_off():
 
     renderer = BrailleRenderer(line_width=40, show_measure_numbers=False)
     output = renderer.render(score)
-    assert '⠁ ' not in output  # No measure number prefix at start of line
+    assert '⠁⠀' not in output  # No measure number prefix at start of line
     assert '⠐⠹' in output
 
     # 2. Piano layout
@@ -316,18 +316,18 @@ def test_ensemble_instrument_header_has_no_trailing_period_and_spaced_guide_dots
     flute_line = next(l for l in lines if l.startswith(encode_literary_braille("Flute")[:-1]))
 
     # No trailing period directly after any name.
-    assert '⠲' not in clarinet_line.split("  ")[0]
-    assert '⠲' not in bassoon_line.split("  ")[0]
-    assert '⠲' not in flute_line.split("  ")[0]
+    assert '⠲' not in clarinet_line.split(blank * 2)[0]
+    assert '⠲' not in bassoon_line.split(blank * 2)[0]
+    assert '⠲' not in flute_line.split(blank * 2)[0]
 
     # Clarinet is the longest: no padding at all before the fixed 2-cell gap.
-    assert clarinet_line == encode_literary_braille("Clarinet")[:-1] + "  " + '⠜' + abbrev_to_brl('cl') + '⠄'
+    assert clarinet_line == encode_literary_braille("Clarinet")[:-1] + blank * 2 + '⠜' + abbrev_to_brl('cl') + '⠄'
 
     # Bassoon: deficit of 1 cell -- plain blank, no guide dots.
-    assert bassoon_line == encode_literary_braille("Bassoon")[:-1] + blank + "  " + '⠜' + abbrev_to_brl('b') + '⠄'
+    assert bassoon_line == encode_literary_braille("Bassoon")[:-1] + blank + blank * 2 + '⠜' + abbrev_to_brl('b') + '⠄'
 
     # Flute: deficit of 3 cells -- one blank, then 2 guide dots (dot 5).
-    assert flute_line == encode_literary_braille("Flute")[:-1] + blank + '⠐⠐' + "  " + '⠜' + abbrev_to_brl('fl') + '⠄'
+    assert flute_line == encode_literary_braille("Flute")[:-1] + blank + '⠐⠐' + blank * 2 + '⠜' + abbrev_to_brl('fl') + '⠄'
 
 
 def test_ensemble_cross_staff_measure_alignment_with_mismatched_content():
@@ -586,11 +586,11 @@ def test_wrap_run_over_line_marks_continuation_with_music_hyphen():
     line = "⠜FL⠄" + "⠹" * 10
     wrapped = wrap_run_over_line(line, width=8)
     assert all(len(w) <= 8 for w in wrapped)
-    assert "".join(w.rstrip('⠐').removeprefix("  ") for w in wrapped[:-1]) + wrapped[-1].removeprefix("  ") == line
+    assert "".join(w.rstrip('⠐').removeprefix('⠀⠀') for w in wrapped[:-1]) + wrapped[-1].removeprefix('⠀⠀') == line
     for w in wrapped[:-1]:
         assert w.endswith('⠐')
     assert not wrapped[-1].endswith('⠐')
-    assert all(w.startswith("  ") for w in wrapped[1:])
+    assert all(w.startswith('⠀⠀') for w in wrapped[1:])
 
 
 def test_wrap_run_over_line_no_op_when_it_already_fits():

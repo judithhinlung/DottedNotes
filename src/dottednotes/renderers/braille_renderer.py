@@ -146,7 +146,7 @@ def center_line(text: str, width: int) -> str:
     if len(text) >= width:
         return text
     left_padding = (width - len(text)) // 2
-    return ' ' * left_padding + text
+    return '⠀' * left_padding + text
 
 
 def join_tempo_and_signature(tempo_brl: str, *signature_parts: str) -> str:
@@ -157,7 +157,7 @@ def join_tempo_and_signature(tempo_brl: str, *signature_parts: str) -> str:
     separate word-sign expression, is set off from it."""
     combined = "".join(signature_parts)
     if tempo_brl and combined:
-        return tempo_brl + " " + combined
+        return tempo_brl + '⠀' + combined
     return tempo_brl or combined
 
 
@@ -234,7 +234,7 @@ def wrap_run_over_line(line: str, width: int) -> list[str]:
         content_width = width - len(indent) - 1  # reserve 1 cell for ⠐
         result.append(indent + remaining[:content_width] + '⠐')
         remaining = remaining[content_width:]
-        indent = "  "
+        indent = '⠀⠀'
     result.append(indent + remaining)
     return result
 
@@ -522,7 +522,7 @@ class BrailleRenderer:
 
         if sig_line:
             # BANA solo signature line starts with 8 spaces indentation
-            lines.append("        " + sig_line)
+            lines.append('⠀' * 8 + sig_line)
 
         # Pack measures on the fly
         current_line = ""
@@ -543,7 +543,7 @@ class BrailleRenderer:
                 # keyboard bar-over-bar parallel's margin number (BANA
                 # 29.3(b): "given without the numeric indicator").
                 num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx)))
-                prefix = (num_str + " ") if self.show_measure_numbers else ""
+                prefix = (num_str + '⠀') if self.show_measure_numbers else ""
                 # Facsimile clef sign (BANA 4.1): stated once, right after
                 # the first measure's number, before that measure's own
                 # signs -- never restated at later line starts (unlike the
@@ -568,7 +568,7 @@ class BrailleRenderer:
                 else:
                     lines.append(current_line)
                     num_str = '⠼' + "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(self._display_measure_number(m, idx)))
-                    prefix = (num_str + " ") if self.show_measure_numbers else ""
+                    prefix = (num_str + '⠀') if self.show_measure_numbers else ""
                     current_line = prefix + brl_start
                     prev_note = prev_start
 
@@ -594,7 +594,7 @@ class BrailleRenderer:
         sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
 
         if sig_line:
-            lines.append("        " + sig_line)
+            lines.append('⠀' * 8 + sig_line)
 
         # Render measures for both hands
         lh_staff = score.staves[1]
@@ -650,10 +650,10 @@ class BrailleRenderer:
     def _build_piano_line_from_strings(self, measure_num: int, measure_strs: list[str], is_right: bool) -> str:
         if self.show_measure_numbers:
             num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(measure_num))
-            prefix = num_str + " "
+            prefix = num_str + '⠀'
         else:
             prefix = ""
-        
+
         hand_sign = '⠨⠜' if is_right else '⠸⠜'
         music_str = "".join(measure_strs)
         if music_str:
@@ -664,7 +664,7 @@ class BrailleRenderer:
         if is_right:
             return prefix + hand_sign + music_str
         else:
-            return " " * len(prefix) + hand_sign + music_str
+            return '⠀' * len(prefix) + hand_sign + music_str
 
     def _render_ensemble(
         self,
@@ -708,7 +708,7 @@ class BrailleRenderer:
                 padding = blank_cell * deficit
 
             abbrev_brl = '⠜' + abbrev_to_brl(abbrev) + '⠄'
-            lines.append(name_brl + padding + "  " + abbrev_brl)
+            lines.append(name_brl + padding + '⠀⠀' + abbrev_brl)
 
         # Signature line
         first_staff = score.staves[0]
@@ -721,7 +721,7 @@ class BrailleRenderer:
         sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
 
         if sig_line:
-            lines.append("       " + sig_line)
+            lines.append('⠀' * 7 + sig_line)
 
         # Pack measures into systems on the fly. Per BANA 33.4, the first
         # signs of each measure must be vertically aligned across every
@@ -839,7 +839,7 @@ class BrailleRenderer:
             if idx > 0:
                 lines.append("")
             if self.show_measure_numbers:
-                heading_chars = [" "] * self.line_width
+                heading_chars = ['⠀'] * self.line_width
                 # BANA 33.4.6: the marking is "indented one cell beyond
                 # the first music signs of the parallel" -- one column
                 # past wherever each measure's own (now cross-staff
@@ -853,7 +853,7 @@ class BrailleRenderer:
                             heading_chars[col + char_idx] = char
                     if k < len(measure_widths):
                         col += measure_widths[k]
-                heading_line = "".join(heading_chars).rstrip()
+                heading_line = "".join(heading_chars).rstrip('⠀')
                 lines.append(heading_line)
 
             for staff_line in best_staff_lines:

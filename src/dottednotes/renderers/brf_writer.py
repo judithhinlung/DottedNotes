@@ -125,16 +125,16 @@ class BRFWriter:
                 right_space = self.line_width - end_idx - len(page_str)
                 
                 if left_space >= 3 and right_space >= 3:
-                    header_line = " " * start_idx + title_brl + " " * (self.line_width - end_idx - len(page_str)) + page_str
+                    header_line = '⠀' * start_idx + title_brl + '⠀' * (self.line_width - end_idx - len(page_str)) + page_str
                 else:
                     max_title_len = self.line_width - len(page_str) - 6
                     if max_title_len > 0:
-                        header_line = "   " + title_brl[:max_title_len] + "   " + page_str
+                        header_line = '⠀⠀⠀' + title_brl[:max_title_len] + '⠀⠀⠀' + page_str
                     else:
                         space_len = self.line_width - len(title_brl) - len(page_str)
                         if space_len < 1:
                             space_len = 1
-                        header_line = title_brl + " " * space_len + page_str
+                        header_line = title_brl + '⠀' * space_len + page_str
                 current_page_lines.append(header_line)
 
             current_page_lines.append(music_lines[i])

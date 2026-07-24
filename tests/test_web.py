@@ -184,7 +184,7 @@ def test_convert_with_measure_numbers_checkbox():
     assert response_brf.status_code == 200
     job_id = response_brf.json()["job_id"]
     download_brf = client.get(f"/api/jobs/{job_id}/brl")
-    assert "⠁ " in download_brf.text  # Braille measure number 1 at start of line
+    assert '⠁⠀' in download_brf.text  # Braille measure number 1 at start of line
     
     # 3. With measure_numbers=false (in Braille - BRL format)
     response_brf_off = client.post(

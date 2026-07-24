@@ -165,7 +165,7 @@ def test_solo_margin_measure_number_carries_number_sign():
     score = parse_brf(brf)
     renderer = BrailleRenderer(line_width=40, show_measure_numbers=True)
     output = renderer.render(score)
-    assert output.startswith("⠼⠁ ")
+    assert output.startswith('⠼⠁⠀')
 
 
 def test_octave_mark_forced_after_leading_rest_starting_a_new_braille_line():

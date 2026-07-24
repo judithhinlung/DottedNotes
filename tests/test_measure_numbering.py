@@ -60,14 +60,14 @@ def test_solo_mode_auto_numbering_ignores_source_number():
     # not the source's own number.
     score = _solo_score([99])
     output = BrailleRenderer(measure_numbering="auto").render(score)
-    assert output.startswith("⠼" + _digit_str(1) + " ")
+    assert output.startswith("⠼" + _digit_str(1) + '⠀')
     assert _digit_str(99) not in output
 
 
 def test_solo_mode_print_score_numbering_uses_source_number():
     score = _solo_score([99])
     output = BrailleRenderer(measure_numbering="print_score").render(score)
-    assert output.startswith("⠼" + _digit_str(99) + " ")
+    assert output.startswith("⠼" + _digit_str(99) + '⠀')
 
 
 def test_solo_mode_auto_numbering_default():
@@ -75,8 +75,8 @@ def test_solo_mode_auto_numbering_default():
     score = _solo_score([5, 6])
     output = BrailleRenderer(line_width=6).render(score)
     lines = output.strip("\n").split("\n")
-    assert lines[0].startswith("⠼" + _digit_str(1) + " ")
-    assert lines[1].startswith("⠼" + _digit_str(2) + " ")
+    assert lines[0].startswith("⠼" + _digit_str(1) + '⠀')
+    assert lines[1].startswith("⠼" + _digit_str(2) + '⠀')
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ def test_print_score_mode_preserves_irregular_musicxml_measure_numbers(tmp_path)
     # jump straight to 21 must all appear exactly as in the source -- never
     # "corrected" to 1, 2, 3.
     assert any(line.startswith("⠼" + _digit_str(0)) for line in lines)
-    assert any(line.startswith("⠼" + _digit_str(1) + " ") for line in lines)
+    assert any(line.startswith("⠼" + _digit_str(1) + '⠀') for line in lines)
     assert any(line.startswith("⠼" + _digit_str(21)) for line in lines)
 
 
@@ -155,9 +155,9 @@ def test_auto_mode_renumbers_irregular_musicxml_measure_numbers_sequentially(tmp
     output = BrailleRenderer(measure_numbering="auto", line_width=6).render(score)
     lines = [l for l in output.strip("\n").split("\n") if l]
     music_lines = lines[1:]  # lines[0] is the title (music21's default movement name)
-    assert any(line.startswith("⠼" + _digit_str(1) + " ") for line in music_lines)
-    assert any(line.startswith("⠼" + _digit_str(2) + " ") for line in music_lines)
-    assert any(line.startswith("⠼" + _digit_str(3) + " ") for line in music_lines)
+    assert any(line.startswith("⠼" + _digit_str(1) + '⠀') for line in music_lines)
+    assert any(line.startswith("⠼" + _digit_str(2) + '⠀') for line in music_lines)
+    assert any(line.startswith("⠼" + _digit_str(3) + '⠀') for line in music_lines)
     assert "⠼" + _digit_str(21) not in output
 
 
