@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/combine/npm/tone@14.7.58,npm/@magenta/music@1.23.1/es6/core.js,npm/html-midi-player@1.5.0"></script>
 </head>
 <body>
     <div class="glass-bg"></div>
@@ -169,6 +170,11 @@
                 
                 <div class="result-status-bar" id="result-status-bar">
                     <p>Status: <span id="status-badge" class="badge neutral">No File</span></p>
+                </div>
+
+                <div class="midi-player-container hidden" id="midi-player-container">
+                    <h3>MIDI Playback</h3>
+                    <midi-player id="midi-player" sound-font></midi-player>
                 </div>
 
                 <div class="download-container">

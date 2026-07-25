@@ -703,3 +703,46 @@ footer {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
 }
+
+/* MIDI Player Styling */
+.midi-player-container {
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.midi-player-container h3 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+#midi-player {
+    width: 100%;
+}
+
+#midi-player::part(control-panel) {
+    background-color: #161b22;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.75rem;
+    color: var(--text-primary);
+}
+
+#midi-player::part(play-button) {
+    color: var(--accent-blue);
+}
+
+#midi-player::part(play-button):hover {
+    color: var(--accent-purple);
+}
+
+#midi-player::part(seek-bar) {
+    accent-color: var(--accent-blue);
+}
+
+#midi-player::part(time) {
+    color: var(--text-secondary);
+    font-family: inherit;
+}

@@ -396,3 +396,38 @@ def test_set_part_instrument_for_extracted_piano_hand():
     ly = client.get(f"/api/jobs/{job_id}/parts/0/ly").text
     assert '\\set Staff.instrumentName = "Acoustic Grand"' in ly
     assert '\\set Staff.midiInstrument = "acoustic grand"' in ly
+
+
+def test_midi_endpoints_and_part_midi_serving():
+    import shutil
+    # '⠐⠹' represents C4 in braille music
+    file_content = "⠐⠹".encode("utf-8")
+    
+    response = client.post(
+        "/api/convert",
+        files={"file": ("test.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "lilypond",
+            "category": "Solo Piano",
+            "profile": "standard"
+        }
+    )
+    assert response.status_code == 200
+    data = response.json()
+    job_id = data["job_id"]
+    
+    # If lilypond is available, check that MIDI file is served correctly
+    if shutil.which("lilypond"):
+        assert "midi" in data["files"]
+        midi_response = client.get(f"/api/jobs/{job_id}/midi")
+        assert midi_response.status_code == 200
+        assert "audio/midi" in midi_response.headers["content-type"]
+        
+        # Test part-level MIDI serving as well (instrument index 0)
+        part_midi_response = client.get(f"/api/jobs/{job_id}/parts/0/midi")
+        assert part_midi_response.status_code == 200
+        assert "audio/midi" in part_midi_response.headers["content-type"]
+    else:
+        # If lilypond is not available, direct retrieval should return 404
+        midi_response = client.get(f"/api/jobs/{job_id}/midi")
+        assert midi_response.status_code == 404

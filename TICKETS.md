@@ -7270,6 +7270,8 @@ to be rediscovered.
 - [ ] S11c-1: Add test cases and validator rules for malformed .brf music files, such as having measure numbers or notes in the left margins when the score is an ensemble score.
 - [x] S11c-2: Implement BANA Page Layout and Formatting Rules for Braille Export
 - [ ] S11c-7: Teach `BrailleRenderer`/`Rest.to_braille()` to emit BANA's compact multi-measure-rest sign (Table 18) for a run of consecutive full-measure rests, instead of one whole-rest cell per measure -- found while working S10b-7; affects BRF round-trip, LilyPond import, and MusicXML import equally, not source-specific. Needs a design decision on how a merged run interacts with `_render_solo`/`_render_piano`/`_render_ensemble`'s per-measure line-packing and measure-number prefixing, alongside the existing `_compress_articulations`/`_compress_measure_repeats` passes. **Confirmed with a real-world repro:** the developer extracted the Piccolo/Flutes I/II part from `tests/fixtures/Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl` (`dottednotes convert ... --part 1 out.brl`) and found a 78-measure rest run printed as 78 individual `⠍` cells instead of BANA's consolidated `78m` count sign -- the same underlying gap, now also surfacing through the newer part-extraction feature (S10d-12/S10d-13), confirmed independently reproducible via `PYTHONPATH=src python3 -m dottednotes.cli convert tests/fixtures/Bartok_Bella_Romanian_Folk_Dances_for_Orchestra.brl /tmp/out.brl --part 1`.
+- [ ] S11c-8: Implement Web UI MIDI Playback
+
 
 **Sprint 12: OMR Import via Audiveris (shelved 2026-07-19 -- see tickets)**
 - [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step (CLI + web backend)
@@ -7425,6 +7427,27 @@ to be rediscovered.
 - [x] All unit and integration tests pass.
 
 ---
+
+### [ ] S11c-8: Implement Web UI MIDI Playback
+
+**Why:** The user wants to easily play back the converted scores directly from the web interface. Emitting a MIDI file allows the browser to synthesize and play the music, making the app much more interactive and helpful for verification, especially for screen reader users who want to hear the music while reading the braille score.
+
+**Steps:**
+1. Import the `html-midi-player` custom element scripts from a reliable CDN in `src/dottednotes/static/index.html`.
+2. Add a styled container with `<midi-player>` inside the `#result-section` in `src/dottednotes/static/index.html`, initially hidden.
+3. Update `src/dottednotes/static/style.css` with custom styles using `::part` selectors to style the play buttons, seek bars, and background to match the dark-mode glassmorphic aesthetics.
+4. Update `src/dottednotes/static/app.js` to show the MIDI player container and set its `src` attribute when conversion succeeds with a generated MIDI file.
+5. In `app.js`, listen to the part selector dropdown change and dynamically update the MIDI player's `src` attribute so that selecting a part extracts and plays the MIDI file for that specific part.
+6. Verify integration by running the web application and testing translation outputs.
+
+**Definition of Done:**
+- [ ] The web UI includes an embedded MIDI player with controls styled to match the site design.
+- [ ] Successfully converting a score with LilyPond output automatically loads the compiled MIDI file into the player.
+- [ ] Selecting a specific part from the parts dropdown automatically updates the player to play that part's MIDI file on-demand.
+- [ ] If no MIDI is compiled (e.g. compilation error or non-LilyPond target format), the MIDI player is cleanly hidden.
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

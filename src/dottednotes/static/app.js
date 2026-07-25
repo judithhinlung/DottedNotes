@@ -58,6 +58,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const partSelectorContainer = document.getElementById('part-selector-container');
     const partSelector = document.getElementById('part-selector');
 
+    // MIDI Player elements
+    const midiPlayerContainer = document.getElementById('midi-player-container');
+    const midiPlayer = document.getElementById('midi-player');
+
     function updateSectionState(section, state, details = {}) {
         if (section === 'validation') {
             if (state === 'no_file') {
@@ -233,6 +237,15 @@ document.addEventListener('DOMContentLoaded', () => {
             );
         }
         setPartLinkHrefs(jobId, val);
+
+        // Dynamically update MIDI player source if a source exists
+        if (midiPlayer.src) {
+            if (val === 'full') {
+                midiPlayer.src = `/api/jobs/${jobId}/midi`;
+            } else {
+                midiPlayer.src = `/api/jobs/${jobId}/parts/${val}/midi`;
+            }
+        }
     });
 
     function handleFileSelected(file) {
@@ -419,6 +432,10 @@ document.addEventListener('DOMContentLoaded', () => {
         validationTbody.innerHTML = '';
         compileLog.textContent = '';
 
+        // Reset MIDI player state
+        midiPlayerContainer.classList.add('hidden');
+        midiPlayer.src = '';
+
         // XMLHttpRequest (not fetch) is used here specifically because it's
         // the only option that exposes upload progress events -- fetch has
         // no equivalent for a multipart body.
@@ -476,6 +493,11 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSectionState('validation', 'no_file');
         
         compileLog.textContent = message;
+
+        // Reset MIDI player state
+        midiPlayerContainer.classList.add('hidden');
+        midiPlayer.src = '';
+
         announceStatus(`Conversion failed. Error details: ${message}`, 'assertive');
     }
 
@@ -497,6 +519,16 @@ document.addEventListener('DOMContentLoaded', () => {
             partSelectorContainer.classList.add('hidden');
         }
 
+        // Auto-load MIDI file if present in the results
+        const midiAvailable = !!(data.files && data.files.midi);
+        if (midiAvailable) {
+            midiPlayer.src = data.files.midi;
+            midiPlayerContainer.classList.remove('hidden');
+        } else {
+            midiPlayerContainer.classList.add('hidden');
+            midiPlayer.src = '';
+        }
+
         // 1. Compile status check and state transitions
         let badgeText = 'Success';
         let badgeClass = 'success';
@@ -512,9 +544,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 announceText = 'Score converted successfully to LilyPond, but PDF/MIDI compilation failed.';
             } else {
                 compileState = 'success';
+                if (midiAvailable) {
+                    announceText += ' A MIDI player is available for playback.';
+                }
             }
         }
-        
+
         // Update compile section state
         updateSectionState('compile', compileState);
         
@@ -677,6 +712,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // rendering half of showResults).
     function showResultsWithoutDialog(data) {
         currentJobId = data.job_id;
+
+        // Keep the MIDI player in sync: setting the instrument can change
+        // which MIDI file (if any) the server has compiled for this job.
+        if (data.files && data.files.midi) {
+            midiPlayer.src = data.files.midi;
+            midiPlayerContainer.classList.remove('hidden');
+        } else {
+            midiPlayerContainer.classList.add('hidden');
+            midiPlayer.src = '';
+        }
 
         let badgeText = 'Success';
         let badgeClass = 'success';
