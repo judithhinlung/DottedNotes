@@ -1,8 +1,17 @@
 FROM python:3.11-slim-bookworm
 
-# Install LilyPond
+# Install LilyPond 2.26.0 from the official upstream binary release.
+# Debian bookworm's apt package lags behind (2.24.x), so we fetch the
+# self-contained upstream tarball instead of `apt-get install lilypond`.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    lilypond \
+    curl \
+    ca-certificates \
+    && curl -sSL -o /tmp/lilypond.tar.gz \
+    https://gitlab.com/lilypond/lilypond/-/releases/v2.26.0/downloads/lilypond-2.26.0-linux-x86_64.tar.gz \
+    && tar -xzf /tmp/lilypond.tar.gz -C /opt \
+    && rm /tmp/lilypond.tar.gz \
+    && ln -s /opt/lilypond-2.26.0/bin/lilypond /usr/local/bin/lilypond \
+    && apt-get purge -y --auto-remove curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
