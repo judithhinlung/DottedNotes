@@ -3155,6 +3155,26 @@ def test_parser_carry_mode_renders_single_grace_block():
     assert ly.count(r'\grace') == 1
 
 
+def test_slur_immediately_after_grace_note_attaches_to_grace_note():
+    # Children's Piece mm. 10/11/14/15: a grace note followed immediately by
+    # a slur sign, then the main note (which then takes an interval to build
+    # a chord, per BANA -- intervals always follow the note they modify) --
+    # the slur starts on the grace note itself (BANA writes the sign right
+    # after the note it starts from), not on some unrelated earlier note.
+    # ⠢ ⠐ A8(grace) ⠉(slur) ⠳(G4 main note, written) ⠔(5th interval, on G)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        notes = _parse(_GRACE_SHORT + _OCT4 + '⠊' + _SLUR + '⠳' + '⠔')
+    from dottednotes.models.chord import Chord
+    assert isinstance(notes[0], Chord)
+    written = notes[0].notes[0]
+    assert written.grace_note is not None
+    assert written.grace_note.notes[0].slur_start is True
+    assert written.slur_end is True
+    ly = written.grace_note.notes[0].to_lilypond()
+    assert ly.endswith('(')
+
+
 # ---------------------------------------------------------------------------
 # S4-5: Word sign / text marking parsing
 # ---------------------------------------------------------------------------
@@ -4561,6 +4581,76 @@ def test_children_s_piece_measure22_left_hand_matches_lilypond_ground_truth():
         ('G', 8, 1), ('F', 16, 0), ('E', 8, 0), ('F', 8, 0), ('E', 4, 0),
     ]
     assert not any("Measure 22:" in str(w.message) for w in caught)
+
+
+def test_children_s_piece_title_decodes_apostrophe_correctly():
+    # The title cell sequence spells "Children's Piece" -- the apostrophe
+    # (braille dot 3) previously had no entry in _BRAILLE_TO_LETTER and
+    # decoded as '?', producing "Children?s Piece".
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    assert '?' not in score.staves[0].title_marking.text
+    assert "'" in score.staves[0].title_marking.text
+
+
+def test_children_s_piece_interval_chords_carry_grace_notes():
+    # Measures 10, 11, 14, and 15 are BANA interval-shorthand chords (not
+    # in-accord voices) whose written note carries a grace note -- Chord
+    # previously dropped it entirely on render (to_lilypond()/
+    # to_relative_lilypond() never referenced it).
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    staff = score.staves[0]
+    expected_grace_note_names = {10: 'A', 11: 'C', 14: 'B', 15: 'D'}
+    for measure_number, grace_name in expected_grace_note_names.items():
+        written = staff.measures[measure_number - 1].notes[0].notes[0]
+        assert written.grace_note is not None, f"measure {measure_number}"
+        assert written.grace_note.notes[0].note_name == grace_name
+
+    ly = score.to_lilypond()
+    assert ly.count(r'\grace') == len(expected_grace_note_names)
+
+
+def test_children_s_piece_lilypond_compiles_with_no_warnings(tmp_path: Path):
+    # Regression guard for the grace-note/slur-misattachment fix: before it,
+    # this fixture compiled with exit code 0 but LilyPond's own log reported
+    # "cannot end slur" at measures 10/11/14/15 (see test_lilypond_formatter.py's
+    # S7b-7 comment, which had to route around this exact fixture for that
+    # reason) -- a clean exit code alone doesn't mean the engraving is right.
+    import shutil
+    import subprocess
+
+    if not shutil.which('lilypond'):
+        pytest.skip('lilypond binary not found; skipping compile test')
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    ly_output = score.to_lilypond()
+
+    ly_file = tmp_path / 'children_s_piece.ly'
+    ly_file.write_text(ly_output, encoding='utf-8')
+    result = subprocess.run(
+        ['lilypond', '-o', str(tmp_path / 'children_s_piece'), str(ly_file)],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"LilyPond compilation failed:\n{result.stderr}"
+    combined_log = (result.stdout + result.stderr).lower()
+    assert "warning" not in combined_log, (
+        f"LilyPond reported a warning during compilation:\n{result.stdout}\n{result.stderr}"
+    )
 
 
 def test_16th_run_splits_into_two_beat_groups():

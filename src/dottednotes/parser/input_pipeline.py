@@ -85,6 +85,7 @@ _BRAILLE_TO_LETTER: dict[int, str] = {
 }
 _BRAILLE_TO_LETTER[0] = ' '   # blank cell = word separator
 _BRAILLE_TO_LETTER[ASCII_TO_DOTS['-']] = '-'  # dots 3,6 -- literary hyphen (e.g. "Left-Hand")
+_BRAILLE_TO_LETTER[ASCII_TO_DOTS["'"]] = "'"  # dot 3 -- literary apostrophe (e.g. "Children's")
 
 
 def decode_literary_braille(cells: str) -> str:

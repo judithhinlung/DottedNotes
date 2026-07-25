@@ -849,6 +849,27 @@ def test_chord_with_fermata_and_breath_mark_to_lilypond():
     assert "\\set breathMarkType = #'comma \\breathe" in ly_rel
 
 
+def test_chord_with_grace_note_on_written_note_to_lilypond():
+    # BANA interval-shorthand chords can carry a grace note on the written
+    # note (e.g. Children's Piece mm. 10/11/14/15) -- Chord must emit it the
+    # same way Note.to_lilypond()/to_relative_lilypond() already do, in both
+    # absolute and relative rendering.
+    from dottednotes.models import Chord
+    written = _make_note('G', 4, 4)
+    written.grace_note = GraceNote(notes=[_make_note('A', 4, 8)])
+    other = _make_note('D', 4, 4)
+    chord = Chord(notes=[written, other])
+
+    ly = chord.to_lilypond()
+    assert ly.startswith(r'\grace')
+    assert "a'" in ly.split('<')[0]
+    assert '<' in ly and '>' in ly
+
+    ly_rel, ref_midi = chord.to_relative_lilypond(60)
+    assert ly_rel.startswith(r'\grace')
+    assert ref_midi == written._midi_pitch()
+
+
 def test_note_with_accent():
     art = Articulation(ArticulationType.ACCENT)
     note = _make_note('C', 4, 4, articulations=[art])

@@ -878,6 +878,22 @@ class BrailleParser:
                 self._last_token_was_chord_tie = True
 
         elif slur_type == 'slur':
+            if self._pending_grace_notes and not self._slur_carry_active:
+                # A slur immediately follows a still-unattached grace note
+                # (BANA writes the slur sign right after the grace note it
+                # starts from, e.g. Children's Piece mm. 10/11/14/15:
+                # grace-note + slur-open, then the main note closes it) --
+                # it starts on that grace note, not on pending[-1] (the last
+                # *regular* note, which is unrelated -- likely the end of the
+                # previous measure at this point). A slur *ending* on a grace
+                # note isn't exercised by any known fixture and isn't handled
+                # here; _build_grace_note_cell still doesn't consume
+                # _pending_slur_end.
+                self._pending_grace_notes[-1].slur_start = True
+                if hasattr(self._pending_grace_notes[-1], 'parsed_tokens'):
+                    self._pending_grace_notes[-1].parsed_tokens.append(token)
+                self._pending_slur_end = True
+                return
             if self._last_token_was_chord_tie:
                 # Bare slur cell immediately after a chord-tie sign is the
                 # doubling shorthand (BANA Sec. 10.2.2: restate only the

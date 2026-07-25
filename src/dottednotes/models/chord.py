@@ -126,14 +126,16 @@ class Chord:
 
     def to_lilypond(self) -> str:
         """Return LilyPond chord string in absolute mode, e.g. '<c ees>4'."""
+        written = self.notes[0]
+        grace_str = (written.grace_note.to_lilypond() + ' ') if written.grace_note else ''
         parts = [
             NOTE_PITCH_ONLY(n)
             for n in self.notes
         ]
         dur = self.duration.to_lilypond()
-        tremolo_str = self.notes[0].tremolo.to_lilypond() if self.notes[0].tremolo else ''
-        extra = _chord_extras(self.notes[0])
-        return f"<{' '.join(parts)}>{dur}{tremolo_str}{extra}"
+        tremolo_str = written.tremolo.to_lilypond() if written.tremolo else ''
+        extra = _chord_extras(written)
+        return f"{grace_str}<{' '.join(parts)}>{dur}{tremolo_str}{extra}"
 
     def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
         """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
@@ -142,6 +144,21 @@ class Chord:
         the chord is relative to the preceding chord note.  After the chord,
         prev_midi advances to the first note's MIDI pitch (LilyPond rule).
         """
+        written = self.notes[0]
+
+        # A grace note attached to the written note (BANA interval-shorthand
+        # chords can carry one, e.g. Children's Piece mm. 10/11/14/15) renders
+        # before the chord, relative to prev_midi -- same chaining as
+        # Note.to_relative_lilypond()'s own grace-note handling.
+        grace_str = ''
+        if written.grace_note:
+            grace_parts = []
+            for gn in written.grace_note.notes:
+                note_str, prev_midi = gn.to_relative_lilypond(prev_midi)
+                grace_parts.append(note_str)
+            prefix = r'\appoggiatura' if written.grace_note.long_appoggiatura else r'\grace'
+            grace_str = f'{prefix} {{ {" ".join(grace_parts)} }} '
+
         parts: list[str] = []
         cur_midi = prev_midi
         for note in self.notes:
@@ -149,12 +166,12 @@ class Chord:
             parts.append(pitch_str)
 
         dur = self.duration.to_lilypond()
-        tremolo_str = self.notes[0].tremolo.to_lilypond() if self.notes[0].tremolo else ''
-        extra = _chord_extras(self.notes[0])
+        tremolo_str = written.tremolo.to_lilypond() if written.tremolo else ''
+        extra = _chord_extras(written)
 
         # After the chord, reference advances to the first note (LilyPond rule).
-        ref_midi = self.notes[0]._midi_pitch()
-        return f"<{' '.join(parts)}>{dur}{tremolo_str}{extra}", ref_midi
+        ref_midi = written._midi_pitch()
+        return f"{grace_str}<{' '.join(parts)}>{dur}{tremolo_str}{extra}", ref_midi
 
 
 def NOTE_PITCH_ONLY(note: Note) -> str:

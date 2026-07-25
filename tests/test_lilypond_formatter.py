@@ -116,14 +116,15 @@ def test_formatter_detects_orchestral_bartok():
 #     Support and Art Song Rendering"), not yet done.
 #
 # Solo Piano uses fingering_melody.brf, not children_s_piece.brf (the
-# fixture TICKETS.md's own S7b-7 text suggests): children_s_piece.brf
-# compiles with exit code 0 but LilyPond's log contains real warnings
-# ("cannot end slur" at three points, "unterminated decrescendo") --
+# fixture TICKETS.md's own S7b-7 text suggests): at the time this test was
+# written, children_s_piece.brf compiled with exit code 0 but LilyPond's log
+# contained real warnings ("cannot end slur" at measures 10/11/14/15) --
 # exactly the class of problem this ticket's "check the log, not just the
-# exit code" step exists to catch. That's a pre-existing slur/decrescendo
-# rendering defect unrelated to formatting; flagged separately rather
-# than fixed here (out of scope for a formatting-pipeline ticket).
-# fingering_melody.brf already compiles warning-free.
+# exit code" step exists to catch. That was Chord never emitting a grace
+# note it carried (dropping the slur that started on it too) -- fixed; see
+# test_parser.py's test_children_s_piece_lilypond_compiles_with_no_warnings.
+# fingering_melody.brf is left as this test's fixture regardless, since it
+# already compiles warning-free and switching isn't needed.
 # For these two, category_override forces the category on a real, fully
 # working score instead of skipping the category outright -- this still
 # exercises the real formatting code path end to end (get_settings ->
