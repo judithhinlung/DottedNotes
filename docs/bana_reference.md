@@ -369,6 +369,50 @@ capitalized-word mode).
   surface. Not implemented; an unrecognized modifier selector raises
   `BrailleParseError` rather than guessing.
 
+### Why UEB, not the full Liblouis table set
+
+BANA §35.1.1 sets **uncontracted UEB (Grade 1)** as the default for vocal
+lyrics. Contracted UEB (Grade 2) is not a general option -- it's restricted
+to two narrow cases:
+
+- **§35.1.1(b):** Grade 2 is permitted only for chants, hymnals, or school
+  materials for grades K-6.
+- **§35.1.1(c):** for any other vocal text, Grade 2 may be used only "at
+  the special request of the end user," and even then BANA still requires
+  a full uncontracted transcript in the preliminary pages.
+
+DottedNotes converts individual musical scores a composer is producing for
+performance or publication -- not liturgical hymnals or K-6 instructional
+collections. Grade 1 isn't a simplification chosen for convenience; it's
+the rule BANA actually specifies for the material DottedNotes handles.
+Given that, [Liblouis](https://liblouis.io/)'s ~150 tables -- overwhelmingly
+Grade 2 contraction rules and full per-language literary alphabets (BANA's
+separate §35.1.1(e)/UEB §13.6 "foreign code signs" case, which requires
+sourcing each language's own braille alphabet individually from *World
+Braille Usage*) -- fall outside DottedNotes' scope almost entirely. The one
+case that scope *does* need -- §35.1.1(d), an accented letter in a foreign
+word inside an otherwise-English lyric -- is already fully covered by
+UEB's own bounded accent-modifier system (12 signs, §4.2 above), which
+DottedNotes implements directly rather than through an external dependency.
+
+The remaining case, §35.1.1(f) -- a two-language song written entirely in
+IPA -- is the one place Liblouis-style tooling might seem relevant, but
+BANA's requirement there isn't just a character mapping: it mandates a
+transcriber's note explaining the IPA usage and a Special Symbols page
+listing every IPA symbol used. DottedNotes has no output surface for
+either today, so an IPA dot-pattern table alone wouldn't produce a
+BANA-compliant transcription -- it would just move the compliance gap
+rather than close it.
+
+Net effect: adopting all of Liblouis would pull in a large external
+C-library dependency to cover contraction rules and per-language alphabets
+BANA doesn't sanction for DottedNotes' actual use case, while the one case
+it could help with (IPA) still needs work Liblouis doesn't provide (the
+note and symbols page). Implementing UEB Grade 1 directly -- hand-verified
+against the official rulebook -- keeps DottedNotes' scope matched to what
+§35.1.1 actually requires, with no dependency footprint spent on rules
+that don't apply.
+
 ---
 
 ## BANA Formatting, Validation & Compression Rules (Sprint 9c)
