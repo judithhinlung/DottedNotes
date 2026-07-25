@@ -180,19 +180,7 @@ def NOTE_PITCH_ONLY(note: Note, key_signature: Optional[KeySignature] = None) ->
     """Return just the pitch portion of a note (name + accidental + fingering), no octave or duration."""
     from .note import NOTE_NAME_TO_LILYPOND
     ly_name = NOTE_NAME_TO_LILYPOND[note.note_name]
-    
-    if note.accidental:
-        accidental_str = note.accidental.to_lilypond()
-    elif key_signature:
-        acc_type = key_signature.accidental_by_step(note.note_name)
-        if acc_type:
-            from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
-            accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
-        else:
-            accidental_str = ''
-    else:
-        accidental_str = ''
-
+    accidental_str = note._accidental_suffix(note._effective_accidental_type(key_signature))
     fingering_str = ''.join(f.to_lilypond() for f in note.fingerings)
     return f"{ly_name}{accidental_str}{fingering_str}"
 

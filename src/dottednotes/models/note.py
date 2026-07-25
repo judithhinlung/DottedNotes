@@ -6,7 +6,7 @@ from typing import Optional, TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .key_signature import KeySignature
 
-from .accidental import Accidental
+from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX, Accidental, AccidentalType
 from .base import BrailleSymbol
 from .breath_mark import BreathMark
 from .duration import Duration
@@ -83,6 +83,20 @@ class Note(BrailleSymbol):
             return "'" * (self.octave - _LILYPOND_OCTAVE_BASE)
         return ''
 
+    def _effective_accidental_type(self, key_signature: Optional[KeySignature] = None) -> Optional[AccidentalType]:
+        """The AccidentalType actually sounding for this note: an explicit
+        accidental wins, otherwise fall back to what the active key
+        signature implies for this pitch step (S10d-15)."""
+        if self.accidental:
+            return self.accidental.type
+        if key_signature:
+            return key_signature.accidental_by_step(self.note_name)
+        return None
+
+    def _accidental_suffix(self, acc_type: Optional[AccidentalType]) -> str:
+        """LilyPond accidental suffix ('is'/'es'/...) for a resolved AccidentalType."""
+        return ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '') if acc_type else ''
+
     def to_lilypond(self, key_signature: Optional[KeySignature] = None) -> str:
         """Return LilyPond note string, e.g. 'c4', 'bes'2.', 'fis8'.
 
@@ -91,18 +105,7 @@ class Note(BrailleSymbol):
         """
         grace_str = (self.grace_note.to_lilypond(key_signature=key_signature) + ' ') if self.grace_note else ''
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
-        
-        if self.accidental:
-            accidental_str = self.accidental.to_lilypond()
-        elif key_signature:
-            acc_type = key_signature.accidental_by_step(self.note_name)
-            if acc_type:
-                from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
-                accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
-            else:
-                accidental_str = ''
-        else:
-            accidental_str = ''
+        accidental_str = self._accidental_suffix(self._effective_accidental_type(key_signature))
 
         octave_str = self._octave_marks()
         duration_str = self.duration.to_lilypond()
@@ -136,7 +139,6 @@ class Note(BrailleSymbol):
             pedal_str = r"\sustainOn\sustainOff"
         return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
                 f"{articulation_str}{ornament_str}{fermata_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}{breath_mark_str}")
-
 
     def to_braille(
         self,
@@ -360,13 +362,8 @@ class Note(BrailleSymbol):
         Renders only the pitch (name + accidental + octave marks), no duration
         or other markings.  Each chord note is relative to the preceding chord note.
         """
+        acc_type = self._effective_accidental_type(key_signature)
         semitone = _NOTE_SEMITONES[self.note_name]
-        acc_type = None
-        if self.accidental:
-            acc_type = self.accidental.type
-        elif key_signature:
-            acc_type = key_signature.accidental_by_step(self.note_name)
-            
         if acc_type:
             semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
 
@@ -387,30 +384,14 @@ class Note(BrailleSymbol):
             octave_str = ""
 
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
-        if self.accidental:
-            accidental_str = self.accidental.to_lilypond()
-        elif key_signature:
-            acc_type = key_signature.accidental_by_step(self.note_name)
-            if acc_type:
-                from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
-                accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
-            else:
-                accidental_str = ''
-        else:
-            accidental_str = ''
-            
+        accidental_str = self._accidental_suffix(acc_type)
         fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
         return f"{ly_name}{accidental_str}{octave_str}{fingering_str}", target_midi
 
     def _midi_pitch(self, key_signature: Optional[KeySignature] = None) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
         semitone = _NOTE_SEMITONES[self.note_name]
-        acc_type = None
-        if self.accidental:
-            acc_type = self.accidental.type
-        elif key_signature:
-            acc_type = key_signature.accidental_by_step(self.note_name)
-            
+        acc_type = self._effective_accidental_type(key_signature)
         if acc_type:
             semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
         return 12 * (self.octave + 1) + semitone
@@ -437,13 +418,8 @@ class Note(BrailleSymbol):
             prefix = r'\appoggiatura' if self.grace_note.long_appoggiatura else r'\grace'
             grace_str = f'{prefix} {{ {" ".join(parts)} }} '
 
+        acc_type = self._effective_accidental_type(key_signature)
         semitone = _NOTE_SEMITONES[self.note_name]
-        acc_type = None
-        if self.accidental:
-            acc_type = self.accidental.type
-        elif key_signature:
-            acc_type = key_signature.accidental_by_step(self.note_name)
-            
         if acc_type:
             semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
 
@@ -465,18 +441,7 @@ class Note(BrailleSymbol):
             octave_str = ""
 
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
-        if self.accidental:
-            accidental_str = self.accidental.to_lilypond()
-        elif key_signature:
-            acc_type = key_signature.accidental_by_step(self.note_name)
-            if acc_type:
-                from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
-                accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
-            else:
-                accidental_str = ''
-        else:
-            accidental_str = ''
-            
+        accidental_str = self._accidental_suffix(acc_type)
         duration_str = self.duration.to_lilypond()
         tremolo_str = self.tremolo.to_lilypond() if self.tremolo else ''
         fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
