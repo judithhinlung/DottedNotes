@@ -78,6 +78,25 @@ header .subtitle {
     font-weight: 400;
 }
 
+.header-help-link {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.header-help-link a {
+    color: var(--accent-blue);
+    text-decoration: underline;
+}
+
+.header-help-link a:hover {
+    color: var(--accent-purple);
+}
+
+.header-help-link a:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}
+
 /* Accessible hidden headings */
 .sr-only {
     position: absolute;

@@ -565,7 +565,7 @@ def test_convert_mystery_melody_single_line_produces_clean_nine_measure_score(
     # title_marking/tempo split). No --report beat-count warnings should
     # appear, and all 9 real measures' pitches should come through clean --
     # not the 20+ measures a corrupted header used to produce.
-    brf = FIXTURES / "mystery melody_single_line.brf"
+    brf = FIXTURES / "mystery_melody_single_line.brf"
     out = tmp_path / "mystery_melody.ly"
     _run_main(monkeypatch, [
         "convert", str(brf), str(out),

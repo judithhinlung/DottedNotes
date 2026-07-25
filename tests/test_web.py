@@ -26,6 +26,19 @@ def test_index_html_has_measure_numbers_checkbox_and_brl_option():
     assert 'type="checkbox"' in response.text
     assert '<option value="brl">' in response.text
 
+
+def test_index_html_links_to_readme_documentation():
+    # The header, footer, and post-translation instrument dialog should
+    # each link out to the README's own documentation rather than leaving
+    # users to guess what an option (or the instrument popup) does.
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    readme_usage_url = "https://github.com/judithhinlung/DottedNotes/blob/main/README.md#usage"
+    readme_options_url = "https://github.com/judithhinlung/DottedNotes/blob/main/README.md#customization-options"
+    assert html.count(readme_options_url) == 2  # header + instrument dialog
+    assert readme_usage_url in html
+
 def test_convert_braille_to_lilypond():
     # '⠐⠹' represents C4 in braille music
     file_content = b"\x10\x39" # ASCII braille equivalent of ⠐⠹ if tokenized
