@@ -459,6 +459,7 @@ class BrailleParser:
                         )
                     )
                     pending = []
+                    self._active_accidentals = {}
                     # Terminate all active interval doublings at double/section bars.
                     if bar_type in ('final_double_bar', 'section_double_bar'):
                         self._active_intervals.clear()
@@ -547,6 +548,7 @@ class BrailleParser:
                         )
                     )
                     pending = []
+                    self._active_accidentals = {}
                 count = 1
                 if token.character == '⠍⠍':
                     count = 2
@@ -1012,21 +1014,12 @@ class BrailleParser:
             ioctave = self._interval_octave_override
             self._interval_octave_override = None
 
-        # An explicit accidental before the interval sign takes priority over the key sig.
-        if self._pending_accidental is not None:
-            iacc_type = self._pending_accidental.type
-            self._pending_accidental = None
-        else:
-            iacc_type = _key_sig_accidental(iname, self._key_signature.sharps_or_flats)
-
-        iacc: Accidental | None = None
-        if iacc_type is not None:
-            iacc = Accidental(
-                dots=frozenset(),
-                category=SymbolCategory.ACCIDENTAL,
-                raw_brl='',
-                type=iacc_type,
-            )
+        # An explicit accidental before the interval sign takes priority over
+        # the key sig / any accidental already active for this pitch+octave
+        # in the current measure (see _resolve_accidental).
+        explicit_accidental = self._pending_accidental
+        self._pending_accidental = None
+        iacc = self._resolve_accidental(iname, ioctave, explicit_accidental)
 
         pnote.interval_notes.append((iname, ioctave, iacc, []))
 
@@ -1263,11 +1256,37 @@ class BrailleParser:
             self._pending_ornaments.append(Ornament(type=OrnamentType.TRILL))
             self._last_ornament_was_trill = True
 
+    def _resolve_accidental(
+        self, note_name: str, octave: int, explicit: Accidental | None
+    ) -> Accidental | None:
+        """Accidental that should sound for (note_name, octave) in the
+        current measure (MBC 2015 Part I, Sec. 5.1): an explicit sign always
+        wins and becomes the active accidental for this exact pitch+octave
+        for the rest of the measure; otherwise reuse whatever's already
+        active for it, falling back to the key signature."""
+        if explicit is not None:
+            self._active_accidentals[(note_name, octave)] = explicit.type
+            return explicit
+        if (note_name, octave) in self._active_accidentals:
+            acc_type = self._active_accidentals[(note_name, octave)]
+        else:
+            acc_type = _key_sig_accidental(note_name, self._key_signature.sharps_or_flats)
+        if acc_type is None:
+            return None
+        return Accidental(
+            dots=frozenset(),
+            category=SymbolCategory.ACCIDENTAL,
+            raw_brl='',
+            type=acc_type,
+            explicit=False,
+        )
+
     def _build_grace_note_cell(self, token: BrailleToken) -> Note:
         """Consume a note token as a single grace note pitch (always duration 8)."""
         note_name, _ = NOTE_CELLS[token.character]
-        accidental = self._pending_accidental
+        explicit_accidental = self._pending_accidental
         self._pending_accidental = None
+        accidental = self._resolve_accidental(note_name, self._current_octave, explicit_accidental)
         return Note(
             dots=frozenset(),
             category=SymbolCategory.NOTE,
@@ -1317,7 +1336,7 @@ class BrailleParser:
 
     def _buffer_note(self, token: BrailleToken) -> _PendingNote:
         note_name, base_duration = NOTE_CELLS[token.character]
-        accidental = self._pending_accidental
+        explicit_accidental = self._pending_accidental
         self._pending_accidental = None
         has_octave_mark = self._octave_mark_pending
         if not has_octave_mark and not self._in_accord_voice_restart:
@@ -1331,6 +1350,9 @@ class BrailleParser:
         self._in_accord_voice_restart = False
         self._octave_mark_pending = False  # octave mark was consumed by this note
         self._previous_note_letter = note_name
+        # Octave is now final -- safe to key the per-measure accidental
+        # state (see _resolve_accidental).
+        accidental = self._resolve_accidental(note_name, self._current_octave, explicit_accidental)
 
         # Capture and clear pre-note dynamics.
         dynamics = list(self._pending_dynamics)
@@ -2169,6 +2191,7 @@ class BrailleParser:
             '_time_signature_parsed': self._time_signature_parsed,
             '_clef_parsed': self._clef_parsed,
             '_pending_accidental': self._pending_accidental,
+            '_active_accidentals': dict(self._active_accidentals),
             '_pending_dynamics': list(self._pending_dynamics),
             '_pending_articulations': list(self._pending_articulations),
             '_active_articulations': set(self._active_articulations),
@@ -2266,6 +2289,14 @@ class BrailleParser:
         self._time_signature_parsed: bool = False
         self._clef_parsed: bool = False
         self._pending_accidental: Accidental | None = None
+        # Per-measure "active accidental" state (MBC 2015 Part I, Sec. 5.1):
+        # keyed by (note_name, octave), records the AccidentalType of the
+        # last *explicit* accidental seen on that exact pitch since the last
+        # measure boundary, so a later unmarked occurrence of the same
+        # pitch+octave inherits it instead of falling back to the key
+        # signature. Reset at each real measure boundary -- see the two
+        # `pending = []` sites after `_finalize_measure()` calls.
+        self._active_accidentals: dict[tuple[str, int], AccidentalType] = {}
         self._pending_dynamics: list[Dynamic] = []
         self._pending_articulations: list[Articulation] = []
         self._active_articulations: set[ArticulationType] = set()

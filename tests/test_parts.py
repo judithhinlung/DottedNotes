@@ -210,9 +210,9 @@ def test_cli_part_by_index(monkeypatch, tmp_path):
 
     content = out.read_text(encoding="utf-8")
     # Should only contain Violin part, not Flute or the Piano/StaffGroup layout
-    # Flute starts C D E F (c4 d e f -> c4 d4 e4 f4)
-    # Violin starts G A B C (g3 a b c -> g'4 a4 b4 c4)
-    assert "g'4 a4 b4 c4" in content.lower()
+    # Key signature is 3 flats (B, E, A). Flute starts C D E F (c4 d ees f).
+    # Violin starts G A B C (g3 a b c -> g'4 aes4 bes4 c4).
+    assert "g'4 aes4 bes4 c4" in content.lower()
     assert "StaffGroup" not in content
 
 
@@ -230,8 +230,9 @@ def test_cli_part_by_name(monkeypatch, tmp_path):
     _run_main(monkeypatch, ["convert", str(brf_file), str(out), "--part", "Flute"])
 
     content = out.read_text(encoding="utf-8")
-    assert "c4 d4 e4 f4" in content.lower()
-    assert "g'4 a4 b4 c4" not in content.lower()
+    # Key signature is 3 flats (B, E, A), so the Flute's E is flatted.
+    assert "c4 d4 ees4 f4" in content.lower()
+    assert "g'4 aes4 bes4 c4" not in content.lower()
 
 
 def test_cli_part_of_transposing_instrument_uses_written_pitch(monkeypatch, tmp_path):
@@ -301,16 +302,17 @@ def test_web_part_rendering_endpoint():
     assert response.status_code == 200
     job_id = response.json()["job_id"]
 
-    # 1. Download part 0 (Flute)
+    # 1. Download part 0 (Flute). Key signature is 3 flats (B, E, A), so the
+    # Flute's E is flatted.
     part0_response = client.get(f"/api/jobs/{job_id}/parts/0/ly")
     assert part0_response.status_code == 200
-    assert "c4 d4 e4 f4" in part0_response.text.lower()
-    assert "g'4 a4 b4 c4" not in part0_response.text.lower()
+    assert "c4 d4 ees4 f4" in part0_response.text.lower()
+    assert "g'4 aes4 bes4 c4" not in part0_response.text.lower()
 
     # 2. Download part 1 (Violin)
     part1_response = client.get(f"/api/jobs/{job_id}/parts/1/ly")
     assert part1_response.status_code == 200
-    assert "g'4 a4 b4 c4" in part1_response.text.lower()
+    assert "g'4 aes4 bes4 c4" in part1_response.text.lower()
 
     # 3. Download part 0 (Flute) as BRF with measure numbers
     response_mn = client.post(
@@ -339,7 +341,7 @@ def test_web_part_rendering_endpoint():
 
     part1_response_fallback = client.get(f"/api/jobs/{job_id}/parts/1/ly")
     assert part1_response_fallback.status_code == 200
-    assert "g'4 a4 b4 c4" in part1_response_fallback.text.lower()
+    assert "g'4 aes4 bes4 c4" in part1_response_fallback.text.lower()
 
 
 def test_web_part_of_transposing_instrument_uses_written_pitch(tmp_path):

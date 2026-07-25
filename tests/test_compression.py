@@ -5,6 +5,7 @@ from dottednotes.models.in_accord import InAccord
 from dottednotes.models.measure import Measure
 from dottednotes.models.duration import Duration
 from dottednotes.models.articulation import Articulation, ArticulationType
+from dottednotes.models.accidental import Accidental, AccidentalType
 from dottednotes.models.text_marking import TextMarking, TextMarkingType
 from dottednotes.renderers.braille_renderer import BrailleRenderer
 from dottednotes.parser.braille_parser import BrailleParser
@@ -52,6 +53,33 @@ def test_musical_equals_note_ignores_articulation_explicit_flag():
     )
 
     assert n1.musical_equals(n2)
+
+
+def test_musical_equals_note_ignores_accidental_explicit_flag():
+    # Same pitch/duration/accidental *type*, differing only in whether the
+    # accidental was written explicitly vs. inferred from the key signature
+    # / carried within the measure -- notation-only bookkeeping, not a
+    # musical difference (mirrors Articulation.explicit's treatment above),
+    # so two otherwise-identical measures must still be recognized as
+    # repeats even if one states the accidental and the other doesn't.
+    n1 = Note(
+        dots=frozenset(), category=None, raw_brl="", note_name="F", octave=4,
+        duration=Duration(4),
+        accidental=Accidental(dots=frozenset(), category=None, raw_brl="⠩", type=AccidentalType.SHARP, explicit=True),
+    )
+    n2 = Note(
+        dots=frozenset(), category=None, raw_brl="", note_name="F", octave=4,
+        duration=Duration(4),
+        accidental=Accidental(dots=frozenset(), category=None, raw_brl="", type=AccidentalType.SHARP, explicit=False),
+    )
+
+    assert n1.musical_equals(n2)
+
+    m1 = Measure(number=1)
+    m1.add_note(n1)
+    m2 = Measure(number=2)
+    m2.add_note(n2)
+    assert m1.musical_equals(m2)
 
 
 def test_musical_equals_chord():

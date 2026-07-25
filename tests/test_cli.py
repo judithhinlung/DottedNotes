@@ -582,13 +582,14 @@ def test_convert_mystery_melody_single_line_produces_clean_nine_measure_score(
     assert "\\time 6/8" in content
 
     measures = [
-        "e8 g8 d'8 f,8 a8 d8",
-        "g8 b8 e,8 g4 f8",
-        "e,8 g8 d'8 f,8 a8 d8",
+        # Key signature is G major (F#): unmarked F notes sound F-sharp.
+        "e8 g8 d'8 fis,8 a8 d8",
+        "g8 b8 e,8 g4 fis8",
+        "e,8 g8 d'8 fis,8 a8 d8",
         "b8 d8 g,8 b4 a8",
         "g8 b8 d8 a4 c8",
-        "b8 c8 e,8 g4 f8",
-        "e8 g8 d'8 f,8 a8 d8",
+        "b8 c8 e,8 g4 fis8",
+        "e8 g8 d'8 fis,8 a8 d8",
         "b8 d8 g,8 b4 a8",
         "gis4. b4.",
     ]

@@ -19,11 +19,11 @@ sopranoMusic = \relative c' {
     \time 4/4
     f8\f g8 a4 a4 a4 |
     f16 f16 g8 a4 a4 a4 |
-    b8( a8) g4 r2 |
-    b8\p( a8) g4 r2 |
-    a8\<( b8) c4 c4 c4 |
+    bes8( a8) g4 r2 |
+    bes8\p( a8) g4 r2 |
+    a8\<( bes8) c4 c4 c4 |
     f,8\>( g8) a4 a4 a4 |
-    a8\p b8 g4 r2 |
+    a8\p bes8 g4 r2 |
     g4 f4~ f2 |
 }
 

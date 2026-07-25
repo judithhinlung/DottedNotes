@@ -772,7 +772,7 @@ class BANAValidator:
             for note in notes_in_item:
                 note_name = note.note_name
                 octave = note.octave
-                has_acc = note.accidental is not None
+                has_acc = note.accidental is not None and note.accidental.explicit
 
                 curr_state = active_accidentals.get((note_name, octave), get_key_sig_accidental(key_sig, note_name))
 

@@ -69,6 +69,26 @@ def test_note_and_rest_to_braille():
     assert r.to_braille() == '⠧'
 
 
+def test_note_to_braille_only_emits_explicit_accidentals():
+    # An accidental inferred from the key signature or carried within the
+    # measure (Accidental.explicit=False) must not be restated in braille
+    # output -- MBC 2015 Part I, Sec. 5.1 -- while a genuinely explicit one
+    # still is.
+    implicit = Note(
+        dots=frozenset(), category=None, raw_brl="", note_name="F", octave=4,
+        duration=Duration(value=4, dots=0),
+        accidental=Accidental(dots=frozenset(), category=None, raw_brl="", type=AccidentalType.SHARP, explicit=False),
+    )
+    assert implicit.to_braille(is_measure_start=True) == '⠐⠻'
+
+    explicit = Note(
+        dots=frozenset(), category=None, raw_brl="", note_name="F", octave=4,
+        duration=Duration(value=4, dots=0),
+        accidental=Accidental(dots=frozenset(), category=None, raw_brl="", type=AccidentalType.SHARP, explicit=True),
+    )
+    assert explicit.to_braille(is_measure_start=True) == '⠩⠐⠻'
+
+
 def test_full_measure_rest_always_uses_whole_rest_sign_regardless_of_time_signature():
     # BANA Music Braille Code 2015, Par. 5.1: "A measure of silence is
     # indicated in the print by a whole rest, whatever the time signature

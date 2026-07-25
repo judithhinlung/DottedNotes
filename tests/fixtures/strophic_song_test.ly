@@ -26,12 +26,12 @@
       \key bes \major
       \time 3/4
       \clef treble
-      b'4 a4 b4 |
-      b4 c4 d4 |
-      e4( d4) c4 |
-      c4 b2 \bar "|."
-      e8 d8 c8 b8 b8 d8 |
-      c8 b8~ b2 \bar "|."
+      bes'4 a4 bes4 |
+      bes4 c4 d4 |
+      ees4( d4) c4 |
+      c4 bes2 \bar "|."
+      ees8 d8 c8 bes8 bes8 d8 |
+      c8 bes8~ bes2 \bar "|."
       }
       }
       \new Lyrics \lyricsto "vocals_right_hand" { Fly away oh my friend, Ple -- ase go quickly. Go far away, please go far away. }

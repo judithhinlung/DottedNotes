@@ -175,8 +175,10 @@ class Note(BrailleSymbol):
                     else:
                         octave_str = _OCTAVE_TO_BRL.get(self.octave, '')
 
-        # 3. Accidental
-        accidental_str = self.accidental.to_braille() if self.accidental else ''
+        # 3. Accidental (only when explicit -- an accidental inferred from
+        # the key signature or carried from an earlier explicit accidental
+        # in this measure is not restated, per MBC 2015 Part I, Sec. 5.1)
+        accidental_str = self.accidental.to_braille() if self.accidental and self.accidental.explicit else ''
 
         # 4. Note cell
         _NOTE_TO_BRL = {}
@@ -320,7 +322,8 @@ class Note(BrailleSymbol):
             self.note_name == other.note_name and
             self.octave == other.octave and
             self.duration == other.duration and
-            self.accidental == other.accidental and
+            (self.accidental.type if self.accidental else None) ==
+            (other.accidental.type if other.accidental else None) and
             self.tie == other.tie and
             self.slur_start == other.slur_start and
             self.slur_end == other.slur_end and

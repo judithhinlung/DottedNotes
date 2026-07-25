@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 
 from dottednotes.bana_symbols import SymbolCategory
@@ -26,6 +26,13 @@ ACCIDENTAL_TO_LILYPOND_SUFFIX = {
 class Accidental(BrailleSymbol):
     """An accidental (sharp, flat, natural, etc.)"""
     type: AccidentalType
+    # Whether the source BRF wrote this accidental explicitly vs. it being
+    # inferred from the key signature or carried from an earlier explicit
+    # accidental on the same pitch+octave within the current measure (MBC
+    # 2015 Part I, Sec. 5.1). compare=False keeps it out of Accidental's
+    # (and therefore Note.musical_equals()'s) equality check -- notation
+    # provenance, not a musical attribute. Mirrors Articulation.explicit.
+    explicit: bool = field(default=True, compare=False)
 
     def to_lilypond(self) -> str:
         """Return LilyPond accidental suffix e.g. 'is', 'es', 'isis'"""

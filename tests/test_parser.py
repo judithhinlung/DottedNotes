@@ -1868,13 +1868,18 @@ def test_e_flat_quarter_renders_as_ees_in_lilypond():
     assert notes[0].to_lilypond().startswith('ees')
 
 
-def test_accidental_does_not_carry_forward_to_next_note():
-    # After the flat E, the following E note should carry no accidental
+def test_explicit_accidental_carries_forward_within_measure():
+    # MBC 2015 Part I, Sec. 5.1: an explicit accidental stays active for
+    # that exact pitch+octave for the rest of the measure, so the second,
+    # unmarked E inherits the flat instead of reverting to E-natural.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         notes = _parse('⠐⠣⠫⠫')   # octave 4, flat E, plain E
-    assert notes[0].accidental is not None   # first note: E-flat
-    assert notes[1].accidental is None       # second note: plain E
+    assert notes[0].accidental.type.name == 'FLAT'
+    assert notes[0].accidental.explicit is True
+    assert notes[1].accidental is not None
+    assert notes[1].accidental.type.name == 'FLAT'
+    assert notes[1].accidental.explicit is False
 
 
 def test_note_without_preceding_accidental_has_none():
@@ -1965,6 +1970,58 @@ def test_g_major_scale_renders_to_lilypond():
     assert r'\time 4/4' in ly
     assert r'\clef treble' in ly
     assert 'fis' in ly
+
+
+def test_unmarked_note_gets_key_signature_accidental():
+    # G major (1 sharp: F#). An unmarked F must sound F-sharp, inferred
+    # (not explicit) -- the reported bug: BANA doesn't restate a key
+    # signature's own accidentals on every occurrence (MBC 2015 Part I,
+    # Sec. 5.1).
+    tokens = [
+        _make_token('⠩', SymbolCategory.KEY_SIGNATURE),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠻', SymbolCategory.NOTE),  # unmarked F quarter
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    parser = BrailleParser(tokens=tokens)
+    score = parser.parse()
+    fnote = score.staves[0].measures[0].notes[0]
+    assert fnote.note_name == 'F'
+    assert fnote.accidental is not None
+    assert fnote.accidental.type.name == 'SHARP'
+    assert fnote.accidental.explicit is False
+    assert fnote.to_lilypond().startswith('fis')
+
+
+def test_explicit_natural_carries_then_resets_at_measure_boundary():
+    # G major (1 sharp: F#). An explicit natural on the first F cancels the
+    # key signature for the rest of THIS measure (Sec. 5.1), so a second,
+    # unmarked F in the same measure also reads natural -- but the next
+    # measure's unmarked F reverts to the key signature's sharp, since the
+    # "active accidental" state resets at each measure boundary.
+    tokens = [
+        _make_token('⠩', SymbolCategory.KEY_SIGNATURE),
+        _make_token('⠐', SymbolCategory.OCTAVE_MARK),
+        _make_token('⠡', SymbolCategory.ACCIDENTAL),  # explicit natural
+        _make_token('⠻', SymbolCategory.NOTE),        # F -- explicit natural
+        _make_token('⠻', SymbolCategory.NOTE),        # F -- carried natural
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+        _make_token('⠻', SymbolCategory.NOTE),        # F -- back to key sig sharp
+        _make_token('⠀', SymbolCategory.BAR_LINE),
+    ]
+    parser = BrailleParser(tokens=tokens)
+    score = parser.parse()
+    measures = score.staves[0].measures
+
+    f1, f2 = measures[0].notes
+    assert f1.accidental.type.name == 'NATURAL'
+    assert f1.accidental.explicit is True
+    assert f2.accidental.type.name == 'NATURAL'
+    assert f2.accidental.explicit is False
+
+    f3 = measures[1].notes[0]
+    assert f3.accidental.type.name == 'SHARP'
+    assert f3.accidental.explicit is False
 
 
 def test_g_major_scale_lilypond_compiles(tmp_path: Path):

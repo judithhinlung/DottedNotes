@@ -298,6 +298,20 @@ def test_validation_redundant_accidental():
     assert "Redundant accidental on note 'F'" in red_accs[0].message
 
 
+def test_validation_no_redundant_accidental_for_unmarked_key_signature_note():
+    # Regression guard: an unmarked F in a G major key signature now parses
+    # with an *inferred* (Accidental.explicit=False) sharp -- this must not
+    # be reported as a redundant explicit accidental, since none was
+    # written in the source at all.
+    brf = "⠩\n⠐⠻"
+    score = parse_brf(brf)
+
+    validator = BANAValidator(profile="strict")
+    result = validator.validate(score)
+    red_accs = [c for c in result.corrections if c.rule_id == "S9c-redundant-accidental"]
+    assert red_accs == []
+
+
 def test_validation_measure_repeat():
     # Two identical measures: ⠐⠹⠀⠐⠹
     brf = "⠐⠹⠀⠐⠹"
