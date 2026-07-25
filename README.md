@@ -261,6 +261,59 @@ dottednotes --version
 >   emits the major spelling; if the piece is actually in the relative
 >   minor, edit the generated `\key` line by hand.
 
+## Web UI
+
+A hosted version is available at [www.dottednotes.net](https://www.dottednotes.net) —
+no installation required. Upload a `.brf`, `.brl`, `.ly`, `.musicxml`, `.xml`, or `.mxl`
+file, choose the options described below, and download the converted result (and, for
+LilyPond output, the compiled PDF/MIDI if compilation succeeds).
+
+The web UI's options mirror the CLI's `convert` flags one-to-one — the "What do these
+options mean?" link on the page points back to this section.
+
+* **Target Format**: LilyPond (`.ly`, `.pdf`, `.midi`), Braille Music (`.brf`),
+  Braille Music (`.brl`), or MusicXML (`.musicxml`). Corresponds to `dottednotes convert`'s
+  choice of output file extension.
+* **Layout Category**: same as `--category` — Default (auto-detect), Solo Piano, Art Song,
+  Chamber, Orchestral, or Lead Sheet.
+* **Braille Compression**: same as `--compression` — Full Compression, Minimal
+  Compression, or No Compression. Only affects Braille Music output.
+* **BANA Validation Profile**: Standard or Strict (extra checks). Controls which rules the
+  BANA Formatting Rule Report (below the downloads) checks for.
+* **Include Measure Numbers**: same as `--measure-numbers`.
+* **Measure Numbering**: same as `--measure-numbering` — Auto (renumber sequentially from
+  1) or Print Score (keep the source file's own numbers). Only matters when Include
+  Measure Numbers is on.
+* **Include Page Numbers**: adds the piece title and a braille page number to every page
+  of Braille Music output. On by default; turn off for a plain continuous stream with no
+  page breaks.
+* **Always Mark Octave at Start of Measure**: same as `--octave-mark-every-measure`.
+* **Include Clef Sign (Facsimile)**: same as `--include-clef-sign`.
+* **Full-Measure Repeat**: same as `--full-measure-repeat` — Single-Voice Only (default),
+  Off, or Single- and Multi-Voice.
+* **Minimum Repeated Measures**: same as `--min-repeated-measures`.
+* **Advanced Formatting Overrides**: same as `--format`, entered as the same
+  comma-separated `key=value` string (e.g. `paper_size=a4,margin_mm=12`).
+
+For a multi-staff score, a **part selector** appears next to the downloads so you can
+fetch a single part (staff) instead of the full score — equivalent to the CLI's
+`--list-parts`/`--part`.
+
+### Instrument selection dialog
+
+If the uploaded file is a BANA Sec. 24 single-line-format `.brf`/`.brl` (an instrumental
+solo or single ensemble part) — or an extracted piano hand from a keyboard score — the
+result has no instrument name of its own: single-line braille never states which
+instrument it's written for, and "right hand"/"left hand" are internal placeholders, not
+real instrument names. In both cases the web UI pops up an **instrument selection
+dialog** after translation, equivalent to the CLI's `--instrument` flag.
+
+Before showing the dialog, DottedNotes makes a best-effort guess: it tries to infer the
+instrument from the piece's title (e.g. a title containing "for Violin"), and falls back
+to piano if nothing recognizable is found. That guess is pre-applied to the initial
+output and pre-selected in the dialog — you can accept it as-is, pick a different
+instrument from the list, or dismiss the dialog to keep the guessed/default instrument.
+
 ## Background
 
 This project is written by a blind composer who uses a BrailleNotetaker to
