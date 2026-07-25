@@ -114,6 +114,13 @@ dottednotes convert piece.musicxml --list-parts
 dottednotes convert piece.musicxml piece.ly --part 2
 dottednotes convert piece.musicxml piece.ly --part "Soprano"
 
+# Convert a BANA Sec. 24 single-line-format instrumental solo, naming its
+# instrument (the braille never states this itself)
+dottednotes convert piece.brf piece.ly --single-line --instrument violin
+
+# List every instrument name --instrument accepts
+dottednotes --list-instruments
+
 # Show version
 dottednotes --version
 ```
@@ -213,6 +220,46 @@ dottednotes --version
 
 * **`--part <IndexOrName>`**:
   Filters the score to include only the specified part before rendering. Accepts a 1-based index (e.g. `2`) or a case-insensitive part name (e.g. `Soprano`).
+
+* **`--single-line`**:
+  Parses `.brf`/`.brl` input as BANA Sec. 24 single-line format (an
+  instrumental solo or single ensemble part) — its braille never states
+  which instrument it's written for (Secs. 24.1–24.5 only cover segment/
+  measure-number layout). Not valid with MusicXML/LilyPond input, which
+  already carries its own instrument information.
+
+* **`--instrument <Name>`**:
+  Names the instrument for a `--single-line` conversion, from LilyPond's
+  General MIDI instrument list (run `dottednotes --list-instruments` to
+  see every option — e.g. `violin`, `flute`, `french horn`). Sets the
+  output staff's name and `\set Staff.midiInstrument`. Optional: if
+  omitted, the instrument is inferred from the piece's title (e.g. "for
+  Violin"), falling back to piano when nothing recognizable is found. The
+  same inference (with a confirm/override prompt) drives the web UI's
+  post-translation instrument popup — see `web.py`'s
+  `needs_instrument_selection`/`POST /api/jobs/{id}/instrument`, which
+  also covers an extracted piano hand (`right hand`/`left hand` are
+  parser placeholders, not real instrument names).
+
+* **`--list-instruments`**:
+  Prints every instrument name `--instrument` accepts, one per line, and
+  exits. Works standalone, without `convert` or an input file (like
+  `--version`).
+
+> [!NOTE]
+> DottedNotes transcribes braille input faithfully rather than
+> auto-correcting it, so a few things are on the transcriber to get right
+> in the source `.brf`/`.brl` file:
+> - **Capitalization**: follow BANA's literary-braille capital-indicator
+>   convention for instrument names, titles, and tempo/mood markings (e.g.
+>   "Allegro moderato", not "allegro moderato") — DottedNotes reproduces
+>   whatever capitalization the braille actually encodes, it doesn't infer
+>   proper-noun or sentence casing on its own.
+> - **Key signature mode**: braille key signatures encode a sharp/flat
+>   count only, with no way to distinguish a major key from its relative
+>   minor (e.g. E minor and G major share one sharp) — DottedNotes always
+>   emits the major spelling; if the piece is actually in the relative
+>   minor, edit the generated `\key` line by hand.
 
 ## Background
 

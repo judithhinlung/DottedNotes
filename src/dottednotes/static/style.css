@@ -630,3 +630,57 @@ footer {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
 }
+
+/* Post-translation instrument selection dialog */
+#instrument-dialog {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    box-shadow: 0 12px 48px 0 rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-primary);
+    padding: 2rem;
+    width: min(28rem, 90vw);
+}
+
+#instrument-dialog::backdrop {
+    background: rgba(13, 17, 23, 0.7);
+}
+
+#instrument-dialog-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+#instrument-dialog h2 {
+    font-size: 1.2rem;
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+.btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 1.05rem;
+    font-weight: 600;
+    padding: 1rem;
+}
+
+.btn-secondary:hover {
+    border-color: var(--accent-blue);
+}
+
+.btn-secondary:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+}

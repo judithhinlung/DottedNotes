@@ -275,7 +275,8 @@ def test_web_convert_returns_parts_list():
     assert response.status_code == 200
     data = response.json()
     assert "parts" in data
-    assert data["parts"] == ["Flute", "Violin"]
+    assert [p["name"] for p in data["parts"]] == ["Flute", "Violin"]
+    assert all(not p["needs_instrument"] for p in data["parts"])
 
 
 def test_web_part_rendering_endpoint():
@@ -355,7 +356,7 @@ def test_web_part_of_transposing_instrument_uses_written_pitch(tmp_path):
         )
     assert response.status_code == 200
     data = response.json()
-    assert data["parts"] == ["Flute", "Horn in F"]
+    assert [p["name"] for p in data["parts"]] == ["Flute", "Horn in F"]
     job_id = data["job_id"]
 
     full_response = client.get(f"/api/jobs/{job_id}/ly")

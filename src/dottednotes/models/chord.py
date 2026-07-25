@@ -31,12 +31,12 @@ class Chord:
     # attribute -- excluded from `musical_equals()` like `Articulation.
     # explicit`. Used by `Score.extract_part()`/`BrailleRenderer` (S10d-13)
     # to detect when an extracted single-staff part must keep ensemble-
-    # style transcription instead of downgrading to SOLO: this chord's
-    # actual pitches were built assuming an upward-reading reader, so
-    # rendering them under a clef-based-direction SOLO layout would have a
-    # reader reconstruct a different note entirely (interval direction
-    # changes the pitch letter, not just the octave -- an octave mark
-    # can't fix that).
+    # style transcription instead of downgrading to SINGLE_LINE: this
+    # chord's actual pitches were built assuming an upward-reading reader,
+    # so rendering them under a clef-based-direction SINGLE_LINE layout
+    # would have a reader reconstruct a different note entirely (interval
+    # direction changes the pitch letter, not just the octave -- an octave
+    # mark can't fix that).
     resolved_ensemble_upward: bool = False
 
     def musical_equals(self, other: Any) -> bool:

@@ -74,6 +74,7 @@
                             </select>
                         </div>
 
+
                         <div class="form-group checkbox-group">
                             <label for="measure_numbers" class="checkbox-label">
                                 <input type="checkbox" id="measure_numbers" name="measure_numbers" value="true" checked>
@@ -210,6 +211,27 @@
                 </div>
             </section>
         </main>
+
+        <dialog id="instrument-dialog" aria-labelledby="instrument-dialog-heading">
+            <form id="instrument-dialog-form" method="dialog">
+                <h2 id="instrument-dialog-heading">Confirm Instrument</h2>
+                <p id="instrument-dialog-context" class="help-text">
+                    This score is in BANA Sec. 24 single-line format, so its braille doesn't state
+                    which instrument it's written for. We've guessed one from the title below &mdash;
+                    change it if it's wrong.
+                </p>
+                <div class="form-group">
+                    <label for="instrument-dialog-select">Instrument</label>
+                    <select id="instrument-dialog-select" name="instrument">
+                        <option value="" selected disabled>Select an instrument&hellip;</option>
+                    </select>
+                </div>
+                <div class="dialog-actions">
+                    <button type="button" class="btn-secondary" id="instrument-dialog-skip">Skip</button>
+                    <button type="submit" class="btn-submit" id="instrument-dialog-confirm">Use This Instrument</button>
+                </div>
+            </form>
+        </dialog>
 
         <footer>
             <p>DottedNotes Web Service &copy; 2026. Made with care for accessible sheet music.</p>

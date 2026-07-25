@@ -10,6 +10,7 @@ from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from .exceptions import DottedNotesError, LilyPondCompileError
+from .models.instrument import GENERAL_MIDI_INSTRUMENTS, infer_instrument_from_title
 from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, has_ensemble_header
 from .parser.lead_sheet_parser import parse_lead_sheet
@@ -18,7 +19,7 @@ from .parser.tokenizer import BrailleTokenizer
 from .parser.input_pipeline import BRLInputPipeline
 
 
-def _parse_score(text: str, category_override: str | None = None):
+def _parse_score(text: str, category_override: str | None = None, single_line: bool = False):
     """Parse normalized Unicode braille text into a Score, choosing the
     lead-sheet, strophic-song, ensemble, or solo parser.
 
@@ -31,12 +32,19 @@ def _parse_score(text: str, category_override: str | None = None):
     ensemble score, so the caller must ask for them explicitly. Otherwise,
     choose the ensemble or solo parser based on whether an instrument-list
     header (BANA §33.2) is present.
+
+    single_line=True (--single-line, BANA Sec. 24) skips that ensemble
+    auto-detection entirely and always routes to the solo parser: a
+    single-line-format instrumental solo is explicitly declared by the
+    caller (who also supplies --instrument, since Sec. 24 content never
+    states its own instrument -- see _run_convert), so there's no need to
+    guess, and no reason to risk a false-positive ensemble-header match.
     """
     if category_override == "Lead Sheet":
         return parse_lead_sheet(text)
     if category_override == "Strophic Song":
         return parse_strophic_song(text)
-    if has_ensemble_header(text):
+    if not single_line and has_ensemble_header(text):
         return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)
     return BrailleParser(tokens=tokens, category_override=category_override).parse()
@@ -138,6 +146,35 @@ def _run_convert(args: argparse.Namespace) -> None:
     if args.format is not None:
         format_overrides = _parse_format(args.format)
 
+    instrument = None
+    if args.instrument is not None and not args.single_line:
+        raise DottedNotesError(
+            "--instrument requires --single-line: BANA Sec. 24's "
+            "single-line format is the only case where the instrument "
+            "isn't already known from the input itself (a piano BRF's "
+            "hands, an ensemble's Sec. 33.2 header, an instrument already "
+            "named in MusicXML/LilyPond input)."
+        )
+    if args.single_line:
+        if is_musicxml_input or is_lilypond_input:
+            raise DottedNotesError(
+                "--single-line only applies to .brf/.brl input -- "
+                "MusicXML and LilyPond input already carry their own "
+                "instrument information."
+            )
+        # --instrument itself is optional (S12-3): when omitted, the
+        # instrument is inferred from the piece's title once it's parsed
+        # below (infer_instrument_from_title), falling back to piano --
+        # BANA Sec. 24's braille never states an instrument, so there's
+        # nothing to require the caller supply up front.
+        if args.instrument is not None:
+            instrument = args.instrument.strip().lower()
+            if instrument not in GENERAL_MIDI_INSTRUMENTS:
+                raise DottedNotesError(
+                    f"Unknown instrument '{args.instrument}'. Run "
+                    "'dottednotes --list-instruments' to see supported names."
+                )
+
     if is_musicxml_input:
         from dottednotes.parser.musicxml_parser import load_musicxml
         score = load_musicxml(args.input)
@@ -167,11 +204,27 @@ def _run_convert(args: argparse.Namespace) -> None:
             _print_verbose_trace(args.input, text)
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                score = _parse_score(text, category_override=category_override)
+                score = _parse_score(text, category_override=category_override, single_line=args.single_line)
             for w in caught:
                 print(f"Warning: {w.message}", file=sys.stderr)
         else:
-            score = _parse_score(text, category_override=category_override)
+            score = _parse_score(text, category_override=category_override, single_line=args.single_line)
+
+    if args.single_line:
+        # S12-1/S12-3: BANA Sec. 24 single-line format never states its
+        # own instrument, so name every staff here, post-parse, rather
+        # than threading it through the parser itself -- from the user's
+        # explicit --instrument when given, otherwise inferred from the
+        # piece's title (e.g. "Mystery Melody for Violin"), falling back
+        # to piano.
+        final_instrument = instrument
+        if final_instrument is None:
+            title_text = score.staves[0].title_text() if score.staves else None
+            final_instrument = infer_instrument_from_title(title_text)
+        display_name = final_instrument.title()
+        for staff in score.staves:
+            staff.name = display_name
+            staff.midi_instrument = final_instrument
 
     if getattr(args, "list_parts", False):
         if not score.staves:
@@ -274,6 +327,22 @@ def _run_convert(args: argparse.Namespace) -> None:
         _compile_with_lilypond(Path(output_path))
 
 
+class _ListInstrumentsAction(argparse.Action):
+    """Prints every --instrument name this CLI accepts (LilyPond's General
+    MIDI instrument list -- see models/instrument.py's GENERAL_MIDI_INSTRUMENTS)
+    and exits immediately, the same way --version does -- no subcommand or
+    its required `input` argument needed first."""
+
+    def __init__(self, option_strings, dest, **kwargs) -> None:
+        kwargs.setdefault("nargs", 0)
+        super().__init__(option_strings, dest, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None) -> None:
+        for name in GENERAL_MIDI_INSTRUMENTS:
+            print(name)
+        parser.exit()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="dottednotes",
@@ -283,6 +352,14 @@ def main() -> None:
         "--version",
         action="version",
         version=f"dottednotes {_pkg_version('dottednotes')}",
+    )
+    parser.add_argument(
+        "--list-instruments",
+        action=_ListInstrumentsAction,
+        help="List every instrument name --instrument accepts (one per "
+             "line) and exit. Used with 'convert --single-line "
+             "--instrument <name>' for BANA Sec. 24 single-line format, "
+             "whose braille never states its own instrument.",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -419,6 +496,25 @@ def main() -> None:
         "--list-parts",
         action="store_true",
         help="List all available parts/staves and exit",
+    )
+    convert_parser.add_argument(
+        "--single-line",
+        action="store_true",
+        help="Parse .brf/.brl input as BANA Sec. 24 single-line format (an "
+             "instrumental solo or single ensemble part), naming its "
+             "instrument via --instrument (or inferring it from the "
+             "title, falling back to piano, if --instrument is omitted) "
+             "since single-line format's braille never states which "
+             "instrument the piece is for.",
+    )
+    convert_parser.add_argument(
+        "--instrument",
+        help="Name the instrument for a --single-line conversion, from "
+             "LilyPond's General MIDI instrument list ('dottednotes "
+             "--list-instruments' to see all options). Sets the output "
+             "staff's name and \\set Staff.midiInstrument. Optional: if "
+             "omitted, the instrument is inferred from the piece's title "
+             "(e.g. 'for Violin'), falling back to piano.",
     )
     convert_parser.set_defaults(func=_run_convert)
 

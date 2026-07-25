@@ -612,7 +612,7 @@ def test_ensemble_renderer_splits_overlong_measure_into_run_over_lines():
         m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=octave, duration=Duration(value=4, dots=0)))
     staff.add_measure(m)
     score.add_staff(staff)
-    # A second staff so this routes through _render_ensemble, not _render_solo.
+    # A second staff so this routes through _render_ensemble, not _render_single_line.
     other = Staff(name="Oboe")
     m2 = Measure(number=1)
     m2.add_note(Rest(dots=frozenset(), category=None, raw_brl="", duration=Duration(value=1, dots=0), is_full_measure=True))

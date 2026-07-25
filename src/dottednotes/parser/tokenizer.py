@@ -209,9 +209,16 @@ class BrailleTokenizer:
                 while j < len(text) and text[j] in LITERARY_DIGITS:
                     digit_values.append(LITERARY_DIGITS[text[j]])
                     j += 1
-                next_char = text[j] if j < len(text) else ''
+                # BANA 24.1.1: "If the segment begins with a partial measure,
+                # the number is followed by dot 3" (Example 24.1.1-1: "#E'").
+                # Consume it here (tentatively -- only committed below once a
+                # real margin number is confirmed) so a partial-measure
+                # segment head is recognized as a margin number at all,
+                # instead of falling through and misreading the segment.
+                partial_j = j + 1 if j < len(text) and text[j] == END_WORD_SIGN else j
+                next_char = text[partial_j] if partial_j < len(text) else ''
                 if digit_values and next_char in (' ', '⠀'):
-                    k = j
+                    k = partial_j
                     while k < len(text) and text[k] == '⠀':
                         k += 1
                     if k < len(text) and text[k] not in ('\n', '\r'):

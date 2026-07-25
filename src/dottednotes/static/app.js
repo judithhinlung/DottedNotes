@@ -25,6 +25,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const groupMinRepeatedMeasures = document.getElementById('group-min-repeated-measures');
     const pageNumbersCheckbox = document.getElementById('page_numbers');
 
+    // Post-translation instrument selection (S12-3, BANA Sec. 24
+    // single-line format): its braille never states an instrument, so
+    // this dialog is shown after translation instead of asked upfront.
+    const instrumentDialog = document.getElementById('instrument-dialog');
+    const instrumentDialogForm = document.getElementById('instrument-dialog-form');
+    const instrumentDialogSelect = document.getElementById('instrument-dialog-select');
+    const instrumentDialogContext = document.getElementById('instrument-dialog-context');
+    let pendingInstrumentScope = null; // {type: 'main'} or {type: 'part', partIdx, fileKeys}
+
     // Results Section
     const resultSection = document.getElementById('result-section');
     const statusBadge = document.getElementById('status-badge');
@@ -45,6 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Part selection
     let currentJobId = null;
+    let currentParts = []; // [{name, needs_instrument}, ...] from the last showResults()
     const partSelectorContainer = document.getElementById('part-selector-container');
     const partSelector = document.getElementById('part-selector');
 
@@ -191,11 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateOptionVisibility();
     });
 
-    // Update link hrefs when part is selected
-    partSelector.addEventListener('change', () => {
-        const val = partSelector.value;
-        const jobId = currentJobId;
-        if (!jobId) return;
+    function setPartLinkHrefs(jobId, val) {
         const links = downloadLinks.querySelectorAll('.download-btn');
         links.forEach(link => {
             const fileType = link.getAttribute('data-file-type');
@@ -205,6 +211,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 link.href = `/api/jobs/${jobId}/parts/${val}/${fileType}`;
             }
         });
+    }
+
+    // Update link hrefs when part is selected. An extracted piano hand
+    // has no real instrument name of its own ("right hand"/"left hand"
+    // are parser placeholders, not instruments, S12-3) -- offer the same
+    // instrument dialog used post-translation before pointing the
+    // download links at it, so the Lilypond/MusicXML exports come out
+    // correctly named.
+    partSelector.addEventListener('change', () => {
+        const val = partSelector.value;
+        const jobId = currentJobId;
+        if (!jobId) return;
+
+        const part = val !== 'full' ? currentParts[Number(val)] : null;
+        if (part && part.needs_instrument) {
+            showInstrumentDialog(
+                { type: 'part', partIdx: val },
+                null,
+                `This part ("${part.name}") doesn't have a real instrument name of its own -- pick one for its LilyPond/MusicXML exports.`,
+            );
+        }
+        setPartLinkHrefs(jobId, val);
     });
 
     function handleFileSelected(file) {
@@ -264,6 +292,36 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function populateInstrumentOptions() {
+        fetch('/api/instruments')
+            .then(res => res.json())
+            .then(data => {
+                (data.instruments || []).forEach(name => {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    instrumentDialogSelect.appendChild(option);
+                });
+            })
+            .catch(() => {
+                // Non-fatal -- the dropdown just stays empty; the backend
+                // still validates 'instrument' server-side either way.
+            });
+    }
+
+    // Shows the post-translation instrument dialog (S12-3), pre-selected
+    // to `defaultInstrument` if it's one of the dropdown's options.
+    // `scope` records what to do when the user confirms -- see
+    // instrumentDialogForm's submit handler below.
+    function showInstrumentDialog(scope, defaultInstrument, contextText) {
+        pendingInstrumentScope = scope;
+        instrumentDialogContext.textContent = contextText;
+        if (defaultInstrument && [...instrumentDialogSelect.options].some(o => o.value === defaultInstrument)) {
+            instrumentDialogSelect.value = defaultInstrument;
+        }
+        instrumentDialog.showModal();
+    }
+
     function announceStatus(text, priority = 'polite') {
         statusAnnouncer.setAttribute('aria-live', priority);
         statusAnnouncer.textContent = text;
@@ -321,6 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initialize option visibility and empty states
     updateOptionVisibility();
+    populateInstrumentOptions();
     updateSectionState('validation', 'no_file');
     updateSectionState('downloads', 'no_file');
     updateSectionState('compile', 'no_file');
@@ -422,14 +481,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function showResults(data) {
         currentJobId = data.job_id;
+        currentParts = data.parts || [];
 
         // Reset and populate part selector
         partSelector.innerHTML = '<option value="full" selected>Full Score (All Parts)</option>';
-        if (data.parts && data.parts.length > 1) {
-            data.parts.forEach((name, idx) => {
+        if (currentParts.length > 1) {
+            currentParts.forEach((part, idx) => {
                 const option = document.createElement('option');
                 option.value = idx;
-                option.textContent = name;
+                option.textContent = part.name;
                 partSelector.appendChild(option);
             });
             partSelectorContainer.classList.remove('hidden');
@@ -539,6 +599,126 @@ document.addEventListener('DOMContentLoaded', () => {
             updateSectionState('validation', 'present', { count: data.validation_report.length });
         } else {
             updateSectionState('validation', 'empty');
+        }
+
+        // 4. Post-translation instrument confirmation (S12-3): a solo BANA
+        // Sec. 24 single-line-format score never states its own
+        // instrument, so the backend already applied a best-effort
+        // default (inferred from the title) -- offer to confirm/change it.
+        if (data.needs_instrument_selection) {
+            showInstrumentDialog(
+                { type: 'main' },
+                data.inferred_instrument,
+                'This score is in BANA Sec. 24 single-line format, so its braille doesn\'t state which instrument it\'s written for. We\'ve guessed one from the title below -- change it if it\'s wrong.',
+            );
+        }
+    }
+
+    // Handles both the main-score and per-part instrument dialogs (see
+    // showInstrumentDialog / pendingInstrumentScope above).
+    document.getElementById('instrument-dialog-skip').addEventListener('click', () => {
+        instrumentDialog.close();
+    });
+
+    instrumentDialogForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const scope = pendingInstrumentScope;
+        const jobId = currentJobId;
+        const instrument = instrumentDialogSelect.value;
+        if (!scope || !jobId || !instrument) {
+            instrumentDialog.close();
+            return;
+        }
+
+        const confirmBtn = document.getElementById('instrument-dialog-confirm');
+        confirmBtn.disabled = true;
+
+        const formData = new FormData();
+        formData.set('instrument', instrument);
+        const url = scope.type === 'main'
+            ? `/api/jobs/${jobId}/instrument`
+            : `/api/jobs/${jobId}/parts/${scope.partIdx}/instrument`;
+
+        fetch(url, { method: 'POST', body: formData })
+            .then(res => res.json().then(body => ({ ok: res.ok, body })))
+            .then(({ ok, body }) => {
+                confirmBtn.disabled = false;
+                instrumentDialog.close();
+                if (!ok) {
+                    announceStatus(`Could not set instrument: ${formatErrorDetail(body.detail)}`, 'assertive');
+                    return;
+                }
+                if (scope.type === 'main') {
+                    // Re-render the results with the corrected instrument
+                    // already applied server-side.
+                    showResultsWithoutDialog({
+                        ...body,
+                        target_format: document.getElementById('target_format').value,
+                        parts: currentParts,
+                        validation_report: [],
+                    });
+                    announceStatus(`Instrument set to ${instrument}. Downloads updated.`, 'polite');
+                } else {
+                    setPartLinkHrefs(jobId, String(scope.partIdx));
+                    announceStatus(`Instrument for this part set to ${instrument}. Downloads updated.`, 'polite');
+                }
+            })
+            .catch(() => {
+                confirmBtn.disabled = false;
+                instrumentDialog.close();
+                announceStatus('Network/connection error: could not set the instrument.', 'assertive');
+            });
+    });
+
+    // Applies a /api/jobs/{id}/instrument response's updated file links/
+    // compile status without re-triggering the instrument dialog itself
+    // (showResults would otherwise loop: needs_instrument_selection isn't
+    // in this response's shape, so this just re-uses the download/compile
+    // rendering half of showResults).
+    function showResultsWithoutDialog(data) {
+        currentJobId = data.job_id;
+
+        let badgeText = 'Success';
+        let badgeClass = 'success';
+        let compileState = 'not_applicable';
+        if (data.target_format === 'lilypond') {
+            if (data.compile_success === false) {
+                badgeText = 'Conversion Success (Compile Failed)';
+                badgeClass = 'warning';
+                compileState = 'present';
+                compileLog.textContent = data.compile_error || 'LilyPond compilation failed.';
+            } else {
+                compileState = 'success';
+            }
+        }
+        updateSectionState('compile', compileState);
+
+        downloadLinks.innerHTML = '';
+        const files = data.files || {};
+        const buttonInfo = {
+            'ly': { text: '🎼 LilyPond Source', title: 'Download LilyPond score source file' },
+            'pdf': { text: '📄 PDF Sheet Music', title: 'Download compiled PDF sheet music' },
+            'midi': { text: '🎵 MIDI Audio', title: 'Download compiled MIDI audio file' },
+            'brf': { text: '⠃ BANA Braille (BRF)', title: 'Download formatted ASCII braille music file' },
+            'brl': { text: '⠃ BANA Braille (BRL)', title: 'Download formatted Unicode braille music file' },
+            'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' }
+        };
+        const fileKeys = Object.keys(files);
+        if (fileKeys.length > 0) {
+            for (const [key, url] of Object.entries(files)) {
+                const info = buttonInfo[key] || { text: `Download ${key.toUpperCase()}`, title: 'Download file' };
+                const link = document.createElement('a');
+                link.href = url;
+                link.className = 'download-btn';
+                link.setAttribute('data-file-type', key);
+                link.textContent = info.text;
+                link.title = info.title;
+                link.setAttribute('aria-label', info.title);
+                downloadLinks.appendChild(link);
+            }
+            updateSectionState('downloads', 'present', { badgeText, badgeClass });
+        } else {
+            updateSectionState('downloads', 'empty');
         }
     }
 });

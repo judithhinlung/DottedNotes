@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from .duration import TICKS_PER_QUARTER, ticks_to_lilypond_duration
 from .measure import Measure
-from .text_marking import TextMarking
+from .text_marking import TextMarking, TextMarkingType
 
 if TYPE_CHECKING:
     from .clef import Clef, ClefType
@@ -23,6 +23,15 @@ class Staff:
     time_signature: TimeSignature | None = None
     clef: Clef | None = None
     tempo: TextMarking | None = None
+    # BANA Sec. 1.4's title, when the solo/single-line parser finds a
+    # header word-sign expression that isn't a recognized tempo/mood term
+    # (TEMPO_TERMS) -- kept separate from `tempo` (S12-2) so a piece with
+    # both a title and a tempo marking (e.g. "Mystery Melody for Violin"
+    # followed by "Allegro moderato") renders both, instead of the second
+    # header word-sign silently overwriting the first in a single shared
+    # slot. Rendered as its own \mark \markup{} ahead of \tempo -- see
+    # to_lilypond().
+    title_marking: TextMarking | None = None
     lyrics: list[str] = field(default_factory=list)
     verses: list[list[str]] = field(default_factory=list)
     verse_prefixes: list[str | None] = field(default_factory=list)
@@ -33,10 +42,37 @@ class Staff:
     # since it covers any instrument, not just the ones in transposition.py's
     # hardcoded _TRANSPOSITIONS table.
     resolved_transposition: tuple[str, str] | None = None
+    # \set Staff.midiInstrument value (S12-1, BANA Sec. 24 single-line
+    # format): set only by the CLI/web API's explicit --instrument
+    # selection, since a single-line-format piece's braille never states
+    # its own instrument (see cli.py). None means "not user-supplied" --
+    # to_lilypond() then omits both \set directives, matching every other
+    # BRF-sourced score, whose staff naming has always come from BANA Sec.
+    # 33.2's ensemble header or a piano hand's fixed "right hand"/"left
+    # hand", never a bare "set an instrument" toggle like this one.
+    midi_instrument: str | None = None
 
 
     def add_measure(self, measure: Measure) -> None:
         self.measures.append(measure)
+
+    def title_text(self) -> str | None:
+        """Best-effort title text for instrument inference (S12-3), e.g.
+        deciding a single-line-format piece's default --instrument from
+        "Mystery Melody for Violin". `title_marking` holds it when this
+        staff also has a separate tempo marking (BrailleParser's
+        title/tempo shift, S12-2). But a piece with *only* one header
+        word-sign and no tempo line at all -- just a title, nothing else
+        -- leaves that single marking in `tempo` untouched (preserving the
+        single-marking case existing tests rely on, e.g. a lone "dolce" or
+        "Allegro") -- so a non-TEMPO-typed `tempo` marking is a title too
+        in that case.
+        """
+        if self.title_marking is not None:
+            return self.title_marking.text
+        if self.tempo is not None and self.tempo.type != TextMarkingType.TEMPO:
+            return self.tempo.text
+        return None
 
     def to_braille(self) -> str:
         sig_parts = []
@@ -123,8 +159,8 @@ class Staff:
         off so every existing ground-truth fixture test is unaffected.
         """
         header: list[str] = []
-        if self.tempo is not None:
-            header.append('    ' + self.tempo.to_lilypond())
+        if self.title_marking is not None:
+            header.append('    ' + self.title_marking.to_lilypond())
         if self.key_signature is not None and self.key_signature.sharps_or_flats != 0:
             header.append('    ' + self.key_signature.to_lilypond())
         if self.time_signature is not None:
@@ -137,6 +173,29 @@ class Staff:
             clef_ly = self._resolve_clef()
             if clef_ly is not None:
                 header.append('    ' + clef_ly)
+
+        # Unconditional (not gated by include_clef): OrchestraScore's
+        # \with{}-block rendering (include_clef=False) still needs tempo in
+        # this staff's own music-variable content -- ensemble_parser.py
+        # propagates a shared staff.tempo across staves, and that must
+        # keep rendering there exactly as it did before title_marking
+        # existed. Positioned after the (possibly skipped) clef so a solo
+        # staff's header reads title, key, time, clef, tempo -- matching
+        # BANA's own Sec. 1.7 Music Heading order (tempo/mood text last,
+        # right before the music starts).
+        if self.tempo is not None:
+            header.append('    ' + self.tempo.to_lilypond())
+
+        if include_clef:
+            # S12-1: only emitted when the CLI/web API's --instrument
+            # selection set this explicitly (see midi_instrument's field
+            # comment) -- nested inside include_clef so OrchestraScore's
+            # \with{}-block rendering (include_clef=False) never gets this
+            # a second time from its own separate instrumentName/
+            # midiInstrument emission in orchestra_score.py.
+            if self.midi_instrument is not None:
+                header.append(f'    \\set Staff.instrumentName = "{self.name}"')
+                header.append(f'    \\set Staff.midiInstrument = "{self.midi_instrument}"')
 
         from .note import Rest
 

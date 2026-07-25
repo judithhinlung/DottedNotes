@@ -1382,6 +1382,18 @@ def test_number_sign_prefixed_margin_number_followed_by_music_is_measure_number(
     assert tokens[0].character == '1'
 
 
+def test_number_sign_prefixed_margin_number_with_partial_measure_dot3():
+    # BANA 24.1.1, Example 24.1.1-1: "If the segment begins with a partial
+    # measure, the number is followed by dot 3" (e.g. "#E'" = measure 5,
+    # partial). The dot 3 (⠄) must be consumed as part of the margin
+    # number, not left to derail the following note content.
+    tokens = BrailleTokenizer().tokenize('⠼⠑⠄⠀⠐⠹')
+    assert tokens[0].category == SymbolCategory.MEASURE_NUMBER
+    assert tokens[0].character == '5'
+    assert tokens[1].category == SymbolCategory.OCTAVE_MARK
+    assert tokens[2].category == SymbolCategory.NOTE
+
+
 def test_bare_number_sign_digit_with_no_following_content_is_still_numeral_repeat():
     # Without real content after it, "#1" alone stays a BANA Sec. 19
     # numeral-repeat token (unsupported -- BrailleParser rejects it), not a

@@ -461,3 +461,139 @@ def test_cli_profile_option(monkeypatch, tmp_path, capsys):
     assert "identical to measure" in captured_strict.err
 
 
+# --- S12-1: BANA Sec. 24 single-line format + --instrument ---
+
+# Time sig 4/4, one margin-numbered segment (measure 1): BANA 24.1.1's
+# number-sign-prefixed margin number ("#A"-equivalent, here plain "#1")
+# followed by a single space then the music.
+_SINGLE_LINE_BRF = '⠀⠀⠼⠙⠲\n⠼⠁⠀⠐⠹\n'
+
+
+def test_list_instruments_flag_prints_full_list_and_exits_zero(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["dottednotes", "--list-instruments"])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 0
+    captured = capsys.readouterr()
+    names = captured.out.splitlines()
+    assert len(names) == 128
+    assert "violin" in names
+    assert "french horn" in names
+
+
+def test_convert_instrument_without_single_line_errors(monkeypatch, tmp_path, capsys):
+    brf = tmp_path / "single.brf"
+    brf.write_text(_SINGLE_LINE_BRF, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), "--instrument", "violin"])
+    assert exc_info.value.code != 0
+    captured = capsys.readouterr()
+    assert "Error: --instrument requires --single-line" in captured.err
+
+
+def test_convert_single_line_without_instrument_infers_piano(monkeypatch, tmp_path, capsys):
+    # S12-3: --instrument is optional -- with no title to infer an
+    # instrument from, this falls back to piano rather than erroring.
+    brf = tmp_path / "single.brf"
+    brf.write_text(_SINGLE_LINE_BRF, encoding="utf-8")
+
+    _run_main(monkeypatch, ["convert", str(brf), "--single-line"])
+    captured = capsys.readouterr()
+    assert '\\set Staff.instrumentName = "Acoustic Grand"' in captured.out
+    assert '\\set Staff.midiInstrument = "acoustic grand"' in captured.out
+
+
+def test_convert_single_line_without_instrument_infers_from_title(monkeypatch, tmp_path, capsys):
+    # S12-3: a title mentioning a recognizable instrument (e.g. "for
+    # Violin") becomes the inferred default when --instrument is omitted.
+    brf = tmp_path / "single_titled.brf"
+    brf.write_text(
+        '⠀⠀⠠⠍⠑⠇⠕⠙⠽⠀⠋⠕⠗⠀⠧⠊⠕⠇⠊⠝\n⠀⠀⠼⠙⠲\n⠼⠁⠀⠐⠹\n',
+        encoding="utf-8",
+    )
+
+    _run_main(monkeypatch, ["convert", str(brf), "--single-line"])
+    captured = capsys.readouterr()
+    assert '\\set Staff.instrumentName = "Violin"' in captured.out
+    assert '\\set Staff.midiInstrument = "violin"' in captured.out
+
+
+def test_convert_single_line_invalid_instrument_errors(monkeypatch, tmp_path, capsys):
+    brf = tmp_path / "single.brf"
+    brf.write_text(_SINGLE_LINE_BRF, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), "--single-line", "--instrument", "kazoo"])
+    assert exc_info.value.code != 0
+    captured = capsys.readouterr()
+    assert "Error: Unknown instrument 'kazoo'" in captured.err
+    assert "--list-instruments" in captured.err
+
+
+def test_convert_single_line_valid_instrument_sets_staff_name_and_midi(monkeypatch, tmp_path, capsys):
+    brf = tmp_path / "single.brf"
+    brf.write_text(_SINGLE_LINE_BRF, encoding="utf-8")
+
+    _run_main(monkeypatch, ["convert", str(brf), "--single-line", "--instrument", "Violin"])
+    captured = capsys.readouterr()
+    assert '\\set Staff.instrumentName = "Violin"' in captured.out
+    assert '\\set Staff.midiInstrument = "violin"' in captured.out
+
+
+def test_convert_single_line_rejects_musicxml_input(monkeypatch, tmp_path, capsys):
+    xml = tmp_path / "piece.musicxml"
+    xml.write_text("<score-partwise></score-partwise>", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(xml), "--single-line", "--instrument", "violin"])
+    assert exc_info.value.code != 0
+    captured = capsys.readouterr()
+    assert "Error: --single-line only applies to .brf/.brl input" in captured.err
+
+
+def test_convert_mystery_melody_single_line_produces_clean_nine_measure_score(
+    monkeypatch, tmp_path, capsys
+):
+    # End-to-end regression test for a real BANA Sec. 24 single-line-format
+    # fixture (S12-2): its Music Heading line ("Allegro moderato" + key/time
+    # signature) previously misparsed into bogus extra measures whenever it
+    # wasn't preceded by a proper capital indicator -- now fixed at the
+    # fixture level (the .brf carries a leading comma on "ALLEGRO"), and the
+    # title ("Mystery Melody for Violin") + tempo ("Allegro moderato") no
+    # longer clobber each other into a single shared slot (S12-2's
+    # title_marking/tempo split). No --report beat-count warnings should
+    # appear, and all 9 real measures' pitches should come through clean --
+    # not the 20+ measures a corrupted header used to produce.
+    brf = FIXTURES / "mystery melody_single_line.brf"
+    out = tmp_path / "mystery_melody.ly"
+    _run_main(monkeypatch, [
+        "convert", str(brf), str(out),
+        "--single-line", "--instrument", "violin", "--verbose",
+    ])
+    captured = capsys.readouterr()
+    assert "Warning:" not in captured.err
+
+    content = out.read_text(encoding="utf-8")
+    assert '\\mark \\markup { "Mystery Melody for violin" }' in content
+    assert '\\tempo "Allegro moderato"' in content
+    assert '\\set Staff.instrumentName = "Violin"' in content
+    assert '\\set Staff.midiInstrument = "violin"' in content
+    assert "\\time 6/8" in content
+
+    measures = [
+        "e8 g8 d'8 f,8 a8 d8",
+        "g8 b8 e,8 g4 f8",
+        "e,8 g8 d'8 f,8 a8 d8",
+        "b8 d8 g,8 b4 a8",
+        "g8 b8 d8 a4 c8",
+        "b8 c8 e,8 g4 f8",
+        "e8 g8 d'8 f,8 a8 d8",
+        "b8 d8 g,8 b4 a8",
+        "gis4. b4.",
+    ]
+    for measure in measures:
+        assert measure in content
+    assert content.count('|') == 9
+
+

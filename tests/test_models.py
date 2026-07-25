@@ -457,6 +457,41 @@ def test_staff_to_lilypond_measure_numbers_off_by_default():
     assert '%' not in ly
 
 
+def test_staff_to_lilypond_omits_instrument_directives_by_default():
+    # S12-1: midi_instrument defaults to None -- every existing solo/piano
+    # BRF-sourced staff (whose name is "right hand"/"left hand", never a
+    # user-supplied instrument) must render exactly as before.
+    staff = Staff(name="right hand")
+    staff.add_measure(Measure(number=1))
+    staff.measures[0].add_note(_make_note('C', 4, 4))
+    ly = staff.to_lilypond()
+    assert '\\set Staff.instrumentName' not in ly
+    assert '\\set Staff.midiInstrument' not in ly
+
+
+def test_staff_to_lilypond_emits_instrument_directives_when_midi_instrument_set():
+    staff = Staff(name="Violin")
+    staff.midi_instrument = "violin"
+    staff.add_measure(Measure(number=1))
+    staff.measures[0].add_note(_make_note('C', 4, 4))
+    ly = staff.to_lilypond()
+    assert '\\set Staff.instrumentName = "Violin"' in ly
+    assert '\\set Staff.midiInstrument = "violin"' in ly
+
+
+def test_staff_to_lilypond_omits_instrument_directives_when_include_clef_false():
+    # OrchestraScore's \with{}-block rendering (include_clef=False) has its
+    # own separate instrumentName/midiInstrument emission -- this staff's
+    # own to_lilypond() must not also emit it a second time.
+    staff = Staff(name="Violin")
+    staff.midi_instrument = "violin"
+    staff.add_measure(Measure(number=1))
+    staff.measures[0].add_note(_make_note('C', 4, 4))
+    ly = staff.to_lilypond(include_clef=False)
+    assert '\\set Staff.instrumentName' not in ly
+    assert '\\set Staff.midiInstrument' not in ly
+
+
 def test_staff_to_lilypond_measure_numbers_on():
     staff = Staff(name="right hand")
     for n in (1, 2):

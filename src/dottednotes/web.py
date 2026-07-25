@@ -20,6 +20,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .exceptions import DottedNotesError, LilyPondCompileError
+from .models.instrument import (
+    GENERAL_MIDI_INSTRUMENTS,
+    infer_instrument_from_title,
+    is_placeholder_staff_name,
+)
 from .models.score import Score
 from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, has_ensemble_header
@@ -87,6 +92,16 @@ def _parse_score(text: str, category_override: str | None = None):
     tokens = BrailleTokenizer().tokenize(text)
     return BrailleParser(tokens=tokens, category_override=category_override).parse()
 
+def _apply_instrument(score: Score, instrument: str) -> None:
+    """Name every staff from a user-selected instrument (S12-3) -- a BANA
+    Sec. 24 single-line-format solo BRF, or an extracted piano hand, never
+    has a real instrument name of its own to fall back on (see
+    is_placeholder_staff_name)."""
+    display_name = instrument.title()
+    for staff in score.staves:
+        staff.name = display_name
+        staff.midi_instrument = instrument
+
 def _get_or_parse_score(job_id: str) -> Score:
     score = get_cached_score(job_id)
     if score is not None:
@@ -115,7 +130,9 @@ def _get_or_parse_score(job_id: str) -> Score:
         from .parser.input_pipeline import BRLInputPipeline
         raw_brl_text = BRLInputPipeline().load(str(input_path))
         score = _parse_score(raw_brl_text, category_override=category)
-        
+        if meta.get("instrument"):
+            _apply_instrument(score, meta["instrument"])
+
     cache_score(job_id, score)
     return score
 
@@ -163,6 +180,100 @@ def compile_with_lilypond(ly_path: Path) -> None:
             stderr=res.stderr
         )
 
+def _render_output(
+    score: Score,
+    job_dir: Path,
+    input_path: Path,
+    job_id: str,
+    target_format: str,
+    category: Optional[str],
+    format_overrides: Optional[str],
+    compression: str,
+    measure_numbers: bool,
+    page_numbers: bool,
+    measure_numbering: str,
+    octave_mark_every_measure: bool,
+    full_measure_repeat: str,
+    min_repeated_measures: int,
+    include_clef_sign: bool,
+) -> dict:
+    """Render `score` to `target_format` and (for LilyPond) attempt PDF/MIDI
+    compilation, returning {"files", "compile_success", "compile_error"}.
+    Shared by /api/convert's initial render and /api/jobs/{id}/instrument's
+    re-render after a post-translation instrument change (S12-3) -- same
+    output paths either way, so a re-render simply overwrites them."""
+    available_files: dict[str, str] = {}
+    compile_success = None
+    compile_error = None
+
+    if target_format == "lilypond":
+        parsed_format_overrides = _parse_format(format_overrides) if format_overrides else None
+        rendered = score.to_lilypond(
+            category_override=category,
+            format_overrides=parsed_format_overrides,
+            measure_numbers=measure_numbers
+        )
+        output_ly = job_dir / f"{input_path.stem}.ly"
+        output_ly.write_text(rendered, encoding="utf-8")
+        available_files["ly"] = f"/api/jobs/{job_id}/ly"
+
+        if shutil.which("lilypond"):
+            try:
+                compile_with_lilypond(output_ly)
+                compile_success = True
+                if (job_dir / f"{input_path.stem}.pdf").exists():
+                    available_files["pdf"] = f"/api/jobs/{job_id}/pdf"
+                if (job_dir / f"{input_path.stem}.midi").exists():
+                    available_files["midi"] = f"/api/jobs/{job_id}/midi"
+                elif (job_dir / f"{input_path.stem}.mid").exists():
+                    (job_dir / f"{input_path.stem}.mid").rename(job_dir / f"{input_path.stem}.midi")
+                    available_files["midi"] = f"/api/jobs/{job_id}/midi"
+            except LilyPondCompileError as ce:
+                compile_success = False
+                compile_error = str(ce)
+                if ce.stderr:
+                    compile_error += f"\nDetails:\n{ce.stderr}"
+        else:
+            compile_success = False
+            compile_error = "LilyPond binary not installed. PDF/MIDI compilation skipped."
+
+    elif target_format in ("braille", "brf", "brl"):
+        from .renderers.brf_writer import BRFWriter
+        writer = BRFWriter(
+            line_width=40,
+            show_measure_numbers=measure_numbers,
+            compression_level=compression,
+            page_numbers=page_numbers,
+            measure_numbering=measure_numbering,
+            octave_mark_every_measure=octave_mark_every_measure,
+            full_measure_repeat=full_measure_repeat,
+            min_repeated_measures=min_repeated_measures,
+            include_clef_sign=include_clef_sign,
+        )
+        if target_format == "brl":
+            output_brl = job_dir / f"{input_path.stem}_output.brl"
+            writer.write_unicode(score, output_brl)
+            available_files["brl"] = f"/api/jobs/{job_id}/brl"
+        else:
+            output_brf = job_dir / f"{input_path.stem}_output.brf"
+            writer.write(score, output_brf)
+            available_files["brf"] = f"/api/jobs/{job_id}/brf"
+
+    elif target_format == "musicxml":
+        output_xml = job_dir / f"{input_path.stem}.musicxml"
+        from .renderers.musicxml_renderer import export_musicxml
+        export_musicxml(score, str(output_xml))
+        available_files["musicxml"] = f"/api/jobs/{job_id}/musicxml"
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported target format: '{target_format}'")
+
+    return {
+        "files": available_files,
+        "compile_success": compile_success,
+        "compile_error": compile_error,
+    }
+
 async def clean_old_jobs():
     while True:
         try:
@@ -207,6 +318,13 @@ def read_root():
         raise HTTPException(status_code=404, detail="Frontend files not found.")
     return FileResponse(index_file)
 
+@app.get("/api/instruments")
+def list_instruments():
+    """Every instrument name POST /api/jobs/{job_id}/instrument and
+    /parts/{part_idx}/instrument accept (S12-3) -- LilyPond's General MIDI
+    instrument list, for the web UI's post-translation instrument popup."""
+    return {"instruments": list(GENERAL_MIDI_INSTRUMENTS)}
+
 @app.post("/api/convert")
 async def convert_file(
     file: UploadFile = File(...),
@@ -247,6 +365,7 @@ async def convert_file(
 
     meta = {
         "input_filename": input_filename,
+        "target_format": target_format,
         "category": category,
         "format_overrides": format_overrides,
         "compression": compression,
@@ -304,7 +423,31 @@ async def convert_file(
             raw_brl_text = BRLInputPipeline().load(str(input_path))
             score = _parse_score(raw_brl_text, category_override=category)
 
+        # S12-3: a single-staff result with no real instrument name (a
+        # solo BANA Sec. 24 single-line-format BRF, or an extracted piano
+        # hand later on) never gets one from the source -- apply a
+        # best-effort default (inferred from the title, e.g. "Mystery
+        # Melody for Violin", falling back to piano) now so the initial
+        # LilyPond/MusicXML output is already sensible, and tell the
+        # frontend a confirm/override popup is worth showing.
+        needs_instrument_selection = (
+            len(score.staves) == 1 and is_placeholder_staff_name(score.staves[0].name)
+        )
+        inferred_instrument = None
+        if needs_instrument_selection:
+            inferred_instrument = infer_instrument_from_title(score.staves[0].title_text())
+            _apply_instrument(score, inferred_instrument)
+
         cache_score(job_id, score)
+
+        # Persisted (not just cached in memory) so _get_or_parse_score's
+        # cache-miss fallback (e.g. after a server restart) reapplies the
+        # same instrument instead of silently reverting to the
+        # placeholder name.
+        meta["needs_instrument_selection"] = needs_instrument_selection
+        meta["instrument"] = inferred_instrument
+        with open(job_dir / "metadata.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f)
 
         # 2. Run BANA validation
         # For MusicXML/LilyPond input there is no source braille text at
@@ -318,85 +461,89 @@ async def convert_file(
         corrections = [c.to_dict() for c in val_result.corrections]
 
         # 3. Render Output format
-        available_files = {}
-        compile_success = None
-        compile_error = None
-
-        if target_format == "lilypond":
-            parsed_format_overrides = _parse_format(format_overrides) if format_overrides else None
-            rendered = score.to_lilypond(
-                category_override=category,
-                format_overrides=parsed_format_overrides,
-                measure_numbers=measure_numbers
-            )
-            output_ly = job_dir / f"{input_path.stem}.ly"
-            output_ly.write_text(rendered, encoding="utf-8")
-            available_files["ly"] = f"/api/jobs/{job_id}/ly"
-
-            # Attempt PDF & MIDI compilation if LilyPond binary is installed
-            if shutil.which("lilypond"):
-                try:
-                    compile_with_lilypond(output_ly)
-                    compile_success = True
-                    if (job_dir / f"{input_path.stem}.pdf").exists():
-                        available_files["pdf"] = f"/api/jobs/{job_id}/pdf"
-                    if (job_dir / f"{input_path.stem}.midi").exists():
-                        available_files["midi"] = f"/api/jobs/{job_id}/midi"
-                    elif (job_dir / f"{input_path.stem}.mid").exists():
-                        # sometimes extension is .mid instead of .midi
-                        (job_dir / f"{input_path.stem}.mid").rename(job_dir / f"{input_path.stem}.midi")
-                        available_files["midi"] = f"/api/jobs/{job_id}/midi"
-                except LilyPondCompileError as ce:
-                    compile_success = False
-                    compile_error = str(ce)
-                    if ce.stderr:
-                        compile_error += f"\nDetails:\n{ce.stderr}"
-            else:
-                compile_success = False
-                compile_error = "LilyPond binary not installed. PDF/MIDI compilation skipped."
-
-        elif target_format in ("braille", "brf", "brl"):
-            from .renderers.brf_writer import BRFWriter
-            writer = BRFWriter(
-                line_width=40,
-                show_measure_numbers=measure_numbers,
-                compression_level=compression,
-                page_numbers=page_numbers,
-                measure_numbering=measure_numbering,
-                octave_mark_every_measure=octave_mark_every_measure,
-                full_measure_repeat=full_measure_repeat,
-                min_repeated_measures=min_repeated_measures,
-                include_clef_sign=include_clef_sign,
-            )
-            if target_format == "brl":
-                output_brl = job_dir / f"{input_path.stem}_output.brl"
-                writer.write_unicode(score, output_brl)
-                available_files["brl"] = f"/api/jobs/{job_id}/brl"
-            else:
-                output_brf = job_dir / f"{input_path.stem}_output.brf"
-                writer.write(score, output_brf)
-                available_files["brf"] = f"/api/jobs/{job_id}/brf"
-
-        elif target_format == "musicxml":
-            output_xml = job_dir / f"{input_path.stem}.musicxml"
-            from .renderers.musicxml_renderer import export_musicxml
-            export_musicxml(score, str(output_xml))
-            available_files["musicxml"] = f"/api/jobs/{job_id}/musicxml"
-
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported target format: '{target_format}'")
+        render_result = _render_output(
+            score, job_dir, input_path, job_id, target_format,
+            category, format_overrides, compression, measure_numbers,
+            page_numbers, measure_numbering, octave_mark_every_measure,
+            full_measure_repeat, min_repeated_measures, include_clef_sign,
+        )
 
         return {
             "job_id": job_id,
             "input_type": input_type,
             "target_format": target_format,
             "validation_report": corrections,
-            "files": available_files,
-            "compile_success": compile_success,
-            "compile_error": compile_error,
-            "parts": [staff.name for staff in score.staves],
+            "files": render_result["files"],
+            "compile_success": render_result["compile_success"],
+            "compile_error": render_result["compile_error"],
+            "parts": [{"name": s.name, "needs_instrument": is_placeholder_staff_name(s.name)} for s in score.staves],
+            "needs_instrument_selection": needs_instrument_selection,
+            "inferred_instrument": inferred_instrument,
         }
 
+    except DottedNotesError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal conversion error: {str(e)}")
+
+
+@app.post("/api/jobs/{job_id}/instrument")
+async def set_instrument(job_id: str, instrument: str = Form(...)):
+    """Override the main score's post-translation instrument default
+    (S12-3) and re-render whichever output format the original
+    /api/convert call produced, so the LilyPond/MusicXML/braille download
+    links reflect the new instrument. Only valid for a job /api/convert
+    flagged with needs_instrument_selection=True."""
+    if not re.fullmatch(r"[A-Za-z0-9-]+", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    job_dir = JOBS_DIR / job_id
+    meta_path = job_dir / "metadata.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Job directory not found or expired.")
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    if not meta.get("needs_instrument_selection"):
+        raise HTTPException(
+            status_code=400,
+            detail="This job's score doesn't have an instrument selection pending.",
+        )
+
+    normalized = instrument.strip().lower()
+    if normalized not in GENERAL_MIDI_INSTRUMENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown instrument '{instrument}'. See GET /api/instruments for supported names.",
+        )
+
+    try:
+        score = _get_or_parse_score(job_id)
+        _apply_instrument(score, normalized)
+        cache_score(job_id, score)
+
+        meta["instrument"] = normalized
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+
+        input_path = job_dir / meta["input_filename"]
+        render_result = _render_output(
+            score, job_dir, input_path, job_id,
+            meta.get("target_format", "lilypond"),
+            meta.get("category"), meta.get("format_overrides"),
+            meta.get("compression", "full"), meta.get("measure_numbers", False),
+            meta.get("page_numbers", True), meta.get("measure_numbering", "auto"),
+            meta.get("octave_mark_every_measure", False),
+            meta.get("full_measure_repeat", "single-voice"),
+            meta.get("min_repeated_measures", 2), meta.get("include_clef_sign", False),
+        )
+        return {
+            "job_id": job_id,
+            "files": render_result["files"],
+            "compile_success": render_result["compile_success"],
+            "compile_error": render_result["compile_error"],
+            "parts": [{"name": s.name, "needs_instrument": is_placeholder_staff_name(s.name)} for s in score.staves],
+        }
     except DottedNotesError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -448,6 +595,83 @@ def get_job_file(job_id: str, file_type: str):
         media_type=media_type,
         filename=target_file.name
     )
+
+@app.post("/api/jobs/{job_id}/parts/{part_idx}/instrument")
+async def set_part_instrument(job_id: str, part_idx: int, instrument: str = Form(...)):
+    """Same idea as /api/jobs/{job_id}/instrument, but for one extracted
+    part (S12-3) -- an extracted piano hand has no real instrument name
+    ("right hand"/"left hand" are BrailleParser placeholders, not
+    instruments), so the web UI's part selector offers this popup too.
+    Pre-renders .ly/.musicxml to the exact paths get_part_file expects, so
+    a subsequent GET to either serves the now-correctly-named version
+    instead of re-rendering a fresh, still-placeholder-named one."""
+    if not re.fullmatch(r"[A-Za-z0-9-]+", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    job_dir = JOBS_DIR / job_id
+    meta_path = job_dir / "metadata.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Job directory not found or expired.")
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    normalized = instrument.strip().lower()
+    if normalized not in GENERAL_MIDI_INSTRUMENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown instrument '{instrument}'. See GET /api/instruments for supported names.",
+        )
+
+    try:
+        score = _get_or_parse_score(job_id)
+        part_score = score.extract_part(part_idx)
+    except DottedNotesError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not is_placeholder_staff_name(part_score.staves[0].name):
+        raise HTTPException(
+            status_code=400,
+            detail="This part already has a real instrument name; instrument selection isn't offered for it.",
+        )
+
+    # extract_part() reuses the same Staff object rather than copying it
+    # (confirmed in models/score.py), so this mutation persists on
+    # score.staves[part_idx] too -- the next extract_part() call for this
+    # part_idx (e.g. from a fresh GET) sees the new name, not the
+    # placeholder.
+    _apply_instrument(part_score, normalized)
+    cache_score(job_id, score)
+
+    part_dir = job_dir / "parts" / str(part_idx)
+    part_dir.mkdir(parents=True, exist_ok=True)
+    input_stem = Path(meta["input_filename"]).stem
+    part_name_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", part_score.staves[0].name)
+    parsed_format_overrides = _parse_format(meta["format_overrides"]) if meta.get("format_overrides") else None
+
+    ly_path = part_dir / f"{input_stem}_{part_name_slug}.ly"
+    ly_path.write_text(
+        part_score.to_lilypond(
+            category_override=meta.get("category"),
+            format_overrides=parsed_format_overrides,
+            measure_numbers=meta.get("measure_numbers", False),
+            concert_pitch=False,
+        ),
+        encoding="utf-8",
+    )
+
+    from .renderers.musicxml_renderer import export_musicxml
+    xml_path = part_dir / f"{input_stem}_{part_name_slug}.musicxml"
+    export_musicxml(part_score, str(xml_path))
+
+    return {
+        "job_id": job_id,
+        "part_idx": part_idx,
+        "name": part_score.staves[0].name,
+        "files": {
+            "ly": f"/api/jobs/{job_id}/parts/{part_idx}/ly",
+            "musicxml": f"/api/jobs/{job_id}/parts/{part_idx}/musicxml",
+        },
+    }
 
 @app.get("/api/jobs/{job_id}/parts/{part_idx}/{file_type}")
 def get_part_file(job_id: str, part_idx: int, file_type: str):

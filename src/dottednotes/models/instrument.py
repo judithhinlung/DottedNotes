@@ -279,3 +279,90 @@ def get_midi_instrument_name(name: str) -> str | None:
         return 'contrabass'
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Full General MIDI instrument list (S12-1, BANA Sec. 24 single-line format),
+# in General MIDI program order, verified against the LilyPond Notation
+# Reference's MIDI instruments list (Documentation/notation/midi-instruments)
+# rather than assumed from memory. Unlike get_midi_instrument_name's name-
+# based heuristic above (used when an instrument *name* is already known,
+# e.g. from a BANA Sec. 33.2 ensemble header), this is the closed set of
+# names --instrument/the web UI's instrument dropdown accept: a BANA Sec. 24
+# single-line-format piece's braille never states which instrument it's
+# for (Secs. 24.1-24.5 describe only segment/measure-number layout, never an
+# in-line instrument name -- confirmed against the BANA manual), so the
+# instrument must be supplied by the user from this exact list rather than
+# parsed or guessed.
+# ---------------------------------------------------------------------------
+
+GENERAL_MIDI_INSTRUMENTS: tuple[str, ...] = (
+    "acoustic grand", "bright acoustic", "electric grand", "honky-tonk",
+    "electric piano 1", "electric piano 2", "harpsichord", "clav",
+    "celesta", "glockenspiel", "music box", "vibraphone", "marimba",
+    "xylophone", "tubular bells", "dulcimer", "drawbar organ",
+    "percussive organ", "rock organ", "church organ", "reed organ",
+    "accordion", "harmonica", "concertina", "acoustic guitar (nylon)",
+    "acoustic guitar (steel)", "electric guitar (jazz)",
+    "electric guitar (clean)", "electric guitar (muted)",
+    "overdriven guitar", "distorted guitar", "guitar harmonics",
+    "acoustic bass", "electric bass (finger)", "electric bass (pick)",
+    "fretless bass", "slap bass 1", "slap bass 2", "synth bass 1",
+    "synth bass 2", "violin", "viola", "cello", "contrabass",
+    "tremolo strings", "pizzicato strings", "orchestral harp", "timpani",
+    "string ensemble 1", "string ensemble 2", "synthstrings 1",
+    "synthstrings 2", "choir aahs", "voice oohs", "synth voice",
+    "orchestra hit", "trumpet", "trombone", "tuba", "muted trumpet",
+    "french horn", "brass section", "synthbrass 1", "synthbrass 2",
+    "soprano sax", "alto sax", "tenor sax", "baritone sax", "oboe",
+    "english horn", "bassoon", "clarinet", "piccolo", "flute", "recorder",
+    "pan flute", "blown bottle", "shakuhachi", "whistle", "ocarina",
+    "lead 1 (square)", "lead 2 (sawtooth)", "lead 3 (calliope)",
+    "lead 4 (chiff)", "lead 5 (charang)", "lead 6 (voice)",
+    "lead 7 (fifths)", "lead 8 (bass+lead)", "pad 1 (new age)",
+    "pad 2 (warm)", "pad 3 (polysynth)", "pad 4 (choir)", "pad 5 (bowed)",
+    "pad 6 (metallic)", "pad 7 (halo)", "pad 8 (sweep)", "fx 1 (rain)",
+    "fx 2 (soundtrack)", "fx 3 (crystal)", "fx 4 (atmosphere)",
+    "fx 5 (brightness)", "fx 6 (goblins)", "fx 7 (echoes)",
+    "fx 8 (sci-fi)", "sitar", "banjo", "shamisen", "koto", "kalimba",
+    "bagpipe", "fiddle", "shanai", "tinkle bell", "agogo", "steel drums",
+    "woodblock", "taiko drum", "melodic tom", "synth drum",
+    "reverse cymbal", "guitar fret noise", "breath noise", "seashore",
+    "bird tweet", "telephone ring", "helicopter", "applause", "gunshot",
+)
+
+
+# ---------------------------------------------------------------------------
+# S12-3: a single-line-format (BANA Sec. 24) piece's braille never states
+# its own instrument (Secs. 24.1-24.5 cover only segment/measure-number
+# layout), so a solo BRF/BRL staff -- and an extracted piano hand, which
+# never had an "instrument" of its own beyond "piano" -- keeps a fixed
+# placeholder name from the parser rather than a real instrument name.
+# Used to decide when to offer the CLI's/web UI's instrument selection.
+# ---------------------------------------------------------------------------
+
+PLACEHOLDER_STAFF_NAMES: frozenset[str] = frozenset({"right hand", "left hand", ""})
+
+
+def is_placeholder_staff_name(name: str) -> bool:
+    """True if `name` is one of BrailleParser's fixed non-instrument
+    defaults ("right hand"/"left hand"), or blank -- never a real,
+    user- or source-supplied instrument name."""
+    return name.strip().lower() in PLACEHOLDER_STAFF_NAMES
+
+
+def infer_instrument_from_title(title: str | None) -> str:
+    """Best-effort default instrument for a single-line-format piece with
+    no real instrument name: look for a recognizable instrument mentioned
+    in the title (e.g. "Mystery Melody for Violin", "Flute Sonata"),
+    falling back to piano ("acoustic grand") when none is found or no
+    title exists at all. This is only ever a suggested default the CLI/
+    web UI lets the user override -- BANA Sec. 24's braille never states
+    an instrument itself (see PLACEHOLDER_STAFF_NAMES), so there is
+    nothing to actually parse here, just a heuristic guess.
+    """
+    if title:
+        midi_name = get_midi_instrument_name(title)
+        if midi_name is not None:
+            return midi_name
+    return "acoustic grand"

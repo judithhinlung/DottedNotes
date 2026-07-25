@@ -644,6 +644,8 @@ class BrailleParser:
             right_staff.clef = self._clef
         if self._pending_tempo is not None:
             right_staff.tempo = self._pending_tempo
+        if self._pending_title is not None:
+            right_staff.title_marking = self._pending_title
 
         for hand_staff in (right_staff, left_staff):
             if hand_staff.measures:
@@ -1465,8 +1467,17 @@ class BrailleParser:
         )
         marking = TextMarking(text=text, type=marking_type)
         if not pending and not piece_started:
-            # Before the first note and first measure of either staff: this is
-            # a header tempo/direction.
+            # Before the first note and first measure of either staff: this
+            # is a header tempo/direction -- unless a *second* header
+            # word-sign shows up before any measure, in which case the
+            # first one was actually the BANA Sec. 1.4 title (S12-2), not
+            # the tempo/direction marking (e.g. "Mystery Melody for Violin"
+            # followed by "Allegro moderato"). Only shift once: a single
+            # header word-sign (the common case -- "Allegro", "dolce", ...)
+            # stays in _pending_tempo untouched, preserving every existing
+            # single-marking test.
+            if self._pending_tempo is not None and self._pending_title is None:
+                self._pending_title = self._pending_tempo
             self._pending_tempo = marking
         else:
             # Mid-piece: attach to the current (not-yet-finalized) measure.
@@ -2178,6 +2189,7 @@ class BrailleParser:
             '_pending_slur_end': self._pending_slur_end,
             '_pending_slur_bracket_open': self._pending_slur_bracket_open,
             '_pending_tempo': self._pending_tempo,
+            '_pending_title': self._pending_title,
             '_pending_text_markings': list(self._pending_text_markings),
             '_active_intervals': dict(self._active_intervals),
             '_last_interval_seen': self._last_interval_seen,
@@ -2275,6 +2287,8 @@ class BrailleParser:
         self._pending_slur_end: bool = False
         self._pending_slur_bracket_open: bool = False
         self._pending_tempo: TextMarking | None = None
+        # BANA Sec. 1.4 title (S12-2) -- see _handle_word_sign's shift logic.
+        self._pending_title: TextMarking | None = None
         self._pending_text_markings: list[TextMarking] = []
         self._pending_pedal_down: str | None = None
         # Interval / chord state

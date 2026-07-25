@@ -325,18 +325,28 @@ class TranscriptionMode(Enum):
 
     Placement of measure numbers (margin vs. a blank line above the system
     of parallels) is *derived from* this mode, not an independent setting:
-    SOLO and PIANO both use margin placement (BANA 24.1.1 / 29.3(b) -- they
-    differ only in whether the numeral sign is included, already handled by
-    each render method), ENSEMBLE uses the blank-line heading (BANA 33.4.6).
+    SINGLE_LINE and PIANO both use margin placement (BANA 24.1.1 / 29.3(b)
+    -- they differ only in whether the numeral sign is included, already
+    handled by each render method), ENSEMBLE uses the blank-line heading
+    (BANA 33.4.6).
+
+    SINGLE_LINE (BANA Sec. 24, "Instrumental Solos and Ensemble Parts") is
+    the mode for a single instrumental part -- a solo BRF/BRL's own single
+    staff, an extracted ensemble/piano part, or a solo MusicXML/LilyPond
+    piece -- named for BANA's own Sec. 24.1 heading ("Single-Line Format"),
+    not just "solo": that section is purely about segment/measure-number
+    layout, and applies identically regardless of where the single staff
+    came from (S12-3, renamed from SOLO for that reason).
 
     TODO(product): a user who wants margin-style placement in ensemble mode
-    (or blank-line placement in solo/piano mode) would need placement
-    decoupled from transcription mode as its own setting. Not built here --
-    it wasn't requested, and doing it well needs product input on how BANA
-    would even describe such a layout (neither 24.1.1/29.3(b) nor 33.4.6
-    anticipates it). Revisit only on an explicit future request.
+    (or blank-line placement in single-line/piano mode) would need
+    placement decoupled from transcription mode as its own setting. Not
+    built here -- it wasn't requested, and doing it well needs product
+    input on how BANA would even describe such a layout (neither
+    24.1.1/29.3(b) nor 33.4.6 anticipates it). Revisit only on an explicit
+    future request.
     """
-    SOLO = auto()
+    SINGLE_LINE = auto()
     PIANO = auto()
     ENSEMBLE = auto()
 
@@ -363,8 +373,8 @@ def _staff_has_ensemble_resolved_chord(staff: Staff) -> bool:
     """True if any measure in `staff` contains a Chord/interval resolved
     under the ensemble-upward rule (see `Chord.resolved_ensemble_upward`).
     Used by `_detect_transcription_mode` (S10d-13) to keep a single
-    extracted part in ENSEMBLE transcription when downgrading it to SOLO
-    would misread that content."""
+    extracted part in ENSEMBLE transcription when downgrading it to
+    SINGLE_LINE would misread that content."""
     return any(
         _item_has_ensemble_resolved_chord(item)
         for measure in staff.measures
@@ -449,10 +459,10 @@ class BrailleRenderer:
         # Par. 10.1.2's ordering ("measure number, hand signs, clefs...
         # time or key signatures" all precede everything else) and Par.
         # 6.5.1's analogous "hand or clef sign" placement before the
-        # accidental/octave-mark/note sequence. Solo output only for now
-        # (_render_solo) -- _render_piano/_render_ensemble don't emit a
-        # clef sign at all today regardless of this setting, an existing
-        # gap this doesn't attempt to close.
+        # accidental/octave-mark/note sequence. Single-line output only for
+        # now (_render_single_line) -- _render_piano/_render_ensemble don't
+        # emit a clef sign at all today regardless of this setting, an
+        # existing gap this doesn't attempt to close.
         self.include_clef_sign = include_clef_sign
 
     def _detect_transcription_mode(self, score: Score) -> TranscriptionMode:
@@ -473,7 +483,7 @@ class BrailleRenderer:
         # single-staff Score, regardless of the original score's type, but
         # if that staff carries any Chord resolved under BANA 33.4.2's
         # ensemble "read upward" rule (Chord.resolved_ensemble_upward),
-        # downgrading it to SOLO's clef-based direction would have a
+        # downgrading it to SINGLE_LINE's clef-based direction would have a
         # reader reconstruct the wrong pitch letter for that interval, not
         # just the wrong octave. Rendering it as ENSEMBLE instead (its own
         # one-row instrument-list header + per-line abbreviation prefix)
@@ -481,7 +491,7 @@ class BrailleRenderer:
         # which is what the chord's actual pitches were built under.
         if len(score.staves) == 1 and _staff_has_ensemble_resolved_chord(score.staves[0]):
             return TranscriptionMode.ENSEMBLE
-        return TranscriptionMode.SOLO
+        return TranscriptionMode.SINGLE_LINE
 
     @staticmethod
     def _measure_span(measure: Measure) -> int:
@@ -541,7 +551,7 @@ class BrailleRenderer:
             # own docstring for why this needs to run only when there is
             # exactly one staff (no cross-staff measure-index alignment to
             # desync), regardless of whether that one staff ends up
-            # rendered as SOLO or as a single-staff ENSEMBLE layout
+            # rendered as SINGLE_LINE or as a single-staff ENSEMBLE layout
             # (S10d-13). Runs before hairpin-terminator omission just
             # below so a hairpin ending right before a rest run it merges
             # is correctly seen as needing an "extensive_rest" (BANA Par.
@@ -577,9 +587,9 @@ class BrailleRenderer:
         elif mode == TranscriptionMode.PIANO:
             return self._render_piano(score)
         else:
-            return self._render_solo(score)
+            return self._render_single_line(score)
 
-    def _render_solo(self, score: Score) -> str:
+    def _render_single_line(self, score: Score) -> str:
         lines = []
         # Title
         if score.title:
@@ -599,7 +609,7 @@ class BrailleRenderer:
         sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
 
         if sig_line:
-            # BANA solo signature line starts with 8 spaces indentation
+            # BANA single-line-format signature line starts with 8 spaces indentation
             lines.append('⠀' * 8 + sig_line)
 
         # Pack measures on the fly
@@ -1112,7 +1122,7 @@ class BrailleRenderer:
         `_measure_span`.
 
         Only ever called (from `render()`) when `score` has exactly one
-        staff -- covering both a plain SOLO score and a single-staff
+        staff -- covering both a plain SINGLE_LINE score and a single-staff
         ENSEMBLE layout (S10d-13, an extracted orchestral part that still
         needs BANA 33.4.2's "read upward" convention -- exactly the
         real-world repro this ticket confirmed, a Piccolo/Flutes I/II part
