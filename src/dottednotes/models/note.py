@@ -368,9 +368,16 @@ class Note(BrailleSymbol):
             semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
 
         base = (prev_midi // 12) * 12 + semitone
-        while base < prev_midi - 5:
+        # LilyPond's real nearest-neighbor rule breaks an exact tritone tie
+        # (6 semitones either way) toward the LOWER pitch -- verified against
+        # the real lilypond binary's \displayMusic output (S10d-16). The
+        # window must therefore be asymmetric the other way: base can be as
+        # low as prev_midi - 6 before shifting up, but must shift down again
+        # once it exceeds prev_midi + 5 (not + 6, which would let the upper
+        # tritone candidate stand).
+        while base < prev_midi - 6:
             base += 12
-        while base > prev_midi + 6:
+        while base > prev_midi + 5:
             base -= 12
 
         target_midi = self._midi_pitch(key_signature)
@@ -423,11 +430,14 @@ class Note(BrailleSymbol):
         if acc_type:
             semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
 
-        # Natural relative MIDI: the occurrence of this pitch class closest to prev_midi
+        # Natural relative MIDI: the occurrence of this pitch class closest to
+        # prev_midi. An exact tritone tie (6 semitones either way) breaks
+        # toward the LOWER pitch, matching real LilyPond -- see
+        # _relative_pitch_str's identical window for the S10d-16 citation.
         base = (prev_midi // 12) * 12 + semitone
-        while base < prev_midi - 5:
+        while base < prev_midi - 6:
             base += 12
-        while base > prev_midi + 6:
+        while base > prev_midi + 5:
             base -= 12
 
         target_midi = self._midi_pitch(key_signature)

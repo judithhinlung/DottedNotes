@@ -794,6 +794,32 @@ def test_fermata_and_breath_mark_survive_measure_to_lilypond():
     assert "\\set breathMarkType = #'caesura \\breathe" in ly
 
 
+def test_relative_pitch_exact_tritone_tie_breaks_toward_lower_octave():
+    # LilyPond's \relative nearest-neighbor rule breaks an exact tritone tie
+    # (6 semitones either direction) toward the LOWER pitch -- verified
+    # against the real lilypond binary's \displayMusic output (S10d-16):
+    # `\relative c' { cis'' g }` resolves the bare, unmarked "g" to the
+    # octave *below* cis'' (a descending tritone), not the octave above.
+    # cis'' = MIDI 85 (octave 6); the two G candidates are G5 (MIDI 79,
+    # -6) and G6 (MIDI 91, +6) -- an exact tie that must resolve to G5.
+    prev_midi = 85  # cis'' (octave 6)
+    g = _make_note('G', 5, 8)  # target: G, octave 5 (MIDI 79)
+    ly, new_midi = g.to_relative_lilypond(prev_midi)
+    assert ly == 'g8'  # no octave marks needed -- G5 is the tie-break winner
+    assert new_midi == 79
+
+
+def test_relative_pitch_str_exact_tritone_tie_breaks_toward_lower_octave():
+    # Same tie-break rule, exercised through the chord-note code path
+    # (_relative_pitch_str), which duplicates to_relative_lilypond()'s
+    # nearest-neighbor window.
+    prev_midi = 85
+    g = _make_note('G', 5, 8)
+    pitch_str, new_midi = g._relative_pitch_str(prev_midi)
+    assert pitch_str == 'g'
+    assert new_midi == 79
+
+
 def test_measure_volta_single_ending_to_braille():
     m = Measure(number=5, ending_numbers=[1])
     m.add_note(_make_note('C', 4, 4))
