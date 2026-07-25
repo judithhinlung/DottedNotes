@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING, Any
 
@@ -124,12 +126,12 @@ class Chord:
         )
         return written_brl
 
-    def to_lilypond(self) -> str:
+    def to_lilypond(self, key_signature: Optional[KeySignature] = None) -> str:
         """Return LilyPond chord string in absolute mode, e.g. '<c ees>4'."""
         written = self.notes[0]
-        grace_str = (written.grace_note.to_lilypond() + ' ') if written.grace_note else ''
+        grace_str = (written.grace_note.to_lilypond(key_signature=key_signature) + ' ') if written.grace_note else ''
         parts = [
-            NOTE_PITCH_ONLY(n)
+            NOTE_PITCH_ONLY(n, key_signature=key_signature)
             for n in self.notes
         ]
         dur = self.duration.to_lilypond()
@@ -137,7 +139,7 @@ class Chord:
         extra = _chord_extras(written)
         return f"{grace_str}<{' '.join(parts)}>{dur}{tremolo_str}{extra}"
 
-    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
         """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
 
         The first note is relative to prev_midi.  Each subsequent note within
@@ -154,7 +156,7 @@ class Chord:
         if written.grace_note:
             grace_parts = []
             for gn in written.grace_note.notes:
-                note_str, prev_midi = gn.to_relative_lilypond(prev_midi)
+                note_str, prev_midi = gn.to_relative_lilypond(prev_midi, key_signature=key_signature)
                 grace_parts.append(note_str)
             prefix = r'\appoggiatura' if written.grace_note.long_appoggiatura else r'\grace'
             grace_str = f'{prefix} {{ {" ".join(grace_parts)} }} '
@@ -162,7 +164,7 @@ class Chord:
         parts: list[str] = []
         cur_midi = prev_midi
         for note in self.notes:
-            pitch_str, cur_midi = note._relative_pitch_str(cur_midi)
+            pitch_str, cur_midi = note._relative_pitch_str(cur_midi, key_signature=key_signature)
             parts.append(pitch_str)
 
         dur = self.duration.to_lilypond()
@@ -170,15 +172,27 @@ class Chord:
         extra = _chord_extras(written)
 
         # After the chord, reference advances to the first note (LilyPond rule).
-        ref_midi = written._midi_pitch()
+        ref_midi = written._midi_pitch(key_signature=key_signature)
         return f"{grace_str}<{' '.join(parts)}>{dur}{tremolo_str}{extra}", ref_midi
 
 
-def NOTE_PITCH_ONLY(note: Note) -> str:
+def NOTE_PITCH_ONLY(note: Note, key_signature: Optional[KeySignature] = None) -> str:
     """Return just the pitch portion of a note (name + accidental + fingering), no octave or duration."""
     from .note import NOTE_NAME_TO_LILYPOND
     ly_name = NOTE_NAME_TO_LILYPOND[note.note_name]
-    accidental_str = note.accidental.to_lilypond() if note.accidental else ''
+    
+    if note.accidental:
+        accidental_str = note.accidental.to_lilypond()
+    elif key_signature:
+        acc_type = key_signature.accidental_by_step(note.note_name)
+        if acc_type:
+            from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
+            accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
+        else:
+            accidental_str = ''
+    else:
+        accidental_str = ''
+
     fingering_str = ''.join(f.to_lilypond() for f in note.fingerings)
     return f"{ly_name}{accidental_str}{fingering_str}"
 

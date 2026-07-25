@@ -8559,6 +8559,20 @@ correctly detected.
       unit-test strings
 - [ ] `pytest tests/` passes with no regressions
 
+---
 
+### [x] S10d-15: Automatically add sharps/flats to LilyPond note names according to the active key signature
 
+**Why:** LilyPond note names (like `fis` for F-sharp, `bes` for B-flat) represent absolute pitch classes, regardless of the key signature. In contrast, in DottedNotes `Score` model (and Braille/MusicXML input when parsed), a note that is sharped or flatted by the key signature does not carry an explicit or visible accidental, so `Note.accidental` is `None` (or `Note.accidental` has `explicit=False`). Currently, when `Note.to_lilypond()` or `Note.to_relative_lilypond()` is called on such notes (e.g. step `"F"`, no accidental), it outputs `"f"`, which LilyPond interprets as F-natural. This causes incorrect pitch spelling in LilyPond compilation.
 
+**Steps:**
+1. Modify `to_lilypond` and `to_relative_lilypond` in `Note` (and equivalent methods in `Chord`, `Tuplet`, etc.) to accept the active `KeySignature` context, or pass the key signature down from `Staff`/`Measure`.
+2. If a note does not have an explicit accidental (or if it has an implicit/key-signature-matching accidental), determine whether it is altered by the active key signature. If the key signature dictates that the step is sharped/flatted, append the appropriate LilyPond alteration suffix (`is` / `es`).
+3. Update `Measure.to_lilypond()` and `Staff.to_lilypond()` to track and pass the active key signature down to note rendering.
+4. Add a unit test or integration test using `bach-cello-suite-no-1-for-violin.mxl` to verify that compiling to LilyPond generates correct pitches (e.g., F-sharps are rendered as `fis`).
+
+**Definition of Done:**
+- [x] Notes without explicit accidentals are correctly altered in LilyPond output when the active key signature dictates it
+- [x] `Measure.to_lilypond()` and `Staff.to_lilypond()` successfully propagate key signature context to notes/chords
+- [x] Test coverage added, including verification of `bach-cello-suite-no-1-for-violin.mxl` rendering to LilyPond with correct `fis` notes
+- [x] `pytest tests/` passes successfully with no regressions

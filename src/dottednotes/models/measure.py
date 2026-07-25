@@ -350,15 +350,17 @@ class Measure:
         return total
 
     def to_lilypond(self, prev_midi: int = 60) -> tuple[str, int]:
+        from .key_signature import KeySignature
+        key_sig = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=self.key_signature)
         parts: list[str] = []
         for marking in self.text_markings:
             parts.append(marking.to_lilypond())
         cur_midi = prev_midi
         for item in self.notes:
             if hasattr(item, 'to_relative_lilypond'):
-                s, cur_midi = item.to_relative_lilypond(cur_midi)
+                s, cur_midi = item.to_relative_lilypond(cur_midi, key_signature=key_sig)
             else:
-                s = item.to_lilypond()
+                s = item.to_lilypond(key_signature=key_sig)
             parts.append(s)
 
         bar_ly = _BAR_LINE_TO_LY.get(self.bar_line_type, '|')

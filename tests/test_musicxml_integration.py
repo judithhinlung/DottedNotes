@@ -224,3 +224,24 @@ def test_integration_musicxml_volta_to_lilypond_compiles(tmp_path):
         f"LilyPond reported a warning during compilation:\n{result.stdout}\n{result.stderr}"
     )
     assert (tmp_path / "volta.pdf").exists()
+
+
+def test_bach_cello_suite_mxl_lilypond_key_signature_spelling():
+    # Load the real Bach cello suite MusicXML fixture
+    from dottednotes.parser.musicxml_parser import load_musicxml
+    score = load_musicxml("tests/fixtures/bach-cello-suite-no-1-for-violin.mxl")
+    ly = score.to_lilypond()
+
+    # The key signature is D major (2 sharps: F-sharp, C-sharp)
+    assert r"\key d \major" in ly
+
+    # Verify that F steps are rendered as 'fis' (F-sharp) and C steps as 'cis' (C-sharp) in the note stream.
+    # The first measure should render:
+    # d16 a'16 fis'16 e16 fis16 a,16 fis'16 a,16 d,16 a'16 fis'16 e16 fis16 a,16 fis'16 a,16
+    assert "d16 a'16 fis'16 e16 fis16 a,16 fis'16 a,16 d,16 a'16 fis'16 e16 fis16 a,16 fis'16 a,16" in ly
+
+    # The second measure should render:
+    # d,16 b'16 g'16 fis16 g16 b,16 g'16 b,16 d,16 b'16 g'16 fis16 g16 b,16 g'16 b,16
+    assert "d,16 b'16 g'16 fis16 g16 b,16 g'16 b,16 d,16 b'16 g'16 fis16 g16 b,16 g'16 b,16" in ly
+
+

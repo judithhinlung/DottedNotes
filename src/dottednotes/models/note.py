@@ -83,15 +83,27 @@ class Note(BrailleSymbol):
             return "'" * (self.octave - _LILYPOND_OCTAVE_BASE)
         return ''
 
-    def to_lilypond(self) -> str:
+    def to_lilypond(self, key_signature: Optional[KeySignature] = None) -> str:
         """Return LilyPond note string, e.g. 'c4', 'bes'2.', 'fis8'.
 
         Output order: grace_note_block note_name accidental octave duration
                       articulations ornaments tie dynamics slur
         """
-        grace_str = (self.grace_note.to_lilypond() + ' ') if self.grace_note else ''
+        grace_str = (self.grace_note.to_lilypond(key_signature=key_signature) + ' ') if self.grace_note else ''
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
-        accidental_str = self.accidental.to_lilypond() if self.accidental else ''
+        
+        if self.accidental:
+            accidental_str = self.accidental.to_lilypond()
+        elif key_signature:
+            acc_type = key_signature.accidental_by_step(self.note_name)
+            if acc_type:
+                from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
+                accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
+            else:
+                accidental_str = ''
+        else:
+            accidental_str = ''
+
         octave_str = self._octave_marks()
         duration_str = self.duration.to_lilypond()
         tremolo_str = self.tremolo.to_lilypond() if self.tremolo else ''
@@ -124,6 +136,7 @@ class Note(BrailleSymbol):
             pedal_str = r"\sustainOn\sustainOff"
         return (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
                 f"{articulation_str}{ornament_str}{fermata_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}{breath_mark_str}")
+
 
     def to_braille(
         self,
@@ -341,15 +354,21 @@ class Note(BrailleSymbol):
             self.breath_mark == other.breath_mark
         )
 
-    def _relative_pitch_str(self, prev_midi: int) -> tuple[str, int]:
+    def _relative_pitch_str(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
         """Return (pitch_only_str, new_midi) for use inside a chord <...> block.
 
         Renders only the pitch (name + accidental + octave marks), no duration
         or other markings.  Each chord note is relative to the preceding chord note.
         """
         semitone = _NOTE_SEMITONES[self.note_name]
+        acc_type = None
         if self.accidental:
-            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(self.accidental.type.name, 0)
+            acc_type = self.accidental.type
+        elif key_signature:
+            acc_type = key_signature.accidental_by_step(self.note_name)
+            
+        if acc_type:
+            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
 
         base = (prev_midi // 12) * 12 + semitone
         while base < prev_midi - 5:
@@ -357,7 +376,7 @@ class Note(BrailleSymbol):
         while base > prev_midi + 6:
             base -= 12
 
-        target_midi = self._midi_pitch()
+        target_midi = self._midi_pitch(key_signature)
         diff = target_midi - base
         octave_adj = diff // 12
         if octave_adj > 0:
@@ -368,18 +387,35 @@ class Note(BrailleSymbol):
             octave_str = ""
 
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
-        accidental_str = self.accidental.to_lilypond() if self.accidental else ''
+        if self.accidental:
+            accidental_str = self.accidental.to_lilypond()
+        elif key_signature:
+            acc_type = key_signature.accidental_by_step(self.note_name)
+            if acc_type:
+                from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
+                accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
+            else:
+                accidental_str = ''
+        else:
+            accidental_str = ''
+            
         fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
         return f"{ly_name}{accidental_str}{octave_str}{fingering_str}", target_midi
 
-    def _midi_pitch(self) -> int:
+    def _midi_pitch(self, key_signature: Optional[KeySignature] = None) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
         semitone = _NOTE_SEMITONES[self.note_name]
+        acc_type = None
         if self.accidental:
-            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(self.accidental.type.name, 0)
+            acc_type = self.accidental.type
+        elif key_signature:
+            acc_type = key_signature.accidental_by_step(self.note_name)
+            
+        if acc_type:
+            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
         return 12 * (self.octave + 1) + semitone
 
-    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
         """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
 
         Grace notes participate in the relative pitch chain: the grace note
@@ -396,14 +432,20 @@ class Note(BrailleSymbol):
         if self.grace_note:
             parts = []
             for gn in self.grace_note.notes:
-                note_str, prev_midi = gn.to_relative_lilypond(prev_midi)
+                note_str, prev_midi = gn.to_relative_lilypond(prev_midi, key_signature=key_signature)
                 parts.append(note_str)
             prefix = r'\appoggiatura' if self.grace_note.long_appoggiatura else r'\grace'
             grace_str = f'{prefix} {{ {" ".join(parts)} }} '
 
         semitone = _NOTE_SEMITONES[self.note_name]
+        acc_type = None
         if self.accidental:
-            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(self.accidental.type.name, 0)
+            acc_type = self.accidental.type
+        elif key_signature:
+            acc_type = key_signature.accidental_by_step(self.note_name)
+            
+        if acc_type:
+            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
 
         # Natural relative MIDI: the occurrence of this pitch class closest to prev_midi
         base = (prev_midi // 12) * 12 + semitone
@@ -412,7 +454,7 @@ class Note(BrailleSymbol):
         while base > prev_midi + 6:
             base -= 12
 
-        target_midi = self._midi_pitch()
+        target_midi = self._midi_pitch(key_signature)
         diff = target_midi - base
         octave_adj = diff // 12
         if octave_adj > 0:
@@ -423,7 +465,18 @@ class Note(BrailleSymbol):
             octave_str = ""
 
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
-        accidental_str = self.accidental.to_lilypond() if self.accidental else ''
+        if self.accidental:
+            accidental_str = self.accidental.to_lilypond()
+        elif key_signature:
+            acc_type = key_signature.accidental_by_step(self.note_name)
+            if acc_type:
+                from .accidental import ACCIDENTAL_TO_LILYPOND_SUFFIX
+                accidental_str = ACCIDENTAL_TO_LILYPOND_SUFFIX.get(acc_type, '')
+            else:
+                accidental_str = ''
+        else:
+            accidental_str = ''
+            
         duration_str = self.duration.to_lilypond()
         tremolo_str = self.tremolo.to_lilypond() if self.tremolo else ''
         fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
@@ -461,7 +514,7 @@ class Rest(BrailleSymbol):
     multi_measure_count: int = 1   # Number of measures for a multi-measure rest
     pedal_sustain: Optional[str] = None
 
-    def to_lilypond(self) -> str:
+    def to_lilypond(self, key_signature: Optional[KeySignature] = None) -> str:
         """Return LilyPond rest string e.g. 'r4', 'R1', 'r2.', 'R1*4'"""
         pedal_str = ''
         if self.pedal_sustain == "on":
@@ -479,9 +532,9 @@ class Rest(BrailleSymbol):
             return f"R{self.duration.to_lilypond()}{pedal_str}"
         return f"r{self.duration.to_lilypond()}{pedal_str}"
 
-    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
         """Rests do not change the pitch reference; pass prev_midi through unchanged."""
-        return self.to_lilypond(), prev_midi
+        return self.to_lilypond(key_signature=key_signature), prev_midi
 
     def to_braille(self) -> str:
         if self.is_full_measure:

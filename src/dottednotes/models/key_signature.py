@@ -224,3 +224,30 @@ class KeySignature(BrailleSymbol):
             note_brl = _LETTER_TO_NOTE_CELL.get(step, '')
             parts.append(_MUSIC_PARENTHESIS + clef_brl + accidental_brl + octave_brl + note_brl + _MUSIC_PARENTHESIS)
         return "".join(parts)
+
+    def accidental_by_step(self, step: str) -> Optional["AccidentalType"]:
+        """Return the AccidentalType implied by the key signature for this note step, or None."""
+        if self.sharps_or_flats is not None:
+            from .accidental import AccidentalType
+            step = step.upper()
+            sharp_order = ['F', 'C', 'G', 'D', 'A', 'E', 'B']
+            flat_order = ['B', 'E', 'A', 'D', 'G', 'C', 'F']
+            if self.sharps_or_flats > 0:
+                if step in sharp_order[:self.sharps_or_flats]:
+                    return AccidentalType.SHARP
+            elif self.sharps_or_flats < 0:
+                num_flats = -self.sharps_or_flats
+                if step in flat_order[:num_flats]:
+                    return AccidentalType.FLAT
+        elif self.non_traditional_pitches is not None:
+            from .accidental import AccidentalType
+            step = step.upper()
+            for s, alter, _oct in self.non_traditional_pitches:
+                if s.upper() == step:
+                    if alter == 1.0: return AccidentalType.SHARP
+                    elif alter == -1.0: return AccidentalType.FLAT
+                    elif alter == 0.0: return AccidentalType.NATURAL
+                    elif alter == 2.0: return AccidentalType.DOUBLE_SHARP
+                    elif alter == -2.0: return AccidentalType.DOUBLE_FLAT
+        return None
+

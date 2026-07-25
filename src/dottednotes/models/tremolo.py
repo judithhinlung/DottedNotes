@@ -61,13 +61,13 @@ class AlternatingTremolo:
             )
         return dataclasses.replace(item, duration=new_duration)
 
-    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
         count = self._repeat_count()
         parts: list[str] = []
         cur_midi = prev_midi
         for item in self.items:
             scaled = self._at_subdivision(item, self.subdivision)
-            s, cur_midi = scaled.to_relative_lilypond(cur_midi)
+            s, cur_midi = scaled.to_relative_lilypond(cur_midi, key_signature=key_signature)
             parts.append(s)
         inner = ' '.join(parts)
         return f'\\repeat tremolo {count} {{ {inner} }}', cur_midi

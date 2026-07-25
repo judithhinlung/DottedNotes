@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from .note import Note
+    from .key_signature import KeySignature
 
 
 class OrnamentType(Enum):
@@ -78,9 +79,9 @@ class GraceNote:
     notes: list[Note]
     long_appoggiatura: bool = False  # False → \grace { }; True → \appoggiatura { }
 
-    def to_lilypond(self) -> str:
+    def to_lilypond(self, key_signature: Optional[KeySignature] = None) -> str:
         prefix = r'\appoggiatura' if self.long_appoggiatura else r'\grace'
-        notes_str = ' '.join(n.to_lilypond() for n in self.notes)
+        notes_str = ' '.join(n.to_lilypond(key_signature=key_signature) for n in self.notes)
         return f'{prefix} {{ {notes_str} }}'
 
     def to_braille(

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
@@ -82,7 +84,7 @@ class InAccord:
             part_strs.append(_render_note_list_to_braille(part, curr_prev, curr_measure_start, time_signature, key_signature, compression_level))
         return sep.join(part_strs)
 
-    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
         """Render as LilyPond simultaneous voices.
 
         LilyPond's \\relative pitch tracking treats '<<', '\\\\', and '>>' as
@@ -103,9 +105,9 @@ class InAccord:
             note_strs: list[str] = []
             for item in part:
                 if hasattr(item, 'to_relative_lilypond'):
-                    s, cur_midi = item.to_relative_lilypond(cur_midi)
+                    s, cur_midi = item.to_relative_lilypond(cur_midi, key_signature=key_signature)
                 else:
-                    s = item.to_lilypond()
+                    s = item.to_lilypond(key_signature=key_signature)
                 note_strs.append(s)
             voice_strs.append('{ ' + ' '.join(note_strs) + ' }')
 

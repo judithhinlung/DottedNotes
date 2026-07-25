@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
 
@@ -7,6 +9,7 @@ from .note import Rest
 if TYPE_CHECKING:
     from .note import Note
     from .time_signature import TimeSignature
+    from .key_signature import KeySignature
 
 _DIGIT_TO_LOWER_CELL = {v: k for k, v in LOWER_DIGIT_CELLS.items()}
 
@@ -53,14 +56,14 @@ class Tuplet:
     items: list = field(default_factory=list)
     ratio: tuple[int, int] = (3, 2)
 
-    def to_relative_lilypond(self, prev_midi: int) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
         parts: list[str] = []
         cur_midi = prev_midi
         for item in self.items:
             if hasattr(item, 'to_relative_lilypond'):
-                s, cur_midi = item.to_relative_lilypond(cur_midi)
+                s, cur_midi = item.to_relative_lilypond(cur_midi, key_signature=key_signature)
             else:
-                s = item.to_lilypond()
+                s = item.to_lilypond(key_signature=key_signature)
             parts.append(s)
         inner = ' '.join(parts)
         num, den = self.ratio
