@@ -41,6 +41,17 @@ class Score:
                 raise DottedNotesError(f"Part '{part_idx_or_name}' not found. Available parts: {valid_names}")
 
         selected_staff = self.staves[idx]
+        if selected_staff.midi_instrument is None:
+            # Ensemble parsing (OrchestraScore) never stores a MIDI instrument
+            # on the Staff itself -- its own full-score renderer computes one
+            # on the fly from the staff name (orchestra_score.py's
+            # _staff_with_block). A part extracted into a plain Score bypasses
+            # that renderer entirely, so without this it silently has no
+            # \set Staff.midiInstrument and LilyPond's \midi{} falls back to
+            # Acoustic Grand Piano. Reuses the same lookup so an extracted
+            # part matches what the full score would have shown for it.
+            from .instrument import get_midi_instrument_name
+            selected_staff.midi_instrument = get_midi_instrument_name(selected_staff.name)
         return Score(
             title=f"{self.title} - {selected_staff.name}" if self.title else selected_staff.name,
             composer=self.composer,

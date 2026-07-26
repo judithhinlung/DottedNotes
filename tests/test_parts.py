@@ -64,6 +64,39 @@ def test_score_extract_part_index():
     assert part2.title == "Duo - Cello"
 
 
+def test_score_extract_part_populates_midi_instrument():
+    # Regression: OrchestraScore's full-score renderer computes each staff's
+    # MIDI instrument on the fly from its name and never stores it on the
+    # Staff object -- extracting a part into a plain Score bypasses that
+    # renderer entirely, so without this fix an extracted part's .midi
+    # silently falls back to Acoustic Grand Piano regardless of instrument.
+    score = Score(title="Duo", composer="Bach")
+    score.add_staff(Staff(name="Violin"))
+    score.add_staff(Staff(name="Cello"))
+
+    assert score.extract_part(0).staves[0].midi_instrument == "violin"
+    assert score.extract_part(1).staves[0].midi_instrument == "cello"
+
+
+def test_score_extract_part_leaves_unresolvable_name_alone():
+    # A solo score's placeholder staff names ("right hand"/"left hand")
+    # don't resolve to a GM instrument -- must stay None (no behavior
+    # change for plain piano scores, which already default to piano).
+    score = Score()
+    score.add_staff(Staff(name="right hand"))
+    assert score.extract_part(0).staves[0].midi_instrument is None
+
+
+def test_score_extract_part_does_not_override_explicit_instrument():
+    # A prior S12-3 instrument selection (web.py's _apply_instrument) must
+    # win over the name-based fallback.
+    score = Score()
+    staff = Staff(name="Violin")
+    staff.midi_instrument = "trumpet"
+    score.add_staff(staff)
+    assert score.extract_part(0).staves[0].midi_instrument == "trumpet"
+
+
 def test_score_extract_part_name():
     score = Score(title="Choral")
     staff1 = Staff(name="Soprano")
@@ -308,11 +341,15 @@ def test_web_part_rendering_endpoint():
     assert part0_response.status_code == 200
     assert "c4 d4 ees4 f4" in part0_response.text.lower()
     assert "g'4 aes4 bes4 c4" not in part0_response.text.lower()
+    # Regression: an extracted ensemble part must carry its own MIDI
+    # instrument, not silently fall back to piano.
+    assert '\\set Staff.midiInstrument = "flute"' in part0_response.text
 
     # 2. Download part 1 (Violin)
     part1_response = client.get(f"/api/jobs/{job_id}/parts/1/ly")
     assert part1_response.status_code == 200
     assert "g'4 aes4 bes4 c4" in part1_response.text.lower()
+    assert '\\set Staff.midiInstrument = "violin"' in part1_response.text
 
     # 3. Download part 0 (Flute) as BRF with measure numbers
     response_mn = client.post(
