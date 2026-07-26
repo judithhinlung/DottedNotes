@@ -1355,13 +1355,27 @@ class BrailleParser:
         explicit_accidental = self._pending_accidental
         self._pending_accidental = None
         has_octave_mark = self._octave_mark_pending
-        if not has_octave_mark and not self._in_accord_voice_restart:
+        if self._in_accord_voice_restart:
             # The melodic-interval rule only applies within one continuous
-            # melodic line. The first note of a new in-accord voice isn't
-            # "consecutive" with the previous voice's last note in that
-            # sense (BANA Sec. 3.2.2's scope is a single voice's own
-            # sequence of notes) -- see _handle_in_accord -- so it just
-            # keeps whatever octave number was last set instead.
+            # melodic line, and a new in-accord voice's first note isn't
+            # "consecutive" with the *other* voice's last note in that sense
+            # (BANA Sec. 3.2.2's scope is a single voice's own sequence of
+            # notes). But this voice index (this measure's 1st/2nd/3rd part)
+            # may itself have appeared in an earlier measure -- if so, an
+            # unmarked first note resumes *that* voice's own melodic thread
+            # (see _handle_in_accord/_finalize_measure, which record each
+            # voice's ending state keyed by its index) rather than
+            # inheriting whatever octave the other voice just ended on.
+            if not has_octave_mark:
+                incoming_voice_idx = len(self._in_accord_parts)
+                if incoming_voice_idx in self._in_accord_voice_octave:
+                    self._current_octave = self._in_accord_voice_octave[incoming_voice_idx]
+                    self._previous_note_letter = self._in_accord_voice_note_letter[incoming_voice_idx]
+                    self._current_octave = self._resolve_unmarked_octave(note_name)
+                # else: this voice index has no prior occurrence in the
+                # piece -- nothing to resume, so keep whatever octave was
+                # last set (pre-existing fallback).
+        elif not has_octave_mark:
             self._current_octave = self._resolve_unmarked_octave(note_name)
         self._in_accord_voice_restart = False
         self._octave_mark_pending = False  # octave mark was consumed by this note
@@ -1603,6 +1617,15 @@ class BrailleParser:
         self._in_accord_voice_restart = True
 
         if in_accord_type == 'full_measure':
+            # Remember this closing voice's own octave/previous-letter state
+            # (keyed by its position among this measure's parts) so that if
+            # this same voice index reappears in a later measure with no
+            # octave mark on its first note, _buffer_note can resume *this*
+            # voice's own melodic thread (BANA Sec. 3.2.2) instead of
+            # inheriting whatever the primary voice happened to end on.
+            outgoing_voice_idx = len(self._in_accord_parts)
+            self._in_accord_voice_octave[outgoing_voice_idx] = self._current_octave
+            self._in_accord_voice_note_letter[outgoing_voice_idx] = self._previous_note_letter
             self._in_accord_parts.append(self._finalize_voice_part(pending))
         elif in_accord_type == 'part_measure':
             self._current_section_parts.append(self._finalize_voice_part(pending))
@@ -1898,6 +1921,12 @@ class BrailleParser:
             self._in_accord_sections = []
         elif self._in_accord_parts:
             # Final voice: whatever is still in pending after the last in-accord sign.
+            # Remember its own octave/previous-letter state too -- same
+            # reasoning as the closing-voice save in _handle_in_accord (this
+            # is the group's *last* voice, which never triggers that path).
+            outgoing_voice_idx = len(self._in_accord_parts)
+            self._in_accord_voice_octave[outgoing_voice_idx] = self._current_octave
+            self._in_accord_voice_note_letter[outgoing_voice_idx] = self._previous_note_letter
             all_parts = list(self._in_accord_parts)
             all_parts.append(self._finalize_voice_part(pending))
             measure.add_note(InAccord(parts=all_parts, in_accord_type=self._in_accord_type))
@@ -2198,6 +2227,8 @@ class BrailleParser:
             '_previous_note_letter': self._previous_note_letter,
             '_previous_note_letter_by_hand': dict(self._previous_note_letter_by_hand),
             '_in_accord_primary_octave': self._in_accord_primary_octave,
+            '_in_accord_voice_octave': dict(self._in_accord_voice_octave),
+            '_in_accord_voice_note_letter': dict(self._in_accord_voice_note_letter),
             '_in_accord_primary_note_letter': self._in_accord_primary_note_letter,
             '_in_accord_voice_restart': self._in_accord_voice_restart,
             '_key_signature': self._key_signature,
@@ -2282,6 +2313,16 @@ class BrailleParser:
         # buffered: that note starts a fresh voice, so _buffer_note skips
         # the melodic-interval computation for it (see _handle_in_accord).
         self._in_accord_voice_restart: bool = False
+        # Per-voice-index octave/previous-letter continuity for in-accord
+        # ('full_measure') voices, across measures -- keyed by each voice's
+        # position among a measure's parts (0, 1, 2, ...). Recorded whenever
+        # such a voice closes (_handle_in_accord's 'full_measure' branch, and
+        # _finalize_measure's last-voice branch); consulted by _buffer_note
+        # so an unmarked first note in a later measure's same-index voice
+        # resumes *that* voice's own melodic thread instead of inheriting
+        # whatever octave a different voice in the same measure ended on.
+        self._in_accord_voice_octave: dict[int, int] = {}
+        self._in_accord_voice_note_letter: dict[int, str | None] = {}
         self._key_signature: KeySignature = KeySignature(
             dots=frozenset(),
             category=SymbolCategory.KEY_SIGNATURE,

@@ -4143,6 +4143,35 @@ def test_parser_in_accord_across_two_measures():
     assert isinstance(staff.measures[1].notes[0], Note)
 
 
+def test_parser_in_accord_second_voice_resumes_own_octave_across_measures():
+    # Children's Piece m18->m19 regression (S10d-17): when a later measure's
+    # in-accord second voice starts unmarked, it must resume *its own*
+    # melodic thread from wherever it last left off (an earlier measure's
+    # same voice index) -- not inherit whatever octave the *first* voice of
+    # the same later measure happens to end on.
+    #
+    # Measure 1: voice1 = C4 D4 E4 F4 (octave 4) \\ voice2 = A3 B3 (explicit
+    # octave 3, ending on B3).
+    # Measure 2: voice1 = F (unmarked, unison with its own m1 ending -- stays
+    # octave 4) \\ voice2 = B (unmarked, unison with *voice2's own* m1
+    # ending B3) -- must resolve to octave 3, not octave 4 (voice1's octave
+    # in this same measure).
+    text = '⠐⠹⠱⠫⠻⠣⠜⠸⠪⠺⠀⠻⠣⠜⠺⠀'
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    staff = score.staves[0]
+    assert len(staff.measures) == 2
+
+    m1_voice2 = staff.measures[0].notes[0].parts[1]
+    assert [(n.note_name, n.octave) for n in m1_voice2] == [('A', 3), ('B', 3)]
+
+    m2 = staff.measures[1].notes[0]
+    assert (m2.parts[0][0].note_name, m2.parts[0][0].octave) == ('F', 4)
+    assert (m2.parts[1][0].note_name, m2.parts[1][0].octave) == ('B', 3)
+
+
 # --- Parser: part-measure in-accord (BANA 11.1.2) ---
 
 # 4/4 measure: [half C] part-measure-sign [quarter E, quarter F]
@@ -4581,6 +4610,28 @@ def test_children_s_piece_measure22_left_hand_matches_lilypond_ground_truth():
         ('G', 8, 1), ('F', 16, 0), ('E', 8, 0), ('F', 8, 0), ('E', 4, 0),
     ]
     assert not any("Measure 22:" in str(w.message) for w in caught)
+
+
+def test_children_s_piece_measure19_second_voice_matches_lilypond_ground_truth():
+    # Children_s_Piece.ly measure 19 upper: <<{fis'8( a8) b8( g8) a4-.}
+    # \\{a,4 b4 cis4}>> -- voice 2's first note (A, unmarked) must resume
+    # voice 2's own octave from measure 18 (where it last appeared, ending
+    # on A4), not inherit voice 1's ending octave for measure 19 itself
+    # (S10d-17). Verified against the real lilypond binary's absolute
+    # pitch resolution: this A must land one octave below voice 1's A that
+    # ends measure 19 (both write "a4" with no marks in \relative text, but
+    # they are not the same absolute pitch).
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / 'children_s_piece.brf')
+    tokens = BrailleTokenizer().tokenize(text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = BrailleParser(tokens=tokens).parse()
+    staff = score.staves[0]
+    m19 = staff.measures[18].notes[0]
+    voice1, voice2 = m19.parts
+    assert (voice1[0].note_name, voice1[0].octave) == ('F', 5)
+    assert (voice2[0].note_name, voice2[0].octave) == ('A', 4)
 
 
 def test_children_s_piece_title_decodes_apostrophe_correctly():
