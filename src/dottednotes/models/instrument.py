@@ -220,6 +220,12 @@ _NAME_TO_MIDI_INSTRUMENT: dict[str, str] = {
     'Harp left hand': 'orchestral harp',
     'Piano right hand': 'acoustic grand',
     'Piano left hand': 'acoustic grand',
+    # Bare, unprefixed "right hand"/"left hand" (no "Piano " prefix) are
+    # exclusively produced by the solo two-hand BRF piano parser
+    # (braille_parser.py) -- never harp, which is always "Harp right/left
+    # hand" -- see PLACEHOLDER_STAFF_NAMES below.
+    'right hand': 'acoustic grand',
+    'left hand': 'acoustic grand',
     'Violin I': 'violin',
     'Violin II': 'violin',
     'Viola': 'viola',

@@ -176,6 +176,27 @@ def test_formatted_solo_piano_score_compiles_cleanly(tmp_path: Path):
     _compile_and_check_no_warnings(ly_output, tmp_path, "solo_piano")
 
 
+def test_formatted_solo_piano_score_sets_midi_instrument_on_both_hands(tmp_path: Path):
+    if not shutil.which("lilypond"):
+        pytest.skip("lilypond binary not found; skipping compile test")
+
+    text = BRLInputPipeline().load(FIXTURES / "fingering_melody.brf")
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(text)).parse()
+
+    ly_output = score.to_lilypond()
+    assert ly_output.count('\\set Staff.midiInstrument = "acoustic grand"') == 2
+
+    pdf_path = _compile_and_check_no_warnings(ly_output, tmp_path, "solo_piano_midi")
+    midi_path = pdf_path.with_suffix(".midi")
+    midi_bytes = midi_path.read_bytes()
+    # A "MTrk" track chunk containing a program-change (0xC0-0xCF) event on
+    # each of the two channels used by the right-hand/left-hand staves --
+    # confirms LilyPond actually emitted the MIDI instrument, not just that
+    # our own generated text contains the \set directive.
+    assert b"\xc0\x00" in midi_bytes
+    assert b"\xc1\x00" in midi_bytes
+
+
 def test_formatted_chamber_score_compiles_cleanly(tmp_path: Path):
     if not shutil.which("lilypond"):
         pytest.skip("lilypond binary not found; skipping compile test")
@@ -187,6 +208,9 @@ def test_formatted_chamber_score_compiles_cleanly(tmp_path: Path):
     assert formatter.detect_category(score) == "Chamber"
 
     ly_output = score.to_lilypond()
+    # Every ensemble part must have its own MIDI instrument (OrchestraScore
+    # already sets one per staff from its instrument-list name).
+    assert ly_output.count('\\set Staff.midiInstrument') == len(score.staves)
     _compile_and_check_no_warnings(ly_output, tmp_path, "chamber")
 
 

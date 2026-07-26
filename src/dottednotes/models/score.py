@@ -145,6 +145,23 @@ class Score:
         return result
 
     @staticmethod
+    def _midi_instrument_line(staff: Staff, indent: str) -> list[str]:
+        """Return a one-line `\\set Staff.midiInstrument = "..."` list (or []
+        if `staff.name` doesn't resolve to a known General MIDI instrument),
+        for the plain multi-staff to_lilypond() path below. Deliberately
+        does not also emit `\\set Staff.instrumentName` -- unlike
+        OrchestraScore._staff_with_block (which always shows instrument
+        names on an ensemble score), a plain Score's staves here include a
+        piano's "right hand"/"left hand" hands, whose bare names would be
+        an unwanted visible label change if printed on the engraving.
+        """
+        from .instrument import get_midi_instrument_name
+        midi_name = get_midi_instrument_name(staff.name)
+        if midi_name is None:
+            return []
+        return [f'{indent}\\set Staff.midiInstrument = "{midi_name}"']
+
+    @staticmethod
     def _wrap_transpose(
         staff: Staff, relative_block: list[str], indent: str, concert_pitch: bool
     ) -> list[str]:
@@ -345,6 +362,7 @@ class Score:
                     block_lines = [
                         "\\new Staff <<",
                         f"  \\new Voice = \"{voice_name}\" {{",
+                        *self._midi_instrument_line(staff, '    '),
                         *transposed,
                         "  }",
                         *lyrics_lines,
@@ -358,6 +376,7 @@ class Score:
                     ]
                     block_lines = [
                         "\\new Staff {",
+                        *self._midi_instrument_line(staff, '  '),
                         *self._wrap_transpose(staff, relative_block, '  ', concert_pitch),
                         "}"
                     ]
@@ -377,6 +396,7 @@ class Score:
                         voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
                         block_lines.append("  \\new Staff <<")
                         block_lines.append(f"    \\new Voice = \"{voice_name}\" {{")
+                        block_lines.extend(self._midi_instrument_line(staff, '      '))
                         block_lines.extend(transposed)
                         block_lines.append("    }")
                         verses = staff.verses if staff.verses else [staff.lyrics]
@@ -389,6 +409,7 @@ class Score:
                         block_lines.append("  >>")
                     else:
                         block_lines.append("  \\new Staff {")
+                        block_lines.extend(self._midi_instrument_line(staff, '    '))
                         relative_block = [f"    \\relative {anchor} {{"]
                         staff_ly = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
                         for line in staff_ly.splitlines():

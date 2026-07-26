@@ -79,12 +79,22 @@ def test_score_extract_part_populates_midi_instrument():
 
 
 def test_score_extract_part_leaves_unresolvable_name_alone():
-    # A solo score's placeholder staff names ("right hand"/"left hand")
-    # don't resolve to a GM instrument -- must stay None (no behavior
-    # change for plain piano scores, which already default to piano).
+    # A genuinely unrecognized staff name doesn't resolve to a GM
+    # instrument -- must stay None.
+    score = Score()
+    score.add_staff(Staff(name="Kazoo"))
+    assert score.extract_part(0).staves[0].midi_instrument is None
+
+
+def test_score_extract_part_resolves_piano_hand_placeholder_names():
+    # A solo piano score's placeholder staff names ("right hand"/"left
+    # hand") are exclusively produced by the two-hand BRF piano parser --
+    # they must resolve to "acoustic grand" so an extracted hand's MIDI
+    # playback isn't left on whatever default a player picks for an unset
+    # channel.
     score = Score()
     score.add_staff(Staff(name="right hand"))
-    assert score.extract_part(0).staves[0].midi_instrument is None
+    assert score.extract_part(0).staves[0].midi_instrument == "acoustic grand"
 
 
 def test_score_extract_part_does_not_override_explicit_instrument():
