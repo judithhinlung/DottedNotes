@@ -20,6 +20,7 @@ from dottednotes.bana_symbols import (
     LITERARY_PERIOD,
     LOWER_DIGIT_CELLS,
     MEASURE_REPEAT_CELL,
+    METRONOME_EQUALS_CELL,
     NOTE_CELLS,
     OCTAVE_MARKS,
     ORNAMENT_CELLS,
@@ -30,6 +31,16 @@ from dottednotes.bana_symbols import (
     SymbolCategory,
 )
 from dottednotes.parser.input_pipeline import decode_literary_braille
+
+# BANA Sec. 1.8's metronome-mark note-value cell is always pitch class "C"
+# (of indefinite pitch -- the note shape stands in for the note value only).
+# NOTE_CELLS has exactly 4 such cells: eighth (⠙), quarter (⠹), whole (⠽),
+# half (⠝). BrailleParser reads the metronome mark's duration as the "large"
+# member of each cell's whole/16th, half/32nd, quarter/64th pair (there is
+# no measure/rhythmic context to ever force the small reading here).
+_METRONOME_NOTE_CELLS: frozenset[str] = frozenset(
+    cell for cell, value in NOTE_CELLS.items() if value is not None and value[0] == 'C'
+)
 
 
 @dataclass
@@ -317,6 +328,24 @@ class BrailleTokenizer:
                         i += 3
                         header_active = False
                         continue
+
+                    # BANA Sec. 1.8 metronome mark, number-first order
+                    # ("the order is occasionally varied in print, the
+                    # number being given before the note, and the braille
+                    # should follow print"): NUMBER_SIGN + digits + equals
+                    # + note-value cell. Only recognized in the header --
+                    # see METRONOME_EQUALS_CELL's module comment.
+                    if header_active:
+                        digits_end = self._metronome_digits_end(text, i + 1)
+                        if (digits_end is not None
+                                and text[digits_end:digits_end + 1] == METRONOME_EQUALS_CELL):
+                            note_end = self._metronome_note_end(text, digits_end + 1)
+                            if note_end is not None:
+                                tokens.append(BrailleToken(
+                                    text[i:note_end], SymbolCategory.METRONOME_MARK, i, line))
+                                i = note_end
+                                header_active = False
+                                continue
 
                     # Check for multi-measure rest: ⠼ followed by literary digits followed by ⠍
                     j = i + 1
@@ -613,6 +642,24 @@ class BrailleTokenizer:
                 tokens.append(BrailleToken(decoded_text, SymbolCategory.WORD_SIGN, start_pos, line, raw=text[start_pos:i]))
                 continue
 
+            # --- metronome mark (BANA Sec. 1.8), note-value cell first:
+            # note-value cell + augmentation dots + equals + NUMBER_SIGN +
+            # digits. Only recognized in the header -- see
+            # METRONOME_EQUALS_CELL's module comment. The number-first
+            # order is handled above, inside the NUMBER_SIGN block.
+            if header_active:
+                note_end = self._metronome_note_end(text, i)
+                if note_end is not None and text[note_end:note_end + 1] == METRONOME_EQUALS_CELL:
+                    after_equals = note_end + 1
+                    if text[after_equals:after_equals + 1] == self._NUMBER_SIGN:
+                        digits_end = self._metronome_digits_end(text, after_equals + 1)
+                        if digits_end is not None:
+                            tokens.append(BrailleToken(
+                                text[i:digits_end], SymbolCategory.METRONOME_MARK, i, line))
+                            i = digits_end
+                            header_active = False
+                            continue
+
             # --- multi-measure rests ⠍⠍, ⠍⠍⠍ at measure start ---
             if at_measure_start:
                 if text[i:i+3] == '⠍⠍⠍':
@@ -670,3 +717,36 @@ class BrailleTokenizer:
         if char == MEASURE_REPEAT_CELL:
             return SymbolCategory.REPEAT
         return SymbolCategory.UNKNOWN
+
+    @staticmethod
+    def _metronome_digits_end(text: str, k: int) -> int | None:
+        """Index just past a run of LITERARY_DIGITS digits starting at k
+        (already past the NUMBER_SIGN cell -- an ordinary braille number,
+        not the separate "lower-cell numeral" convention LOWER_DIGIT_CELLS
+        is reserved for, e.g. measure numbers), including an optional
+        LITERARY_HYPHEN + more digits for a BPM range (BANA Sec. 1.8
+        Example 1.8-3: "104-112"). None if there are no digits at k."""
+        j = k
+        while j < len(text) and text[j] in LITERARY_DIGITS:
+            j += 1
+        if j == k:
+            return None
+        if j < len(text) and text[j] == LITERARY_HYPHEN:
+            j2 = j + 1
+            while j2 < len(text) and text[j2] in LITERARY_DIGITS:
+                j2 += 1
+            if j2 > j + 1:
+                j = j2
+        return j
+
+    @staticmethod
+    def _metronome_note_end(text: str, k: int) -> int | None:
+        """Index just past a BANA Sec. 1.8 metronome note-value cell
+        (_METRONOME_NOTE_CELLS) plus any augmentation dots, starting at k.
+        None if text[k] isn't one of those cells."""
+        if k >= len(text) or text[k] not in _METRONOME_NOTE_CELLS:
+            return None
+        j = k + 1
+        while j < len(text) and text[j] == END_WORD_SIGN:
+            j += 1
+        return j

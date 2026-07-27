@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from .duration import TICKS_PER_QUARTER, ticks_to_lilypond_duration
 from .measure import Measure
+from .metronome_mark import MetronomeMark
 from .text_marking import TextMarking, TextMarkingType
 
 if TYPE_CHECKING:
@@ -23,6 +24,12 @@ class Staff:
     time_signature: TimeSignature | None = None
     clef: Clef | None = None
     tempo: TextMarking | None = None
+    # BANA Sec. 1.8 heading metronome mark (e.g. "quarter note = 120"),
+    # independent of `tempo` -- a word-sign tempo term and a metronome mark
+    # can co-occur (Example 1.7-2: "Piu tosto lento e appassionato" on one
+    # line, the metronome marking and signatures on the next). Combined into
+    # one `\tempo` directive by to_lilypond() below when both are present.
+    metronome: MetronomeMark | None = None
     # BANA Sec. 1.4's title, when the solo/single-line parser finds a
     # header word-sign expression that isn't a recognized tempo/mood term
     # (TEMPO_TERMS) -- kept separate from `tempo` (S12-2) so a piece with
@@ -183,7 +190,14 @@ class Staff:
         # staff's header reads title, key, time, clef, tempo -- matching
         # BANA's own Sec. 1.7 Music Heading order (tempo/mood text last,
         # right before the music starts).
-        if self.tempo is not None:
+        if self.metronome is not None:
+            # Combine with any separate word-sign tempo term (BANA Sec.
+            # 1.7-2: a tempo term and a metronome mark can appear together)
+            # into a single `\tempo "text" 4 = 120` directive.
+            header.append('    ' + self.metronome.to_lilypond(
+                text=self.tempo.text if self.tempo is not None else None
+            ))
+        elif self.tempo is not None:
             header.append('    ' + self.tempo.to_lilypond())
 
         if include_clef:

@@ -197,6 +197,22 @@ def test_formatted_solo_piano_score_sets_midi_instrument_on_both_hands(tmp_path:
     assert b"\xc1\x00" in midi_bytes
 
 
+def test_metronome_mark_compiles_and_renders_tempo(tmp_path: Path):
+    if not shutil.which("lilypond"):
+        pytest.skip("lilypond binary not found; skipping compile test")
+
+    # BANA Music Braille Code 2015, Example 1.8-2: number-first order,
+    # "72 = quarter note" -- see tests/test_parser.py's metronome-mark
+    # section for the full cell-by-cell decode.
+    metronome = '⠼⠛⠃⠶⠹'
+    notes = '⠐⠹⠹⠹⠹'  # octave 4 + 4 C quarters, filling one 4/4 measure
+    score = BrailleParser(tokens=BrailleTokenizer().tokenize(metronome + notes)).parse()
+
+    ly_output = score.to_lilypond()
+    assert r'\tempo 4 = 72' in ly_output
+    _compile_and_check_no_warnings(ly_output, tmp_path, "metronome_mark")
+
+
 def test_formatted_chamber_score_compiles_cleanly(tmp_path: Path):
     if not shutil.which("lilypond"):
         pytest.skip("lilypond binary not found; skipping compile test")
