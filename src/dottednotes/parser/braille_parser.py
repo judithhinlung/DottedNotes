@@ -11,12 +11,16 @@ from ..bana_symbols import (
     BAR_LINE_SEQUENCES,
     CLEF_CELLS,
     DYNAMIC_CELLS,
+    END_WORD_SIGN,
     GRACE_NOTE_INDICATOR,
     IN_ACCORD_CELLS,
     INTERVAL_CELLS,
     KEY_SIGNATURE_CELLS,
     LITERARY_DIGITS,
+    LITERARY_HYPHEN,
+    METRONOME_EQUALS_CELL,
     NOTE_CELLS,
+    NUMBER_SIGN,
     OCTAVE_MARKS,
     ORNAMENT_CELLS,
     REST_CELLS,
@@ -43,6 +47,7 @@ from ..models.dynamic import Dynamic, DynamicLevel
 from ..models.key_signature import KeySignature
 from ..models.measure import Measure
 from ..models.measure_repeat import MeasureRepeat
+from ..models.metronome_mark import MetronomeMark
 from ..models.note import Note, Rest
 from ..models.fingering import Fingering
 from ..models.ornament import GraceNote, Ornament, OrnamentType
@@ -474,6 +479,8 @@ class BrailleParser:
                 self._pending_repeat_count += 1
                 if self._pending_repeat_line is None:
                     self._pending_repeat_line = token.line
+            elif token.category == SymbolCategory.METRONOME_MARK:
+                self._handle_metronome_mark(token)
             elif token.category == SymbolCategory.KEY_SIGNATURE:
                 self._handle_key_signature(token)
             elif token.category == SymbolCategory.TIME_SIGNATURE:
@@ -646,6 +653,8 @@ class BrailleParser:
             right_staff.clef = self._clef
         if self._pending_tempo is not None:
             right_staff.tempo = self._pending_tempo
+        if self._pending_metronome is not None:
+            right_staff.metronome = self._pending_metronome
         if self._pending_title is not None:
             right_staff.title_marking = self._pending_title
 
@@ -1479,6 +1488,60 @@ class BrailleParser:
         self._pending_pedal_down = None
         return prest
 
+    # BANA Sec. 1.8's metronome-mark note-value cell is always pitch class
+    # "C" (of indefinite pitch); see tokenizer.py's identical derivation.
+    _METRONOME_NOTE_CELLS: frozenset[str] = frozenset(
+        cell for cell, value in NOTE_CELLS.items() if value is not None and value[0] == 'C'
+    )
+
+    @staticmethod
+    def _parse_metronome_digits(cells: str, start: int) -> tuple[int, int | None, int]:
+        """Parse a LITERARY_DIGITS run (an ordinary braille number, not the
+        separate "lower-cell numeral" convention LOWER_DIGIT_CELLS is
+        reserved for, e.g. measure numbers) + optional LITERARY_HYPHEN
+        range (BANA Sec. 1.8 Example 1.8-3: "104-112") starting at `start`.
+        Returns (bpm, bpm_range_end, index just past what was consumed)."""
+        j = start
+        while j < len(cells) and cells[j] in LITERARY_DIGITS:
+            j += 1
+        bpm = int(''.join(str(LITERARY_DIGITS[c]) for c in cells[start:j]))
+        range_end = None
+        if j < len(cells) and cells[j] == LITERARY_HYPHEN:
+            k = j + 1
+            while k < len(cells) and cells[k] in LITERARY_DIGITS:
+                k += 1
+            range_end = int(''.join(str(LITERARY_DIGITS[c]) for c in cells[j + 1:k]))
+            j = k
+        return bpm, range_end, j
+
+    def _handle_metronome_mark(self, token: BrailleToken) -> None:
+        """Decode a BANA Sec. 1.8 metronome mark (BrailleTokenizer already
+        validated the grammar and found its span; `token.character` is the
+        raw cells) into a MetronomeMark, in whichever order -- note-value
+        cell first or number first -- the source used (Sec. 1.8: "the
+        order is occasionally varied in print... the braille should follow
+        print")."""
+        cells = token.character
+        if cells[0] in self._METRONOME_NOTE_CELLS:
+            _, base_duration = NOTE_CELLS[cells[0]]
+            j = 1
+            while j < len(cells) and cells[j] == END_WORD_SIGN:
+                j += 1
+            dots = j - 1
+            assert cells[j] == METRONOME_EQUALS_CELL and cells[j + 1] == NUMBER_SIGN
+            bpm, bpm_range_end, _ = self._parse_metronome_digits(cells, j + 2)
+        else:
+            # Number-first: NUMBER_SIGN + digits[-digits] + equals + note[.dots]
+            bpm, bpm_range_end, eq_idx = self._parse_metronome_digits(cells, 1)
+            assert cells[eq_idx] == METRONOME_EQUALS_CELL
+            note_cell = cells[eq_idx + 1]
+            base_duration = NOTE_CELLS[note_cell][1]
+            dots = len(cells) - (eq_idx + 2)
+
+        self._pending_metronome = MetronomeMark(
+            note_value=base_duration, dots=dots, bpm=bpm, bpm_range_end=bpm_range_end,
+        )
+
     def _handle_key_signature(self, token: BrailleToken) -> None:
         self._key_signature = KeySignature(
             dots=frozenset(),
@@ -2259,6 +2322,7 @@ class BrailleParser:
             '_pending_slur_end': self._pending_slur_end,
             '_pending_slur_bracket_open': self._pending_slur_bracket_open,
             '_pending_tempo': self._pending_tempo,
+            '_pending_metronome': self._pending_metronome,
             '_pending_title': self._pending_title,
             '_pending_text_markings': list(self._pending_text_markings),
             '_active_intervals': dict(self._active_intervals),
@@ -2375,6 +2439,8 @@ class BrailleParser:
         self._pending_slur_end: bool = False
         self._pending_slur_bracket_open: bool = False
         self._pending_tempo: TextMarking | None = None
+        # BANA Sec. 1.8 heading metronome mark -- see _handle_metronome_mark.
+        self._pending_metronome: MetronomeMark | None = None
         # BANA Sec. 1.4 title (S12-2) -- see _handle_word_sign's shift logic.
         self._pending_title: TextMarking | None = None
         self._pending_text_markings: list[TextMarking] = []

@@ -65,6 +65,7 @@ class SymbolCategory(Enum):
     TREMOLO = auto()
     PEDAL = auto()
     CHORD_SYMBOL = auto()
+    METRONOME_MARK = auto()
     UNKNOWN = auto()
 
 
@@ -335,6 +336,23 @@ FERMATA_OVER_BAR_LINE_CELL: str = '⠸⠣⠇'
 # ---------------------------------------------------------------------------
 
 MEASURE_REPEAT_CELL: str = '⠶'  # dots 2,3,5,6 = U+2836
+
+# ---------------------------------------------------------------------------
+# Metronome mark "equals" sign (BANA Music Braille Code 2015, Par. 1.8:
+# "the sign [dots 2,3,5,6] represents the 'equals' sign"). Decoded from the
+# manual's own ASCII transcription (Examples 1.8-1 through 1.8-6) against
+# ASCII_TO_DOTS and cross-checked note-by-note against the printed metronome
+# marks shown alongside each example -- developer-confirmed 2026.
+#
+# Same cell as MEASURE_REPEAT_CELL/CHORD_PAREN_CELL/LOWER_DIGIT_CELLS['⠶']=7
+# above. Disambiguated the same way those already are: BrailleTokenizer only
+# ever recognizes this meaning while its header_active state is still True
+# (i.e. before any real musical content) -- a region none of the other
+# meanings reach, since REPEAT/CHORD_PAREN/instrument-list digit-7 all only
+# occur mid-music or on a separate chord-symbol/instrument-list line.
+# ---------------------------------------------------------------------------
+
+METRONOME_EQUALS_CELL: str = '⠶'  # dots 2,3,5,6 = U+2836
 
 # ---------------------------------------------------------------------------
 # Articulation cells

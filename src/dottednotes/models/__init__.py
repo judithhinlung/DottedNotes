@@ -14,6 +14,7 @@ from .instrument import InstrumentInfo, InstrumentFamily, get_instrument_family
 from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
 from .measure_repeat import MeasureRepeat
+from .metronome_mark import MetronomeMark
 from .note import Note, Rest
 from .fingering import Fingering
 from .ornament import GraceNote, Ornament, OrnamentType, ORNAMENT_TO_LILYPOND
@@ -52,6 +53,7 @@ __all__ = [
     "KeySignature",
     "Measure",
     "MeasureRepeat",
+    "MetronomeMark",
     "Note",
     "Rest",
     "Fingering",

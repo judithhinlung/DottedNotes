@@ -3381,6 +3381,129 @@ def test_capital_indicator_tempo_before_first_note_in_lilypond():
 
 
 # ---------------------------------------------------------------------------
+# BANA Music Braille Code 2015, Par. 1.8 -- heading metronome marks.
+# Each braille string below is decoded, cell by cell, from the manual's own
+# Examples 1.8-1 through 1.8-6 (cross-checked against the printed metronome
+# marks shown alongside each example, not just the ASCII transcription).
+# ---------------------------------------------------------------------------
+
+# Example 1.8-1: "N7#HJ" -- note-first order, half note = 80.
+#   ⠝ = C-half-shape note-value cell, ⠶ = equals, ⠼ = numeral sign, ⠓⠚ = "80"
+_METRONOME_HALF_80 = '⠝⠶⠼⠓⠚'
+
+# Example 1.8-2: "#GB7?" -- number-first order, 72 = quarter note.
+#   ⠼ = numeral sign, ⠛⠃ = "72", ⠶ = equals, ⠹ = C-quarter-shape note cell
+_METRONOME_72_QUARTER = '⠼⠛⠃⠶⠹'
+
+# Example 1.8-3: "?'7#AJD-aab" -- dotted quarter = 104-112 (a BPM range).
+#   ⠹ = quarter note cell, ⠄ = augmentation dot, ⠶ = equals, ⠼ = numeral
+#   sign, ⠁⠚⠙ = "104", ⠤ = hyphen (range), ⠁⠁⠃ = "112"
+_METRONOME_DOTTED_QUARTER_RANGE = '⠹⠄⠶⠼⠁⠚⠙⠤⠁⠁⠃'
+
+# Examples 1.8-4/5/6: "CIRCA"/"CA."/"ABOUT" + quarter note = 60. The
+# qualifier word is ordinary header word-sign text (capital indicator +
+# literary letters + terminating period), entirely independent of the
+# metronome-mark grammar itself -- see MetronomeMark's module docstring.
+_METRONOME_QUARTER_60 = '⠹⠶⠼⠋⠚'
+_CIRCA = '⠠⠉⠊⠗⠉⠁⠲'   # capital indicator + c-i-r-c-a + period
+_CA = '⠠⠉⠁⠲'          # capital indicator + c-a + period
+_ABOUT = '⠠⠁⠃⠕⠥⠞⠲'   # capital indicator + a-b-o-u-t + period
+
+
+def test_metronome_note_first_produces_single_token():
+    tokens = BrailleTokenizer().tokenize(_METRONOME_HALF_80)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.METRONOME_MARK
+
+
+def test_metronome_number_first_produces_single_token():
+    tokens = BrailleTokenizer().tokenize(_METRONOME_72_QUARTER)
+    assert len(tokens) == 1
+    assert tokens[0].category == SymbolCategory.METRONOME_MARK
+
+
+def test_metronome_note_first_half_note_80():
+    score = _parse_score(_METRONOME_HALF_80 + _C_QUARTER_OCT4)
+    metronome = score.staves[0].metronome
+    assert metronome is not None
+    assert (metronome.note_value, metronome.dots, metronome.bpm, metronome.bpm_range_end) == (2, 0, 80, None)
+
+
+def test_metronome_number_first_72_quarter():
+    score = _parse_score(_METRONOME_72_QUARTER + _C_QUARTER_OCT4)
+    metronome = score.staves[0].metronome
+    assert metronome is not None
+    assert (metronome.note_value, metronome.dots, metronome.bpm, metronome.bpm_range_end) == (4, 0, 72, None)
+
+
+def test_metronome_dotted_quarter_bpm_range():
+    score = _parse_score(_METRONOME_DOTTED_QUARTER_RANGE + _C_QUARTER_OCT4)
+    metronome = score.staves[0].metronome
+    assert metronome is not None
+    assert (metronome.note_value, metronome.dots, metronome.bpm, metronome.bpm_range_end) == (4, 1, 104, 112)
+
+
+def test_metronome_renders_bare_tempo_directive():
+    score = _parse_score(_METRONOME_72_QUARTER + _C_QUARTER_OCT4)
+    assert r'\tempo 4 = 72' in score.to_lilypond()
+
+
+def test_metronome_dotted_range_renders_tempo_directive():
+    score = _parse_score(_METRONOME_DOTTED_QUARTER_RANGE + _C_QUARTER_OCT4)
+    assert r'\tempo 4. = 104 - 112' in score.to_lilypond()
+
+
+def test_metronome_comes_before_notes_in_lilypond():
+    score = _parse_score(_METRONOME_HALF_80 + _C_QUARTER_OCT4)
+    ly = score.to_lilypond()
+    assert ly.index(r'\tempo') < ly.index('c4')
+
+
+def test_metronome_with_circa_qualifier_combines_into_one_tempo_directive():
+    score = _parse_score(_CIRCA + '⠀' + _METRONOME_QUARTER_60 + _C_QUARTER_OCT4)
+    staff = score.staves[0]
+    assert staff.tempo is not None and staff.tempo.text == 'Circa'
+    assert staff.metronome is not None
+    assert r'\tempo "Circa" 4 = 60' in score.to_lilypond()
+
+
+def test_metronome_with_ca_qualifier_combines_into_one_tempo_directive():
+    score = _parse_score(_CA + '⠀' + _METRONOME_QUARTER_60 + _C_QUARTER_OCT4)
+    assert r'\tempo "Ca" 4 = 60' in score.to_lilypond()
+
+
+def test_metronome_with_about_qualifier_combines_into_one_tempo_directive():
+    score = _parse_score(_ABOUT + '⠀' + _METRONOME_QUARTER_60 + _C_QUARTER_OCT4)
+    assert r'\tempo "About" 4 = 60' in score.to_lilypond()
+
+
+def test_metronome_with_separate_tempo_term_combines_into_one_tempo_directive():
+    """BANA Example 1.7-2: a word-sign tempo term and a metronome mark can
+    appear together (tempo term on one line, metronome mark on the next)."""
+    score = _parse_score(_CAPITAL_ALLEGRO_MODERATO + '⠀' + _METRONOME_QUARTER_60 + _C_QUARTER_OCT4)
+    staff = score.staves[0]
+    assert staff.tempo is not None and staff.tempo.text == 'Allegro moderato'
+    assert staff.metronome is not None
+    assert r'\tempo "Allegro moderato" 4 = 60' in score.to_lilypond()
+
+
+def test_no_metronome_mark_leaves_metronome_none():
+    """Regression: a piece with only a word-sign tempo term (no metronome
+    mark at all) must not spuriously populate Staff.metronome."""
+    score = _parse_score(_BANA_ALLEGRO + _C_QUARTER_OCT4)
+    assert score.staves[0].metronome is None
+    assert r'\tempo "allegro"' in score.to_lilypond()
+
+
+def test_metronome_mark_only_stays_gated_to_header():
+    """A measure-repeat sign (the same cell as the metronome equals sign)
+    mid-piece must still be REPEAT, not misread as part of a metronome
+    mark, once real musical content has started."""
+    score = _parse_score(_C_QUARTER_OCT4 + '⠀' + '⠶')
+    assert score.staves[0].metronome is None
+
+
+# ---------------------------------------------------------------------------
 # S4-6: Integration test — sprint_4_melody with all Sprint 4 elements
 # ---------------------------------------------------------------------------
 

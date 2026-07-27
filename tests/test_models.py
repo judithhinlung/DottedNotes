@@ -21,6 +21,7 @@ from dottednotes.models import (
     KEY_TO_LILYPOND,
     KeySignature,
     Measure,
+    MetronomeMark,
     Note,
     Ornament,
     OrnamentType,
@@ -717,6 +718,26 @@ def test_fermata_between_notes_to_braille():
 def test_fermata_squared_and_tent_to_lilypond_and_braille():
     assert Fermata(shape=FermataShape.SQUARED).to_lilypond() == r'\henzelongfermata'
     assert Fermata(shape=FermataShape.SQUARED).to_braille() == '⠰⠣⠇'
+
+
+def test_metronome_mark_to_lilypond_bare():
+    mark = MetronomeMark(note_value=4, bpm=120)
+    assert mark.to_lilypond() == r'\tempo 4 = 120'
+
+
+def test_metronome_mark_to_lilypond_dotted():
+    mark = MetronomeMark(note_value=4, dots=1, bpm=104)
+    assert mark.to_lilypond() == r'\tempo 4. = 104'
+
+
+def test_metronome_mark_to_lilypond_range():
+    mark = MetronomeMark(note_value=4, dots=1, bpm=104, bpm_range_end=112)
+    assert mark.to_lilypond() == r'\tempo 4. = 104 - 112'
+
+
+def test_metronome_mark_to_lilypond_with_text():
+    mark = MetronomeMark(note_value=4, bpm=120)
+    assert mark.to_lilypond(text='Allegro') == r'\tempo "Allegro" 4 = 120'
     assert Fermata(shape=FermataShape.TENT).to_lilypond() == r'\henzeshortfermata'
     assert Fermata(shape=FermataShape.TENT).to_braille() == '⠘⠣⠇'
 

@@ -8641,3 +8641,114 @@ correctly detected.
 - [ ] CLI supports `--key-mode` flag.
 - [ ] Test coverage added for all changes, and `pytest tests/` passes with no regressions.
 
+---
+
+### [ ] S10d-18: Parse BANA Sec. 1.8 heading metronome marks ("quarter note = 120") into LilyPond `\tempo`
+
+**Why:** BANA Music Braille Code 2015, Par. 1.8 defines a heading metronome
+indication -- a note-value cell (always pitch class "C", of indefinite
+pitch), an "equals" sign, and a numeric BPM value, in either order
+("the order is occasionally varied in print... the braille should follow
+print"), optionally preceded by a qualifier word ("circa"/"ca."/"about").
+Until now, DottedNotes had no representation for this at all: the note-value
+cell would have been misread as an ordinary pitched `NOTE` and the equals
+sign as a measure-`REPEAT` sign. LilyPond has a direct, well-defined
+`\tempo 4 = 120` (Notation Reference, "Metronome marks") equivalent, so this
+is a straightforward, high-value gap to close -- unlike Sec. 1.8.1's
+in-line/mid-piece marks (S10d-19), which are lower priority.
+
+**Steps:**
+1. `bana_symbols.py`: new `SymbolCategory.METRONOME_MARK` and
+   `METRONOME_EQUALS_CELL` (same cell as `MEASURE_REPEAT_CELL`/
+   `CHORD_PAREN_CELL`/`LOWER_DIGIT_CELLS['⠶']=7` -- disambiguated by only
+   ever being recognized while the tokenizer's header_active state is
+   still True).
+2. `models/metronome_mark.py`: new `MetronomeMark` dataclass
+   (`note_value`/`dots`/`bpm`/`bpm_range_end`) with `to_lilypond(text=...)`
+   building a `\tempo [.."text"..] N[.] = bpm[ - bpm_range_end]` directive.
+   No separate qualifier field -- a "circa"/"ca."/"about" word is just a
+   preceding header word-sign, already captured by the existing
+   `Staff.tempo`/`_pending_tempo` path and recombined via `text=`.
+3. `models/staff.py`: new `Staff.metronome: MetronomeMark | None` field,
+   combined with any existing `Staff.tempo` in `to_lilypond()`'s header
+   building into one `\tempo` line.
+4. `tokenizer.py`: recognize the mark (both cell orderings) only while
+   `header_active`, the same state that already gates key/time-signature
+   detection -- new `_metronome_digits_end`/`_metronome_note_end`
+   span-finding helpers (digits use `LITERARY_DIGITS`, the ordinary
+   numeral-sign convention, not `LOWER_DIGIT_CELLS`, which is reserved for
+   measure numbers/instrument-list part numbers -- confirmed by decoding
+   BANA's own Example 1.8-1 digit cells against `ASCII_TO_DOTS`). The
+   number-first ordering must be checked inside the existing
+   `elif char == self._NUMBER_SIGN:` branch (it already unconditionally
+   consumes every `⠼`-led sequence), not as a separate later check.
+5. `braille_parser.py`: new `_handle_metronome_mark()` decodes the token's
+   raw cell span into a `MetronomeMark`, stored on `self._pending_metronome`
+   (mirroring `_pending_tempo`, including its `get_state()`/`_reset_state()`
+   snapshot entries) and assigned to `right_staff.metronome`.
+
+**Definition of Done:**
+- [ ] All 6 of BANA's own Sec. 1.8 examples (1.8-1 through 1.8-6: both cell
+      orderings, a dotted-note BPM range, and all three qualifier words)
+      parse correctly and round-trip through `Score.to_lilypond()`
+- [ ] A tempo term (word-sign) and a metronome mark together (BANA Example
+      1.7-2) combine into one `\tempo "text" N = bpm` directive
+- [ ] A measure-repeat sign (`⠶` mid-piece, the same cell as the metronome
+      equals sign) is unaffected -- still parses as `REPEAT`, not a
+      misdetected metronome mark
+- [ ] Real `lilypond` compile test added and passing
+      (`tests/test_lilypond_formatter.py`)
+- [ ] `pytest tests/` passes with no regressions
+
+---
+
+### [ ] S10d-19: Parse BANA Sec. 1.8.1 in-line/mid-piece metronome and note-value-equivalency marks
+
+**Why:** BANA Par. 1.8.1 covers a metronome marking (or a note-value
+equivalency shown with an equals sign, e.g. a meter-change "dotted quarter
+= quarter") that appears *within* the music rather than in the heading
+(S10d-18). BANA recommends enclosing these in "music parentheses" to
+keep them from being mistaken for real notes. Deferred out of S10d-18
+because it needs a new symbol decode that collides with an existing,
+heavily-used sign, and it's rare in practice (the developer's own
+assessment) -- not worth the added tokenizer risk in the same change as the
+much more common heading-mark case.
+
+Decoded (not yet developer-confirmed) from BANA's own Examples 1.8.1-1
+through 1.8.1-3, cross-referenced against `ASCII_TO_DOTS`: the "music
+parenthesis" wrapping both sides of the in-line mark is the two-cell
+sequence `⠠⠄` (dot 6 + dot 3), identical on both the opening and closing
+side. **Both of those cells already mean something else mid-music**: `⠠`
+alone is the octave-7 mark, and `⠄` alone is the augmentation dot / end-word
+sign. A real octave-7 mark is always immediately followed by a note cell,
+never directly by an augmentation dot, so the two are distinguishable by
+lookahead -- but this needs real verification against the `lilypond`
+binary and, per CLAUDE.md, developer confirmation of the dot pattern before
+implementing, not just this decode.
+
+The note-value-equivalency sub-case (Example 1.8.1-2/3, no numeric BPM at
+all) also has no direct `\tempo` equivalent in LilyPond -- it would need
+the markup-based form (LilyPond Notation Reference, "Metronome marks":
+`\tempo \markup { \rhythm { 4. } = \rhythm { 4 } }`), a separate rendering
+path from S10d-18's `MetronomeMark.to_lilypond()`.
+
+**Steps:**
+1. Confirm the `⠠⠄` bracket dot pattern with the developer (or against a
+   real BRF fixture) before implementing anything.
+2. Extend the tokenizer's mid-music path to recognize the bracketed mark
+   without regressing real octave-7-mark-then-note sequences -- add
+   targeted regression tests for that boundary specifically.
+3. Decide whether to support the note-value-equivalency (non-numeric)
+   sub-case at all for v1, and if so, add the `\rhythm`-markup rendering
+   path.
+4. Wire the parsed mark into `Measure`/`Note` (mid-measure placement, not
+   `Staff`-level like S10d-18's heading mark).
+
+**Definition of Done:**
+- [ ] `⠠⠄` bracket dot pattern developer-confirmed
+- [ ] In-line metronome marks (numeric case) parse and render correctly
+- [ ] Real octave-7-mark-then-note sequences are unaffected (regression
+      tests added)
+- [ ] Note-value-equivalency (non-numeric) sub-case explicitly
+      scoped in or out, with reasoning documented
+- [ ] `pytest tests/` passes with no regressions
