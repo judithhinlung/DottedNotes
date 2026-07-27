@@ -174,6 +174,7 @@ class MusicXMLTranslator:
 
         current_clef = "treble"
         current_key = 0
+        current_key_mode = "major"
         current_time = (4, 4)
         
         # Collect lyrics by verse number
@@ -184,7 +185,9 @@ class MusicXMLTranslator:
         chord_track_entries: list = []
 
         for m21_measure in part.getElementsByClass(music21.stream.Measure):
-            measure, measure_chord_entries = self.translate_measure(m21_measure, current_clef, current_key, current_time)
+            measure, current_key_mode, measure_chord_entries = self.translate_measure(
+                m21_measure, current_clef, current_key, current_key_mode, current_time
+            )
             chord_track_entries.extend(measure_chord_entries)
 
             # Carry over active clef/key/time signatures
@@ -195,7 +198,7 @@ class MusicXMLTranslator:
             # Populate staff-level signature models at the first measure
             if len(staff.measures) == 0:
                 # Key signature
-                staff.key_signature = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=current_key)
+                staff.key_signature = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=current_key, mode=current_key_mode)
                 # Time signature
                 staff.time_signature = TimeSignature(dots=frozenset(), category=None, raw_brl="", numerator=current_time[0], denominator=current_time[1])
                 # Clef
@@ -283,7 +286,7 @@ class MusicXMLTranslator:
             ct = ClefType.TREBLE
         return Clef(dots=frozenset(), category=None, raw_brl="", clef_type=ct)
 
-    def translate_measure(self, m21_measure: music21.stream.Measure, prev_clef: str, prev_key: int, prev_time: tuple[int, int]) -> tuple[Measure, list]:
+    def translate_measure(self, m21_measure: music21.stream.Measure, prev_clef: str, prev_key: int, prev_key_mode: str, prev_time: tuple[int, int]) -> tuple[Measure, str, list]:
         # Determine signatures for this measure
         clef_name = prev_clef
         clefs = list(m21_measure.getElementsByClass(music21.clef.Clef))
@@ -298,6 +301,7 @@ class MusicXMLTranslator:
                 clef_name = "tenor"
                 
         key_val = prev_key
+        key_mode = prev_key_mode
         keys = list(m21_measure.getElementsByClass(music21.key.KeySignature))
         if keys:
             if keys[0].sharps is None:
@@ -334,6 +338,9 @@ class MusicXMLTranslator:
                 )
             else:
                 key_val = keys[0].sharps
+                m21_mode = getattr(keys[0], 'mode', 'major')
+                if m21_mode in ('major', 'minor'):
+                    key_mode = m21_mode
 
         time_val = prev_time
         times = list(m21_measure.getElementsByClass(music21.meter.TimeSignature))
@@ -484,7 +491,7 @@ class MusicXMLTranslator:
                 chord_track_entries = self._align_chord_symbols(stream_elements, chord_symbols)
 
         self._validate_measure_beat_count(measure)
-        return measure, chord_track_entries
+        return measure, key_mode, chord_track_entries
 
     def _validate_measure_beat_count(self, measure: Measure) -> None:
         """Warn (plain text) if a measure's resolved note/rest duration

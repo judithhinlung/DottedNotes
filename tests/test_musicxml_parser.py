@@ -76,6 +76,72 @@ def test_musicxml_key_signature_beyond_seven_flats_does_not_crash():
     assert staff.to_lilypond().count(r'\key aeses \major') == 1
 
 
+def test_musicxml_key_signature_mode_minor_is_parsed():
+    # S10d-16: a <key><fifths>...<mode>minor</mode></key> key signature
+    # should be imported with mode="minor" (music21 upgrades this to a
+    # Key object with a real .mode attribute, unlike a plain KeySignature
+    # from <fifths> alone, which has no .mode attribute at all).
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.TrebleClef())
+    measure.insert(0, music21.key.Key('e', 'minor'))
+    measure.append(music21.note.Note('E4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    staff = score.staves[0]
+    assert staff.key_signature.sharps_or_flats == 1
+    assert staff.key_signature.mode == "minor"
+    assert staff.to_lilypond().count(r'\key e \minor') == 1
+
+
+def test_musicxml_key_signature_without_mode_defaults_to_major():
+    # A plain <key><fifths> with no <mode> child produces a music21
+    # KeySignature (not a Key), which has no .mode attribute at all --
+    # must not crash, and must default to "major".
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.TrebleClef())
+    measure.insert(0, music21.key.KeySignature(2))
+    measure.append(music21.note.Note('D4', quarterLength=4))
+    part.append(measure)
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    staff = score.staves[0]
+    assert staff.key_signature.mode == "major"
+    assert staff.to_lilypond().count(r'\key d \major') == 1
+
+
+def test_musicxml_key_signature_mode_carries_across_measures():
+    # The mode established by an early measure's key signature (like
+    # sharps_or_flats itself) must keep applying to later measures that
+    # don't restate a key signature of their own.
+    m21_score = music21.stream.Score()
+    part = music21.stream.Part()
+
+    m1 = music21.stream.Measure(number=1)
+    m1.insert(0, music21.clef.TrebleClef())
+    m1.insert(0, music21.key.Key('b', 'minor'))
+    m1.append(music21.note.Note('B4', quarterLength=4))
+    part.append(m1)
+
+    m2 = music21.stream.Measure(number=2)
+    m2.append(music21.note.Note('B4', quarterLength=4))
+    part.append(m2)
+
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    staff = score.staves[0]
+    assert staff.key_signature.mode == "minor"
+    assert len(staff.measures) == 2
+    assert staff.measures[1].key_signature == staff.measures[0].key_signature
+
+
 def test_musicxml_non_traditional_key_signature_does_not_crash():
     # Regression test (S10d-7, found via the MusicXML Test Suite's own
     # 13c-KeySignatures-NonTraditional.xml): a <key-step>/<key-alter>

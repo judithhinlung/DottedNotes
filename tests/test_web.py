@@ -431,3 +431,40 @@ def test_midi_endpoints_and_part_midi_serving():
         # If lilypond is not available, direct retrieval should return 404
         midi_response = client.get(f"/api/jobs/{job_id}/midi")
         assert midi_response.status_code == 404
+
+
+def test_key_mode_selection_and_override():
+    file_content = "⠩\n⠐⠹".encode("utf-8")
+    
+    response = client.post(
+        "/api/convert",
+        files={"file": ("test.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "lilypond",
+            "category": "Solo Piano",
+            "profile": "standard"
+        }
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["needs_key_mode_selection"] is True
+    assert data["key_signature_sharps_flats"] == 1
+    assert data["major_option"] == "G Major"
+    assert data["minor_option"] == "E Minor"
+    job_id = data["job_id"]
+    
+    # By default, it compiles to G major
+    ly = client.get(f"/api/jobs/{job_id}/ly").text
+    assert r"\key g \major" in ly
+
+    # Override to minor
+    override = client.post(f"/api/jobs/{job_id}/key-mode", data={"mode": "minor"})
+    assert override.status_code == 200
+    
+    # Check that it compiles to E minor
+    ly_minor = client.get(f"/api/jobs/{job_id}/ly").text
+    assert r"\key e \minor" in ly_minor
+
+    # Invalid mode returns 400
+    invalid = client.post(f"/api/jobs/{job_id}/key-mode", data={"mode": "dorian"})
+    assert invalid.status_code == 400

@@ -366,17 +366,26 @@ class LilypondParser:
             elif t == '\\key':
                 if i + 2 < len(tokens):
                     key_note = tokens[i+1]
-                    # positive = sharps, negative = flats
-                    # Standard key sig parsing is simplified for S9
-                    sharps_or_flats = 0
-                    # Let's count sharps/flats based on standard key names
-                    # We can use a simple map:
-                    key_map = {
+                    key_mode_token = tokens[i+2].lower()
+                    mode = "minor" if key_mode_token == "\\minor" else "major"
+                    
+                    key_map_major = {
+                        'c': 0,
                         'g': 1, 'd': 2, 'a': 3, 'e': 4, 'b': 5, 'fis': 6, 'cis': 7,
-                        'c': 0, 'f': -1, 'bes': -2, 'ees': -3, 'aes': -4, 'des': -5, 'ges': -6, 'ces': -7
+                        'f': -1, 'bes': -2, 'ees': -3, 'aes': -4, 'des': -5, 'ges': -6, 'ces': -7
                     }
-                    sharps_or_flats = key_map.get(key_note.lower(), 0)
-                    staff.key_signature = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=sharps_or_flats)
+                    key_map_minor = {
+                        'a': 0,
+                        'e': 1, 'b': 2, 'fis': 3, 'cis': 4, 'gis': 5, 'dis': 6, 'ais': 7,
+                        'd': -1, 'g': -2, 'c': -3, 'f': -4, 'bes': -5, 'ees': -6, 'aes': -7
+                    }
+                    
+                    if mode == "minor":
+                        sharps_or_flats = key_map_minor.get(key_note.lower(), 0)
+                    else:
+                        sharps_or_flats = key_map_major.get(key_note.lower(), 0)
+                        
+                    staff.key_signature = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=sharps_or_flats, mode=mode)
                     current_measure.key_signature = sharps_or_flats
                     i += 3
                 else:

@@ -241,6 +241,13 @@ dottednotes --version
   also covers an extracted piano hand (`right hand`/`left hand` are
   parser placeholders, not real instrument names).
 
+* **`--key-mode <major|minor>`**:
+  Choose whether key signatures in `.brf`/`.brl` input are major or their
+  relative minor keys before encoding to LilyPond (since braille key signatures
+  only specify the number of sharps/flats, e.g. one flat for F major vs D
+  minor). Defaults to `major`. The same selection (with a confirm/override
+  prompt) drives the web UI's post-translation key signature mode popup.
+
 * **`--list-instruments`**:
   Prints every instrument name `--instrument` accepts, one per line, and
   exits. Works standalone, without `convert` or an input file (like
@@ -313,6 +320,10 @@ instrument from the piece's title (e.g. a title containing "for Violin"), and fa
 to piano if nothing recognizable is found. That guess is pre-applied to the initial
 output and pre-selected in the dialog — you can accept it as-is, pick a different
 instrument from the list, or dismiss the dialog to keep the guessed/default instrument.
+
+### Key signature mode selection dialog
+
+If the uploaded file is a Braille format file (`.brf`/`.brl`), the key signatures only indicate the number of sharps or flats (e.g. one flat), not whether the key is major or minor. When translating these scores to LilyPond, the web UI pops up a **key signature mode selection dialog** to let you choose between the indicated major key (e.g., F Major) and its relative minor (e.g., D Minor), equivalent to the CLI's `--key-mode` argument. This ensures that the generated LilyPond file uses the correct key spelling and mode.
 
 ## Background
 

@@ -210,6 +210,11 @@ def _run_convert(args: argparse.Namespace) -> None:
         else:
             score = _parse_score(text, category_override=category_override, single_line=args.single_line)
 
+    if not is_musicxml_input and not is_lilypond_input and getattr(args, "key_mode", None):
+        for staff in score.staves:
+            if staff.key_signature:
+                staff.key_signature.mode = args.key_mode
+
     if args.single_line:
         # S12-1/S12-3: BANA Sec. 24 single-line format never states its
         # own instrument, so name every staff here, post-parse, rather
@@ -515,6 +520,15 @@ def main() -> None:
              "staff's name and \\set Staff.midiInstrument. Optional: if "
              "omitted, the instrument is inferred from the piece's title "
              "(e.g. 'for Violin'), falling back to piano.",
+    )
+    convert_parser.add_argument(
+        "--key-mode",
+        choices=["major", "minor"],
+        default="major",
+        help="Choose whether key signatures in .brf/.brl input are major "
+             "or their relative minor keys before encoding to LilyPond "
+             "(since braille key signatures only specify the number of "
+             "sharps/flats, e.g. one flat for F major vs D minor). Defaults to major.",
     )
     convert_parser.set_defaults(func=_run_convert)
 

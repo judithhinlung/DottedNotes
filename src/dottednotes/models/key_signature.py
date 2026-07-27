@@ -63,6 +63,24 @@ KEY_TO_LILYPOND: dict[int, tuple[str, str]] = {
     -7: ('ces', 'major'),
 }
 
+KEY_TO_LILYPOND_MINOR: dict[int, str] = {
+     7: 'ais',
+     6: 'dis',
+     5: 'gis',
+     4: 'cis',
+     3: 'fis',
+     2: 'b',
+     1: 'e',
+     0: 'a',
+    -1: 'd',
+    -2: 'g',
+    -3: 'c',
+    -4: 'f',
+    -5: 'bes',
+    -6: 'ees',
+    -7: 'aes',
+}
+
 
 _KEY_TO_BRL = {
     1: '⠩',
@@ -91,7 +109,22 @@ _KEY_TO_BRL = {
 _NATURAL_SEMITONE = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
 _SHARP_LETTER_CYCLE = "CGDAEBF"  # tonic letters for +1, +2, +3, ... sharps
 _FLAT_LETTER_CYCLE = "CFBEADG"   # tonic letters for -1, -2, -3, ... flats
-_ACCIDENTAL_SUFFIX = {-2: 'eses', -1: 'es', 0: '', 1: 'is', 2: 'isis'}
+
+
+def _accidental_suffix(accidental: int) -> str:
+    """LilyPond spells n sharps/flats by repeating 'is'/'es' n times (Notation
+    Reference "Pitches" -- cisis is double sharp, ceses is double flat, and
+    the pattern keeps extending the same way for triple+ accidentals). A
+    fixed {-2: 'eses', ..., 2: 'isis'} table used to raise KeyError once
+    |sharps_or_flats| got large enough that the circle-of-fifths derivation
+    below needed a triple accidental -- computing the suffix instead of
+    looking it up keeps this unbounded, matching BANA Par. 6.5's own "four
+    or more accidentals, no upper limit" numeral-prefixed braille form."""
+    if accidental > 0:
+        return 'is' * accidental
+    if accidental < 0:
+        return 'es' * (-accidental)
+    return ''
 
 
 def _tonic_letter_and_accidental(sharps_or_flats: int) -> tuple[str, int]:
@@ -106,6 +139,38 @@ def _tonic_letter_and_accidental(sharps_or_flats: int) -> tuple[str, int]:
     raw = target - _NATURAL_SEMITONE[letter]
     accidental = ((raw + 6) % 12) - 6
     return (letter, accidental)
+
+
+def _tonic_letter_and_accidental_minor(sharps_or_flats: int) -> tuple[str, int]:
+    if sharps_or_flats > 0:
+        n = sharps_or_flats
+        letter = _SHARP_LETTER_CYCLE[(n + 3) % 7]
+        target = ((7 * n) - 3) % 12
+    else:
+        n = -sharps_or_flats
+        letter = _FLAT_LETTER_CYCLE[(n + 4) % 7]
+        target = ((5 * n) - 3) % 12
+    raw = target - _NATURAL_SEMITONE[letter]
+    accidental = ((raw + 6) % 12) - 6
+    return (letter, accidental)
+
+
+def tonic_name(sharps_or_flats: int, mode: str = "major") -> str:
+    """Return just the LilyPond tonic note name (e.g. 'g', 'aes', 'eis') for
+    a key signature and mode, without the surrounding '\\key ... \\major'/
+    '\\minor' directive text. Shared by KeySignature.to_lilypond() and by
+    web.py's key-mode selection dialog (S10d-16), which needs the same
+    major/minor tonic derivation to build its "F Major" / "D Minor" option
+    labels without duplicating the table-lookup-then-derive logic."""
+    if mode == "minor":
+        if sharps_or_flats in KEY_TO_LILYPOND_MINOR:
+            return KEY_TO_LILYPOND_MINOR[sharps_or_flats]
+        letter, accidental = _tonic_letter_and_accidental_minor(sharps_or_flats)
+    else:
+        if sharps_or_flats in KEY_TO_LILYPOND:
+            return KEY_TO_LILYPOND[sharps_or_flats][0]
+        letter, accidental = _tonic_letter_and_accidental(sharps_or_flats)
+    return letter.lower() + _accidental_suffix(accidental)
 
 
 def _numeral_prefixed_braille(count: int, sign_cell: str) -> str:
@@ -147,12 +212,16 @@ class KeySignature(BrailleSymbol):
     octave). Exactly one of sharps_or_flats/non_traditional_pitches must
     be set.
 
-    Minor keys are not yet distinguished from their relative majors;
-    the same braille cell covers both.  Minor-mode support is deferred
-    to a later sprint.
+    A braille key signature cell only states the number of sharps/flats,
+    never major vs. relative minor (BANA Chapter 6 has no separate mode
+    marking) -- `mode` ("major"/"minor", default "major") disambiguates
+    that when known, e.g. from an explicit source (LilyPond/MusicXML) or
+    a user's post-translation choice (S10d-16). Braille output
+    (to_braille) is unaffected, since the cell is identical either way.
     """
     sharps_or_flats: Optional[int] = None
     non_traditional_pitches: Optional[list[tuple[str, float, Optional[int]]]] = None
+    mode: str = "major"
 
     def __post_init__(self) -> None:
         has_standard = self.sharps_or_flats is not None
@@ -179,12 +248,9 @@ class KeySignature(BrailleSymbol):
                 "against the Notation Reference. Braille output (to_braille) "
                 "is supported for the whole-tone case."
             )
-        if self.sharps_or_flats in KEY_TO_LILYPOND:
-            note, mode = KEY_TO_LILYPOND[self.sharps_or_flats]
-            return f'\\key {note} \\{mode}'
-        letter, accidental = _tonic_letter_and_accidental(self.sharps_or_flats)
-        note = letter.lower() + _ACCIDENTAL_SUFFIX[accidental]
-        return f'\\key {note} \\major'
+        directive_mode = "minor" if self.mode == "minor" else "major"
+        note = tonic_name(self.sharps_or_flats, directive_mode)
+        return f'\\key {note} \\{directive_mode}'
 
     def to_braille(self) -> str:
         if self.non_traditional_pitches is not None:

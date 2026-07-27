@@ -32,8 +32,20 @@ from .parser.input_pipeline import BRLInputPipeline
 from .parser.lilypond_parser import LilypondParser
 from .parser.tokenizer import BrailleTokenizer
 from .validation.validator import BANAValidator
+from .models.key_signature import tonic_name
 
 JOBS_DIR = Path("/tmp/dottednotes-jobs")
+
+_FRIENDLY_NOTE_NAMES = {
+    'c': 'C', 'g': 'G', 'd': 'D', 'a': 'A', 'e': 'E', 'b': 'B',
+    'fis': 'F-sharp', 'cis': 'C-sharp', 'gis': 'G-sharp', 'dis': 'D-sharp', 'ais': 'A-sharp',
+    'f': 'F', 'bes': 'B-flat', 'ees': 'E-flat', 'aes': 'A-flat',
+    'des': 'D-flat', 'ges': 'G-flat', 'ces': 'C-flat'
+}
+
+def get_friendly_note_name(note: str) -> str:
+    return _FRIENDLY_NOTE_NAMES.get(note.lower(), note.capitalize())
+
 
 SCORE_CACHE: dict[str, Score] = {}
 CACHE_KEYS_FIFO: list[str] = []
@@ -132,6 +144,10 @@ def _get_or_parse_score(job_id: str) -> Score:
         score = _parse_score(raw_brl_text, category_override=category)
         if meta.get("instrument"):
             _apply_instrument(score, meta["instrument"])
+        if meta.get("key_mode") and score.staves:
+            for staff in score.staves:
+                if staff.key_signature:
+                    staff.key_signature.mode = meta["key_mode"]
 
     cache_score(job_id, score)
     return score
@@ -438,14 +454,39 @@ async def convert_file(
             inferred_instrument = infer_instrument_from_title(score.staves[0].title_text())
             _apply_instrument(score, inferred_instrument)
 
+        # Key mode selection detection (S10d-16)
+        needs_key_mode_selection = False
+        major_option = None
+        minor_option = None
+        key_signature_sharps_flats = None
+
+        if input_type == "braille" and score.staves:
+            ks = score.staves[0].key_signature
+            # No `!= 0` exclusion here: 0 sharps/flats is C major *or* A
+            # minor, exactly as mode-ambiguous as any other key signature
+            # (BANA Chapter 6 has no mode marking at all). In practice a
+            # real .brf's KeySignature is never sharps_or_flats == 0 --
+            # BANA has no cell for "explicitly zero accidentals", so a
+            # piece with none simply has no KeySignature at all
+            # (staff.key_signature is None, excluded by the `is not None`
+            # check below, not by this one) -- but this guard should still
+            # reflect the value it's built to represent rather than
+            # silently special-casing a real, meaningful key signature.
+            if ks is not None and ks.sharps_or_flats is not None:
+                needs_key_mode_selection = True
+                key_signature_sharps_flats = ks.sharps_or_flats
+                major_option = get_friendly_note_name(tonic_name(ks.sharps_or_flats, "major")) + " Major"
+                minor_option = get_friendly_note_name(tonic_name(ks.sharps_or_flats, "minor")) + " Minor"
+
         cache_score(job_id, score)
 
         # Persisted (not just cached in memory) so _get_or_parse_score's
         # cache-miss fallback (e.g. after a server restart) reapplies the
-        # same instrument instead of silently reverting to the
-        # placeholder name.
+        # same instrument and key signature mode instead of silently reverting.
         meta["needs_instrument_selection"] = needs_instrument_selection
         meta["instrument"] = inferred_instrument
+        meta["needs_key_mode_selection"] = needs_key_mode_selection
+        meta["key_mode"] = "major"
         with open(job_dir / "metadata.json", "w", encoding="utf-8") as f:
             json.dump(meta, f)
 
@@ -479,6 +520,10 @@ async def convert_file(
             "parts": [{"name": s.name, "needs_instrument": is_placeholder_staff_name(s.name)} for s in score.staves],
             "needs_instrument_selection": needs_instrument_selection,
             "inferred_instrument": inferred_instrument,
+            "needs_key_mode_selection": needs_key_mode_selection,
+            "key_signature_sharps_flats": key_signature_sharps_flats,
+            "major_option": major_option,
+            "minor_option": minor_option,
         }
 
     except DottedNotesError as e:
@@ -548,6 +593,72 @@ async def set_instrument(job_id: str, instrument: str = Form(...)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal conversion error: {str(e)}")
+
+
+@app.post("/api/jobs/{job_id}/key-mode")
+async def set_key_mode(job_id: str, mode: str = Form(...)):
+    """Override the parsed score's key signature mode (major vs relative minor)
+    (S10d-16) and re-render whichever output format the original
+    /api/convert call produced. Only valid for a job /api/convert
+    flagged with needs_key_mode_selection=True."""
+    if not re.fullmatch(r"[A-Za-z0-9-]+", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID format.")
+
+    job_dir = JOBS_DIR / job_id
+    meta_path = job_dir / "metadata.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Job directory not found or expired.")
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    if not meta.get("needs_key_mode_selection"):
+        raise HTTPException(
+            status_code=400,
+            detail="This job's score doesn't have a key signature mode selection pending.",
+        )
+
+    normalized = mode.strip().lower()
+    if normalized not in ("major", "minor"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid key mode '{mode}'. Must be 'major' or 'minor'.",
+        )
+
+    try:
+        score = _get_or_parse_score(job_id)
+        if score.staves:
+            for staff in score.staves:
+                if staff.key_signature:
+                    staff.key_signature.mode = normalized
+        cache_score(job_id, score)
+
+        meta["key_mode"] = normalized
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f)
+
+        input_path = job_dir / meta["input_filename"]
+        render_result = _render_output(
+            score, job_dir, input_path, job_id,
+            meta.get("target_format", "lilypond"),
+            meta.get("category"), meta.get("format_overrides"),
+            meta.get("compression", "full"), meta.get("measure_numbers", False),
+            meta.get("page_numbers", True), meta.get("measure_numbering", "auto"),
+            meta.get("octave_mark_every_measure", False),
+            meta.get("full_measure_repeat", "single-voice"),
+            meta.get("min_repeated_measures", 2), meta.get("include_clef_sign", False),
+        )
+        return {
+            "job_id": job_id,
+            "files": render_result["files"],
+            "compile_success": render_result["compile_success"],
+            "compile_error": render_result["compile_error"],
+            "parts": [{"name": s.name, "needs_instrument": is_placeholder_staff_name(s.name)} for s in score.staves],
+        }
+    except DottedNotesError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal conversion error: {str(e)}")
+
 
 @app.get("/api/jobs/{job_id}/{file_type}")
 def get_job_file(job_id: str, file_type: str):

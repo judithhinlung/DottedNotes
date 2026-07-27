@@ -249,6 +249,32 @@
             </form>
         </dialog>
 
+        <dialog id="key-mode-dialog" aria-labelledby="key-mode-dialog-heading">
+            <form id="key-mode-dialog-form" method="dialog">
+                <h2 id="key-mode-dialog-heading">Confirm Key Mode</h2>
+                <p id="key-mode-dialog-context" class="help-text">
+                    This braille score contains a key signature but the mode (major or minor) is ambiguous.
+                    Choose whether this is in the major key indicated by the key signature or its relative minor.
+                </p>
+                <p class="help-text">
+                    <a href="https://github.com/judithhinlung/DottedNotes/blob/main/README.md#key-signature-mode-selection-dialog" target="_blank" rel="noopener noreferrer">
+                        Why am I seeing this?<span class="sr-only"> (opens the documentation in a new tab)</span>
+                    </a>
+                </p>
+                <div class="form-group">
+                    <label for="key-mode-dialog-select">Key Signature Mode</label>
+                    <select id="key-mode-dialog-select" name="mode">
+                        <option value="major" id="key-mode-dialog-major-option" selected>Major Key</option>
+                        <option value="minor" id="key-mode-dialog-minor-option">Relative Minor Key</option>
+                    </select>
+                </div>
+                <div class="dialog-actions">
+                    <button type="button" class="btn-secondary" id="key-mode-dialog-skip">Skip</button>
+                    <button type="submit" class="btn-submit" id="key-mode-dialog-confirm">Use This Mode</button>
+                </div>
+            </form>
+        </dialog>
+
         <footer>
             <p>DottedNotes Web Service &copy; 2026. Made with care for accessible sheet music.</p>
             <p>

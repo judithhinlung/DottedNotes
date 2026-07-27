@@ -349,9 +349,15 @@ class Measure:
                 total += _item_ticks(item)
         return total
 
-    def to_lilypond(self, prev_midi: int = 60) -> tuple[str, int]:
+    def to_lilypond(self, prev_midi: int = 60, key_signature_mode: str = "major") -> tuple[str, int]:
         from .key_signature import KeySignature
-        key_sig = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=self.key_signature)
+        key_sig = KeySignature(
+            dots=frozenset(),
+            category=None,
+            raw_brl="",
+            sharps_or_flats=self.key_signature,
+            mode=key_signature_mode,
+        )
         parts: list[str] = []
         for marking in self.text_markings:
             parts.append(marking.to_lilypond())

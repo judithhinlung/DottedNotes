@@ -651,7 +651,7 @@ footer {
 }
 
 /* Post-translation instrument selection dialog */
-#instrument-dialog {
+#instrument-dialog, #key-mode-dialog {
     background-color: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 16px;
@@ -663,17 +663,17 @@ footer {
     width: min(28rem, 90vw);
 }
 
-#instrument-dialog::backdrop {
+#instrument-dialog::backdrop, #key-mode-dialog::backdrop {
     background: rgba(13, 17, 23, 0.7);
 }
 
-#instrument-dialog-form {
+#instrument-dialog-form, #key-mode-dialog-form {
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
 }
 
-#instrument-dialog h2 {
+#instrument-dialog h2, #key-mode-dialog h2 {
     font-size: 1.2rem;
 }
 

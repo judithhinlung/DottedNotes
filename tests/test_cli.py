@@ -598,3 +598,18 @@ def test_convert_mystery_melody_single_line_produces_clean_nine_measure_score(
     assert content.count('|') == 9
 
 
+def test_cli_key_mode(monkeypatch, tmp_path):
+    brf = tmp_path / "test.brf"
+    brf.write_text("⠩\n⠐⠹", encoding="utf-8")
+    
+    out_major = tmp_path / "out_major.ly"
+    _run_main(monkeypatch, ["convert", str(brf), str(out_major)])
+    content_major = out_major.read_text(encoding="utf-8")
+    assert r"\key g \major" in content_major
+
+    out_minor = tmp_path / "out_minor.ly"
+    _run_main(monkeypatch, ["convert", str(brf), str(out_minor), "--key-mode", "minor"])
+    content_minor = out_minor.read_text(encoding="utf-8")
+    assert r"\key e \minor" in content_minor
+
+

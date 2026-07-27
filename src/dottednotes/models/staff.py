@@ -263,7 +263,8 @@ class Staff:
                 i = j
             else:
                 m = self.measures[i]
-                ly_str, prev_midi = m.to_lilypond(prev_midi=prev_midi)
+                mode = self.key_signature.mode if self.key_signature else "major"
+                ly_str, prev_midi = m.to_lilypond(prev_midi=prev_midi, key_signature_mode=mode)
                 if measure_numbers:
                     measure_lines.append(f'    % {m.number}')
                 measure_lines.append('    ' + ly_str)
@@ -356,9 +357,10 @@ class Staff:
 
         repeat_count = len(group['branches'])
         lines.append(f'    \\repeat volta {repeat_count} {{')
+        mode = self.key_signature.mode if self.key_signature else "major"
         for idx in range(group['shared_start'], group['shared_end']):
             m = self.measures[idx]
-            ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi)
+            ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=mode)
             if measure_numbers:
                 lines.append(f'        % {m.number}')
             lines.append('        ' + ly_str)
@@ -370,7 +372,7 @@ class Staff:
             lines.append(f'        \\volta {numbers_str} {{')
             for idx in range(branch_start, branch_end):
                 m = self.measures[idx]
-                ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi)
+                ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=mode)
                 if measure_numbers:
                     lines.append(f'            % {m.number}')
                 lines.append('            ' + ly_str)

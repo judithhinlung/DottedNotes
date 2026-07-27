@@ -433,3 +433,37 @@ def test_grace_note_attaches_to_following_note_and_chains_octave():
     # "g4" with no mark, relative to the grace note A4, reads as G4 (a step
     # down), not G3 or G5.
     assert main_note.octave == 4
+
+
+def test_lilypond_key_mode_parsing():
+    # Test major key
+    ly_major = """
+    \\version "2.26.0"
+    \\score {
+      \\relative c' {
+        \\key g \\major
+        g4
+      }
+    }
+    """
+    score_major = LilypondParser().parse(ly_major)
+    ks_major = score_major.staves[0].key_signature
+    assert ks_major is not None
+    assert ks_major.sharps_or_flats == 1
+    assert ks_major.mode == "major"
+
+    # Test minor key
+    ly_minor = """
+    \\version "2.26.0"
+    \\score {
+      \\relative c' {
+        \\key e \\minor
+        e4
+      }
+    }
+    """
+    score_minor = LilypondParser().parse(ly_minor)
+    ks_minor = score_minor.staves[0].key_signature
+    assert ks_minor is not None
+    assert ks_minor.sharps_or_flats == 1
+    assert ks_minor.mode == "minor"

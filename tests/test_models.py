@@ -1008,6 +1008,42 @@ def _make_ks(sharps_or_flats: int) -> KeySignature:
 
 # --- to_lilypond() for all 15 standard keys ---
 
+def test_key_minor_modes():
+    # 0 sharps/flats
+    ks = KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=0, mode='minor')
+    assert ks.to_lilypond() == r'\key a \minor'
+    # Sharps
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=1, mode='minor').to_lilypond() == r'\key e \minor'
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=5, mode='minor').to_lilypond() == r'\key gis \minor'
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=7, mode='minor').to_lilypond() == r'\key ais \minor'
+    # Flats
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=-1, mode='minor').to_lilypond() == r'\key d \minor'
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=-5, mode='minor').to_lilypond() == r'\key bes \minor'
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=-7, mode='minor').to_lilypond() == r'\key aes \minor'
+    # Extreme keys (> 7 and < -7)
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=8, mode='minor').to_lilypond() == r'\key eis \minor'
+    assert KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=-8, mode='minor').to_lilypond() == r'\key des \minor'
+
+
+def test_key_minor_and_major_modes_do_not_crash_on_very_extreme_keys():
+    # Once the circle-of-fifths derivation needs a triple (or higher)
+    # sharp/flat, a fixed accidental-suffix lookup table used to raise
+    # KeyError -- this affected both modes (the lookup table is shared),
+    # not just the new minor path. Regression coverage for both.
+    for n in (17, 20, 30, -19, -20, -30):
+        for mode in ('major', 'minor'):
+            ly = KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=n, mode=mode).to_lilypond()
+            assert ly.endswith(f'\\{mode}')
+    assert (
+        KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=20, mode='major').to_lilypond()
+        == r'\key fisisis \major'
+    )
+    assert (
+        KeySignature(dots=frozenset(), category=None, raw_brl='', sharps_or_flats=-20, mode='minor').to_lilypond()
+        == r'\key eeseses \minor'
+    )
+
+
 def test_key_c_major():
     assert _make_ks(0).to_lilypond() == r'\key c \major'
 

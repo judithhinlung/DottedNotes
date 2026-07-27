@@ -34,6 +34,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const instrumentDialogContext = document.getElementById('instrument-dialog-context');
     let pendingInstrumentScope = null; // {type: 'main'} or {type: 'part', partIdx, fileKeys}
 
+    // Post-translation key mode selection (S10d-16)
+    const keyModeDialog = document.getElementById('key-mode-dialog');
+    const keyModeDialogForm = document.getElementById('key-mode-dialog-form');
+    const keyModeDialogSelect = document.getElementById('key-mode-dialog-select');
+    const keyModeDialogContext = document.getElementById('key-mode-dialog-context');
+    const keyModeDialogMajorOption = document.getElementById('key-mode-dialog-major-option');
+    const keyModeDialogMinorOption = document.getElementById('key-mode-dialog-minor-option');
+    let pendingKeyModeData = null;
+
     // Results Section
     const resultSection = document.getElementById('result-section');
     const statusBadge = document.getElementById('status-badge');
@@ -636,16 +645,25 @@ document.addEventListener('DOMContentLoaded', () => {
             updateSectionState('validation', 'empty');
         }
 
-        // 4. Post-translation instrument confirmation (S12-3): a solo BANA
-        // Sec. 24 single-line-format score never states its own
-        // instrument, so the backend already applied a best-effort
-        // default (inferred from the title) -- offer to confirm/change it.
+        // 4. Post-translation instrument and key mode confirmation (S12-3, S10d-16)
+        if (data.needs_key_mode_selection) {
+            pendingKeyModeData = {
+                sharps_flats: data.key_signature_sharps_flats,
+                major_option: data.major_option,
+                minor_option: data.minor_option
+            };
+        } else {
+            pendingKeyModeData = null;
+        }
+
         if (data.needs_instrument_selection) {
             showInstrumentDialog(
                 { type: 'main' },
                 data.inferred_instrument,
                 'This score is in BANA Sec. 24 single-line format, so its braille doesn\'t state which instrument it\'s written for. We\'ve guessed one from the title below -- change it if it\'s wrong.',
             );
+        } else if (pendingKeyModeData) {
+            showKeyModeDialog(pendingKeyModeData);
         }
     }
 
@@ -653,6 +671,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // showInstrumentDialog / pendingInstrumentScope above).
     document.getElementById('instrument-dialog-skip').addEventListener('click', () => {
         instrumentDialog.close();
+        if (pendingKeyModeData) {
+            showKeyModeDialog(pendingKeyModeData);
+        }
     });
 
     instrumentDialogForm.addEventListener('submit', (e) => {
@@ -693,6 +714,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         validation_report: [],
                     });
                     announceStatus(`Instrument set to ${instrument}. Downloads updated.`, 'polite');
+                    if (pendingKeyModeData) {
+                        showKeyModeDialog(pendingKeyModeData);
+                    }
                 } else {
                     setPartLinkHrefs(jobId, String(scope.partIdx));
                     announceStatus(`Instrument for this part set to ${instrument}. Downloads updated.`, 'polite');
@@ -766,4 +790,68 @@ document.addEventListener('DOMContentLoaded', () => {
             updateSectionState('downloads', 'empty');
         }
     }
+
+    function showKeyModeDialog(keyModeData) {
+        keyModeDialogMajorOption.textContent = keyModeData.major_option;
+        keyModeDialogMajorOption.value = 'major';
+        keyModeDialogMinorOption.textContent = keyModeData.minor_option;
+        keyModeDialogMinorOption.value = 'minor';
+        
+        const sf = keyModeData.sharps_flats;
+        const sfDescription = sf === 0
+            ? 'no sharps or flats'
+            : `${Math.abs(sf)} ${sf > 0 ? 'sharp' : 'flat'}${Math.abs(sf) > 1 ? 's' : ''}`;
+        keyModeDialogContext.textContent = `This braille score contains a key signature (${sfDescription}) but the key mode (major or minor) is ambiguous. Choose whether this is in ${keyModeData.major_option} or its relative minor, ${keyModeData.minor_option}:`;
+        
+        keyModeDialogSelect.value = 'major'; // default to major
+        keyModeDialog.showModal();
+    }
+
+    document.getElementById('key-mode-dialog-skip').addEventListener('click', () => {
+        keyModeDialog.close();
+        pendingKeyModeData = null;
+    });
+
+    keyModeDialogForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const jobId = currentJobId;
+        const mode = keyModeDialogSelect.value;
+        if (!jobId || !mode) {
+            keyModeDialog.close();
+            pendingKeyModeData = null;
+            return;
+        }
+
+        const confirmBtn = document.getElementById('key-mode-dialog-confirm');
+        confirmBtn.disabled = true;
+
+        const formData = new FormData();
+        formData.set('mode', mode);
+
+        fetch(`/api/jobs/${jobId}/key-mode`, { method: 'POST', body: formData })
+            .then(res => res.json().then(body => ({ ok: res.ok, body })))
+            .then(({ ok, body }) => {
+                confirmBtn.disabled = false;
+                keyModeDialog.close();
+                pendingKeyModeData = null;
+                if (!ok) {
+                    announceStatus(`Could not set key mode: ${formatErrorDetail(body.detail)}`, 'assertive');
+                    return;
+                }
+                showResultsWithoutDialog({
+                    ...body,
+                    target_format: document.getElementById('target_format').value,
+                    parts: currentParts,
+                    validation_report: [],
+                });
+                const selectedText = mode === 'major' ? keyModeDialogMajorOption.textContent : keyModeDialogMinorOption.textContent;
+                announceStatus(`Key mode set to ${selectedText}. Downloads updated.`, 'polite');
+            })
+            .catch(() => {
+                confirmBtn.disabled = false;
+                keyModeDialog.close();
+                pendingKeyModeData = null;
+                announceStatus('Network/connection error: could not set the key mode.', 'assertive');
+            });
+    });
 });

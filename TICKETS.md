@@ -8576,3 +8576,68 @@ correctly detected.
 - [x] `Measure.to_lilypond()` and `Staff.to_lilypond()` successfully propagate key signature context to notes/chords
 - [x] Test coverage added, including verification of `bach-cello-suite-no-1-for-violin.mxl` rendering to LilyPond with correct `fis` notes
 - [x] `pytest tests/` passes successfully with no regressions
+
+---
+
+### [ ] S10d-16: Request selection between major and relative minor key signature modes before encoding to LilyPond
+
+**Why:** Braille key signatures (BANA Chapter 6) only specify the number of sharps or flats (e.g. one flat), not whether the key is major or minor. When translating braille scores to LilyPond, DottedNotes currently assumes all keys are major (e.g., rendering one flat as `\key f \major` instead of `\key d \minor`). To ensure the generated LilyPond is encoded with the proper key mode, the user should be prompted via a modal dialog (similar to the instrument selection dialog) to choose between the indicated major key or its relative minor whenever a braille score is converted.
+
+**Steps:**
+1. **Extend `KeySignature` model:**
+   - In [key_signature.py](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/models/key_signature.py), add a `mode: str = "major"` field (with values `"major"` or `"minor"`) to `KeySignature`.
+   - Update `to_lilypond()` to check `self.mode`.
+     - Define `KEY_TO_LILYPOND_MINOR` mapping standard key signature values (-7 to 7) to their minor key names:
+       `KEY_TO_LILYPOND_MINOR = {7: 'ais', 6: 'dis', 5: 'gis', 4: 'cis', 3: 'fis', 2: 'b', 1: 'e', 0: 'a', -1: 'd', -2: 'g', -3: 'c', -4: 'f', -5: 'bes', -6: 'ees', -7: 'aes'}`
+     - For non-standard keys (|sharps_or_flats| > 7), implement the relative minor key derivation:
+       - For sharps (> 0): `letter = _SHARP_LETTER_CYCLE[(n + 3) % 7]`, `target_minor = ((7 * n) - 3) % 12`
+       - For flats (< 0 where n = -sharps_or_flats): `letter = _FLAT_LETTER_CYCLE[(n + 4) % 7]`, `target_minor = ((5 * n) - 3) % 12`
+       - Compute accidental alteration: `raw = target_minor - _NATURAL_SEMITONE[letter]`, `accidental = ((raw + 6) % 12) - 6`
+     - Generate LilyPond output like `\key {minor_note} \minor`.
+2. **Propagate mode to measures:**
+   - Modify `Measure.to_lilypond()` in [measure.py](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/models/measure.py) to accept `key_signature_mode: str = "major"` and pass it when constructing the temporary `KeySignature` object.
+   - Update `Staff.to_lilypond()` in [staff.py](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/models/staff.py) to pass `self.key_signature.mode` (if `self.key_signature` is not None) to `Measure.to_lilypond()`.
+3. **Parse mode from existing formats:**
+   - In [lilypond_parser.py](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/parser/lilypond_parser.py): parse the mode token following a key note (e.g. `\minor` -> `mode="minor"`, `\major` -> `mode="major"`) and pass it to the `KeySignature` model.
+   - In [musicxml_parser.py](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/parser/musicxml_parser.py): extract the mode from the MusicXML key signature (using keys[0].mode or keys[0].type, mapping `"minor"` / `"major"`) and pass it to `KeySignature`.
+4. **Implement Backend API changes:**
+   - In [web.py](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/web.py):
+     - When converting (`/api/convert`), check if `input_type == "braille"` and the score has a standard key signature. If so, set `needs_key_mode_selection = True` and persist this along with `key_mode = "major"` in the job's `metadata.json`.
+     - In the `/api/convert` JSON response, include:
+       - `needs_key_mode_selection`: boolean
+       - `key_signature_sharps_flats`: integer
+       - `major_option`: user-friendly name of the major key (e.g. `"F Major"` or `"B-flat Major"`)
+       - `minor_option`: user-friendly name of the relative minor key (e.g. `"D Minor"` or `"G Minor"`)
+     - Implement a new POST endpoint `/api/jobs/{job_id}/key-mode` accepting a `mode` parameter (Form field).
+       - Validate the job ID, check that `needs_key_mode_selection` is true.
+       - Update the `key_mode` in `metadata.json`.
+       - Load the cached `Score` object, traverse its staves, and update each staff's `key_signature.mode` to the selected mode.
+       - Re-render the LilyPond output, compile to PDF/MIDI, update cached files, and return the new result response.
+5. **Implement Frontend UI changes:**
+   - In [index.html](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/static/index.html):
+     - Create a modal dialog `<dialog id="key-mode-dialog" aria-labelledby="key-mode-dialog-heading">` matching the layout and design of `#instrument-dialog`.
+     - It should contain radio buttons or a dropdown to choose between the major key or its relative minor.
+   - In [style.css](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/static/style.css): Add styles for `#key-mode-dialog` equivalent to `#instrument-dialog`.
+   - In [app.js](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/static/app.js):
+     - Wire the UI controls and handle opening the dialog when `needs_key_mode_selection` is returned.
+     - Dynamically populate the radio button labels / text with the major and relative minor key names from the response.
+     - On submitting, send POST to `/api/jobs/{job_id}/key-mode`, close the dialog, and update the UI downloads/player with the returned results.
+     - Ensure the instrument dialog and key mode dialog do not overlap (e.g. queue them or chain them if both are needed).
+6. **Implement CLI changes:**
+   - In [cli.py](file:///Users/Judith/.gemini/antigravity-ide/worktrees/sprint-9/src/dottednotes/cli.py): add a `--key-mode` argument (choices: `["major", "minor"]`, default: `"major"`).
+   - If provided, set the `mode` on the parsed score's key signature.
+7. **Write tests:**
+   - Unit tests in `test_models.py` verifying `KeySignature.to_lilypond()` correctly outputs `\minor` key directives and handles the relative minor derivation (both standard and circle-of-fifths bounds).
+   - Unit/integration tests for parser updates in `test_parser.py` and `test_ensemble_parser.py` verifying minor mode parsing from LilyPond and MusicXML.
+   - API tests in `test_web.py` for `/api/jobs/{job_id}/key-mode` and the key-mode selection payload in `/api/convert`.
+   - CLI tests in `test_cli.py` for `--key-mode`.
+
+**Definition of Done:**
+- [ ] `KeySignature` model supports a `mode` field with correct LilyPond key signature output for relative minors.
+- [ ] LilyPond and MusicXML parsers correctly read and store the key mode.
+- [ ] Backend `/api/convert` detects key mode selection needs for braille files and includes options in response.
+- [ ] `/api/jobs/{job_id}/key-mode` endpoint successfully overrides the key signature mode and triggers LilyPond compilation.
+- [ ] Frontend modal popup allows choosing between the major key or relative minor key.
+- [ ] CLI supports `--key-mode` flag.
+- [ ] Test coverage added for all changes, and `pytest tests/` passes with no regressions.
+
