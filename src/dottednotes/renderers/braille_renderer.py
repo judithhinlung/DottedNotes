@@ -161,38 +161,111 @@ def join_tempo_and_signature(tempo_brl: str, *signature_parts: str) -> str:
     return tempo_brl or combined
 
 
+_ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
+
+# A bare transposition/key name used as a leading qualifier in real
+# MusicXML part names (e.g. "Bb Clarinet", "C Tuba", "F Horn") -- BANA
+# Sec. 33.2.1's own Example 33.2.1-1 abbreviates "Trumpet in B-flat" as
+# just "tp", the key dropped entirely, so the same qualifier fronting the
+# name instead of trailing it must be dropped the same way before
+# resolving against Table 29.
+_KEY_QUALIFIER_RE = re.compile(r'^[A-G](?:-?(?:flat|sharp)|[b#])?$', re.IGNORECASE)
+
+
+def _roman_to_arabic(numeral: str) -> Optional[str]:
+    upper = numeral.upper()
+    if upper in _ROMAN_NUMERALS:
+        return str(_ROMAN_NUMERALS.index(upper) + 1)
+    return None
+
+
+def _arabic_to_roman(numeral: str) -> Optional[str]:
+    if numeral.isdigit():
+        idx = int(numeral) - 1
+        if 0 <= idx < len(_ROMAN_NUMERALS):
+            return _ROMAN_NUMERALS[idx]
+    return None
+
+
+def _singular_forms(name: str) -> list[str]:
+    """Plausible singular forms of a plural/section instrument name (e.g.
+    "Violins" -> "Violin", "Basses" -> "Bass"), stripping only the last word."""
+    words = name.split()
+    if not words:
+        return []
+    last_word = words[-1]
+    forms = []
+    if last_word.endswith('es'):
+        forms.append(' '.join(words[:-1] + [last_word[:-2]]))
+    if last_word.endswith('s'):
+        forms.append(' '.join(words[:-1] + [last_word[:-1]]))
+    return forms
+
+
+def _strip_leading_key_qualifier(name: str) -> Optional[str]:
+    """Drop a leading bare key/transposition qualifier word (e.g. "Bb" in
+    "Bb Clarinet", "C" in "C Tuba"), or None if `name` doesn't start with one."""
+    words = name.split()
+    if len(words) > 1 and _KEY_QUALIFIER_RE.match(words[0]):
+        return ' '.join(words[1:])
+    return None
+
+
 def _table29_lookup(staff_name: str) -> Optional[str]:
     """Resolve `staff_name` against BANA Table 29, tolerating the
     plural/section-style part names real MusicXML exports use (e.g.
     "Violins I", "Violas", "Double Basses") against the table's singular
-    solo-instrument keys ("Violin I", "Viola", "Double bass")."""
-    abbrev = TABLE_29_ENGLISH.get(staff_name)
+    solo-instrument keys ("Violin I", "Viola", "Double bass"), a leading
+    key/transposition qualifier ("Bb Clarinet", "C Tuba" -- Sec. 33.2.1),
+    and a numbered part given as an Arabic digit rather than the table's
+    Roman numeral ("Violin I") or with no dedicated table entry at all
+    ("Flute 1", "Horn 1" -- Sec. 33.2.2 appends the part number, as a
+    lower-cell digit, directly after the base abbreviation)."""
+    lower_table = {key.lower(): val for key, val in TABLE_29_ENGLISH.items()}
+
+    abbrev = lower_table.get(staff_name.lower())
     if abbrev:
         return abbrev
 
-    numeral_match = re.match(r'^(.+?)\s+([IVXLCDM]+)$', staff_name)
-    if numeral_match:
-        head, numeral_suffix = numeral_match.group(1), numeral_match.group(2)
-    else:
-        head, numeral_suffix = staff_name, None
-
-    words = head.split()
-    if not words:
+    numeral_match = re.match(r'^(.+?)\s+(\d+|[IVXLCDM]+)$', staff_name)
+    if not numeral_match:
+        words = staff_name.split()
+        if not words:
+            return None
+        no_numeral_candidates = _singular_forms(staff_name)
+        qualifier_stripped = _strip_leading_key_qualifier(staff_name)
+        if qualifier_stripped:
+            no_numeral_candidates.append(qualifier_stripped)
+            no_numeral_candidates.extend(_singular_forms(qualifier_stripped))
+        for candidate in no_numeral_candidates:
+            abbrev = lower_table.get(candidate.lower())
+            if abbrev:
+                return abbrev
         return None
-    last_word = words[-1]
-    candidates = []
-    if last_word.endswith('es'):
-        candidates.append(last_word[:-2])
-    if last_word.endswith('s'):
-        candidates.append(last_word[:-1])
 
-    lower_table = {key.lower(): val for key, val in TABLE_29_ENGLISH.items()}
-    for candidate in candidates:
-        singular_head = ' '.join(words[:-1] + [candidate])
-        full_name = f"{singular_head} {numeral_suffix}" if numeral_suffix else singular_head
-        abbrev = lower_table.get(full_name.lower())
-        if abbrev:
-            return abbrev
+    head, numeral = numeral_match.group(1), numeral_match.group(2)
+    is_arabic = numeral.isdigit()
+    roman = numeral if not is_arabic else _arabic_to_roman(numeral)
+    arabic = numeral if is_arabic else _roman_to_arabic(numeral)
+
+    base_candidates = [head] + _singular_forms(head)
+    qualifier_stripped = _strip_leading_key_qualifier(head)
+    if qualifier_stripped:
+        base_candidates.append(qualifier_stripped)
+        base_candidates.extend(_singular_forms(qualifier_stripped))
+
+    if roman:
+        for base in base_candidates:
+            abbrev = lower_table.get(f"{base} {roman}".lower())
+            if abbrev:
+                return abbrev
+
+    if arabic:
+        for base in base_candidates:
+            abbrev = lower_table.get(base.lower())
+            if abbrev:
+                return abbrev + arabic
+
     return None
 
 

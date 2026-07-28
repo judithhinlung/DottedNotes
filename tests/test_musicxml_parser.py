@@ -189,12 +189,18 @@ def test_musicxml_non_traditional_key_signature_does_not_crash():
 def test_musicxml_accidental_display_status_suppresses_spurious_naturals():
     # BANA-adjacent bug: music21's engraving pass attaches a non-None
     # `pitch.accidental` to almost every note in a keyed piece as internal
-    # pitch-spelling bookkeeping, even when nothing should be printed.
-    # `displayStatus == False` is music21's own signal that the accidental
-    # is present but not meant to be shown -- only an explicit `<accidental>`
-    # tag (or a real, need-to-show case) gets `True`/`None`. Parsed via
+    # pitch-spelling bookkeeping, even when nothing should be printed --
+    # that noise must not survive as a spurious note-level accidental when
+    # it merely matches the key signature and nothing has overridden this
+    # exact pitch+octave earlier in the measure. But when something HAS
+    # overridden it (the explicit natural on note 1 below), the following
+    # note reverting to the key-implied sharp is a real countermand (BANA
+    # Sec. 6.2: "an accidental remains in force until it is countermanded
+    # or until the end of the measure") and must show its own explicit
+    # sign, not silently rely on the key signature. Parsed via
     # `music21.converter.parse` (not hand-built Accidental objects) since
-    # it's converter.parse's own engraving pass that sets displayStatus.
+    # it's converter.parse's own engraving pass that sets displayStatus
+    # (not itself trusted here -- see translate_note_obj's own comment).
     xml = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">
 <score-partwise version="3.1">
@@ -232,10 +238,13 @@ def test_musicxml_accidental_display_status_suppresses_spurious_naturals():
     notes = score.staves[0].measures[0].notes
     assert len(notes) == 3
 
-    explicit_natural, implied_by_key, fully_diatonic = notes
+    explicit_natural, countermanded_sharp, fully_diatonic = notes
     assert explicit_natural.accidental is not None
     assert explicit_natural.accidental.type == AccidentalType.NATURAL
-    assert implied_by_key.accidental is None
+    assert explicit_natural.accidental.explicit is True
+    assert countermanded_sharp.accidental is not None
+    assert countermanded_sharp.accidental.type == AccidentalType.SHARP
+    assert countermanded_sharp.accidental.explicit is True
     assert fully_diatonic.accidental is None
 
 

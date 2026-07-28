@@ -803,6 +803,11 @@ class MusicXMLTranslator:
         current_grace_unslashed: list[bool] = []
         tuplet_group = []
         tuplet_group_ratio: tuple[int, int] = (3, 2)
+        # Tracks each (note_name, octave)'s currently-sounding accidental
+        # within this voice/measure (BANA Sec. 6.2), reset for each call --
+        # i.e. per measure, or per voice within a multi-voice measure. See
+        # translate_note_obj's accidental handling for how it's used.
+        active_accidentals: dict[tuple[str, int], AccidentalType] = {}
 
         for el in elements:
             # music21.harmony.ChordSymbol is itself a music21.chord.Chord
@@ -822,7 +827,7 @@ class MusicXMLTranslator:
             ottava_shift = self._ottava_octave_shift(el)
 
             if isinstance(el, music21.note.Note):
-                note_obj = self.translate_note_obj(el, duration, ottava_shift)
+                note_obj = self.translate_note_obj(el, duration, ottava_shift, active_accidentals)
                 if el.duration.isGrace:
                     current_grace_notes.append(note_obj)
                     current_grace_unslashed.append(not getattr(el.duration, 'slash', True))
@@ -838,7 +843,7 @@ class MusicXMLTranslator:
                     dn_item = note_obj
                     
             elif isinstance(el, music21.chord.Chord):
-                chord_notes = [self.translate_note_obj(n, duration, ottava_shift) for n in el.notes]
+                chord_notes = [self.translate_note_obj(n, duration, ottava_shift, active_accidentals) for n in el.notes]
                 chord_notes.sort(key=lambda n: n._midi_pitch() if hasattr(n, '_midi_pitch') else 60, reverse=not (clef_name in ("bass", "tenor")))
                 
                 written_note = chord_notes[0]
@@ -1026,7 +1031,13 @@ class MusicXMLTranslator:
 
         return Duration(value=val, dots=dots, is_triplet=is_triplet, tuplet_ratio=tuplet_ratio)
 
-    def translate_note_obj(self, m21_note, duration: Duration, ottava_shift: int = 0) -> Note:
+    def translate_note_obj(
+        self,
+        m21_note,
+        duration: Duration,
+        ottava_shift: int = 0,
+        active_accidentals: "dict[tuple[str, int], AccidentalType] | None" = None,
+    ) -> Note:
         pitch = m21_note.pitch
         note_name = pitch.step
         octave = pitch.octave
@@ -1050,19 +1061,34 @@ class MusicXMLTranslator:
         # all (this is also what keeps a real orchestral score's accidental
         # count sane: music21 attaches internal pitch-spelling bookkeeping
         # to nearly every note in a keyed piece, not just genuinely altered
-        # ones). Whether a genuinely-different, still-present accidental
-        # is merely *redundant to restate* (e.g. already shown earlier in
-        # the same measure) is a separate, already-implemented concern
-        # (BANAValidator's S9c-redundant-accidental rule, surfaced via
-        # --report), not something to pre-decide by omitting it here.
+        # ones).
+        #
+        # Whether a genuinely-different, still-present accidental is
+        # *redundant to restate* (BANA Sec. 6.2: "an accidental remains in
+        # force until it is countermanded or until the end of the measure,
+        # but only for the same note at the same pitch") is decided below
+        # via `active_accidentals`, keyed by (note_name, octave) and reset
+        # per measure/voice by the caller -- not via music21's own
+        # `displayStatus`, which goes False for the same reason a
+        # restatement should be suppressed (right result) but also for
+        # unrelated "implied, not restated" cases (tied continuations) that
+        # this project can't distinguish from real redundancy without its
+        # own tracking anyway. Using `active_accidentals` instead gets both
+        # right with one mechanism: the object is always kept (so pitch
+        # stays correct for LilyPond, which never reads `.explicit`), and
+        # `.explicit` -- which only gates the braille sign -- is False
+        # exactly when this exact pitch+octave already sounds this exact
+        # accidental earlier in the same measure/voice.
         acc = None
         m21_acc = None
-        if pitch.accidental is not None:
-            key_sig = m21_note.getContextByClass(music21.key.KeySignature)
-            key_accidental = key_sig.accidentalByStep(pitch.step) if key_sig else None
-            key_alter = key_accidental.alter if key_accidental else 0.0
-            if pitch.accidental.alter != key_alter:
-                m21_acc = pitch.accidental
+        if active_accidentals is None:
+            active_accidentals = {}
+        pitch_key = (note_name, octave)
+        key_sig = m21_note.getContextByClass(music21.key.KeySignature)
+        key_accidental = key_sig.accidentalByStep(pitch.step) if key_sig else None
+        key_alter = key_accidental.alter if key_accidental else 0.0
+        if pitch.accidental is not None and pitch.accidental.alter != key_alter:
+            m21_acc = pitch.accidental
         if m21_acc is not None:
             acc_type = None
             name = m21_acc.name
@@ -1079,8 +1105,25 @@ class MusicXMLTranslator:
                 elif alter == 2.0: acc_type = AccidentalType.DOUBLE_SHARP
                 elif alter == -2.0: acc_type = AccidentalType.DOUBLE_FLAT
             if acc_type is not None:
-                acc = Accidental(dots=frozenset(), category=None, raw_brl="", type=acc_type)
-                
+                explicit = active_accidentals.get(pitch_key) != acc_type
+                active_accidentals[pitch_key] = acc_type
+                acc = Accidental(dots=frozenset(), category=None, raw_brl="", type=acc_type, explicit=explicit)
+        elif pitch_key in active_accidentals:
+            # This pitch+octave had a different accidental actively sounding
+            # earlier in this measure/voice and has now reverted to the
+            # key-signature-implied pitch -- BANA Sec. 6.2's "until it is
+            # countermanded" requires an explicit sign here too (a natural,
+            # or the key signature's own sharp/flat restated), not silence,
+            # or the earlier accidental would still be understood to apply.
+            del active_accidentals[pitch_key]
+            key_acc_type = AccidentalType.NATURAL
+            if key_accidental is not None:
+                if key_accidental.name == 'sharp':
+                    key_acc_type = AccidentalType.SHARP
+                elif key_accidental.name == 'flat':
+                    key_acc_type = AccidentalType.FLAT
+            acc = Accidental(dots=frozenset(), category=None, raw_brl="", type=key_acc_type, explicit=True)
+
         note = Note(
             dots=frozenset(),
             category=None,
