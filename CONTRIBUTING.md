@@ -133,4 +133,4 @@ someone's music.
 ## License
 
 By contributing, you agree your contributions will be licensed under this
-project's GPL-2.0 license (see [LICENSE](LICENSE)).
+project's GPL-3.0 license (see [LICENSE](LICENSE)).

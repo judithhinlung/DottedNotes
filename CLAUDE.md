@@ -157,7 +157,7 @@ DottedNotes/
 │   ├── lilypond_conventions.md  # LilyPond formatting defaults reference, with citations
 │   └── mutopia_analysis.md      # Raw Mutopia corpus analysis backing lilypond_conventions.md
 ├── examples/
-├── LICENSE                      # GPL-2.0
+├── LICENSE                      # GPL-3.0
 ├── README.md
 ├── pyproject.toml
 ├── CLAUDE.md                    # This file

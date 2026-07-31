@@ -360,4 +360,4 @@ friendly: plain text, no ASCII art, no progress bars, no visual-only feedback.
 
 ## License
 
-GPL-2.0. See [LICENSE](LICENSE).
+GPL-3.0. See [LICENSE](LICENSE).
