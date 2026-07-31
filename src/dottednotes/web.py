@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -33,6 +34,12 @@ from .parser.lilypond_parser import LilypondParser
 from .parser.tokenizer import BrailleTokenizer
 from .validation.validator import BANAValidator
 from .models.key_signature import tonic_name
+
+# Render captures container stdout/stderr as its log stream, so a plain
+# INFO-level logger (rather than a metrics/analytics service) is enough to
+# count usage from `render logs` -- no new dependency, no PII collection.
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("dottednotes.web")
 
 JOBS_DIR = Path("/tmp/dottednotes-jobs")
 
@@ -367,6 +374,10 @@ async def convert_file(
     job_id = str(uuid.uuid4())
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
+
+    # No filename/IP/other PII here -- job_id and target_format are enough
+    # to count conversion requests from the log stream.
+    logger.info("conversion request: job_id=%s target_format=%s", job_id, target_format)
 
     input_filename = Path(file.filename or "input.brf").name
     if not input_filename or input_filename in (".", ".."):
