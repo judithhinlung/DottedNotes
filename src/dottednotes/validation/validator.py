@@ -579,8 +579,17 @@ class BANAValidator:
             return item.duration.duration_in_ticks()
 
         for measure in staff.measures:
-            num, den = measure.time_signature
-            expected_beats = num * (4 / den)
+            # `Measure.time_signature` is a legacy tuple field that's never
+            # populated by the parser (it always defaults to (4, 4)) -- the
+            # real, parsed time signature lives on the staff. Falling back to
+            # the measure's tuple only when the staff has none keeps this
+            # rule inert (rather than crashing) for hand-built Measures/tests
+            # that don't set a staff time signature at all.
+            if staff.time_signature is not None:
+                expected_beats = staff.time_signature.beats_per_measure()
+            else:
+                num, den = measure.time_signature
+                expected_beats = num * (4 / den)
             expected_ticks = round(expected_beats * TICKS_PER_QUARTER)
 
             actual_ticks = 0

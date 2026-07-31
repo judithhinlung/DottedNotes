@@ -266,6 +266,32 @@ def test_validation_beat_count():
     assert "expected 4.0 beats but counted 1.0" in beat_errs[0].message
 
 
+def test_validation_beat_count_uses_staff_time_signature():
+    # Regression test: _validate_beat_count() used to read the never-populated
+    # Measure.time_signature tuple (always its (4, 4) default) instead of the
+    # staff's actual parsed TimeSignature, so every non-4/4 piece was flagged
+    # on every measure ("expected 4.0 beats") even when correctly notated.
+    # See tests/fixtures/mystery cue.brf (6/8) for the real-world report this
+    # came from.
+    from dottednotes.models.time_signature import TimeSignature
+
+    # 6/8 measure, full: three quarter-beats via six eighth notes (C4 x6).
+    notes = [
+        Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4,
+             duration=Duration(value=8))
+        for _ in range(6)
+    ]
+    measure = Measure(number=1, notes=notes)
+    time_sig = TimeSignature(dots=frozenset(), category=None, raw_brl="", numerator=6, denominator=8)
+    staff = Staff(name="Test", time_signature=time_sig, measures=[measure])
+    score = Score(staves=[staff])
+
+    validator = BANAValidator()
+    result = validator.validate(score)
+    beat_errs = [c for c in result.corrections if c.rule_id == "S9c-beat-count"]
+    assert beat_errs == []
+
+
 def test_validation_slur_matching():
     # 1. Unclosed slur bracket open: ⠰⠃⠐⠹⠱
     brf = "⠰⠃⠐⠹⠱"
