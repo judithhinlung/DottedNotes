@@ -430,6 +430,7 @@ See TICKETS.md for full ticket details and step-by-step instructions.
 - [ ] Sprint 10b: MusicXML Import Hardening
 - [ ] Sprint 10c: BANA Transcription for Fermatas, Breath Marks, and First/Second Endings
 - [ ] Sprint 10d: MusicXML Import Hardening, Round 2
+- [ ] Sprint 11: Mid-Piece Key Signature Changes
 
 ---
 

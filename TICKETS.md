@@ -8752,3 +8752,201 @@ path from S10d-18's `MetronomeMark.to_lilypond()`.
 - [ ] Note-value-equivalency (non-numeric) sub-case explicitly
       scoped in or out, with reasoning documented
 - [ ] `pytest tests/` passes with no regressions
+
+---
+
+# Sprint 11: Mid-Piece Key Signature Changes
+
+Estimated time: 1–1.5 weeks.
+
+**Why this sprint exists:** DottedNotes currently supports exactly one key
+signature per staff, fixed at the header -- there is no way to transcribe a
+piece that changes key partway through. BANA Music Braille Code 2015, Par.
+6.5, explicitly covers this case: "A change of key is placed wherever it
+occurs and generally should be placed on the same line as the following
+note. The first note after a key signature requires an octave mark."
+LilyPond's side is simpler -- the same `\key <tonic> \<mode>` directive,
+re-emitted at the point of change, with automatic courtesy-accidental
+cancellation (Notation Reference, "Pitches": "When the key signature
+changes, natural signs are automatically printed to cancel any accidentals
+from previous key signatures").
+
+Investigation found `Measure.key_signature: int` already exists and is
+correctly populated per-measure by two of the three import paths (MusicXML
+import, LilyPond reverse-parse) for accidental-spelling purposes (S10d-15)
+-- but the BRF parser never populates it, and **no output path emits a key
+change at all**, even where the per-measure data already exists:
+`Staff.to_lilypond()` prints one `\key` directive in the header and never
+again; there is no braille-side equivalent either.
+
+**Explicitly out of scope for this sprint:** ensemble scores with differing
+per-part key signatures (BANA Par. 33.4.1 -- when parts don't share a key,
+it's omitted from the combined heading and appended per-part instead).
+`orchestra_score.py`/`ensemble_parser.py` have zero existing key-signature
+handling today, so that's new ground-up work better suited to its own
+ticket.
+
+---
+
+### [ ] S11-1: Per-measure key-signature tracking through the BRF parser + correct header-key derivation
+
+**Why:** The BRF parser is the only one of the three import paths with no
+per-measure key tracking at all -- `_handle_key_signature`
+(`parser/braille_parser.py`) overwrites `self._key_signature` on every
+KEY_SIGNATURE token, but `_finalize_measure` never stamps that value onto
+the `Measure` it builds, so `Measure.key_signature` stays at its default
+(0) for every BRF-parsed measure regardless of what the source actually
+says. Separately, `hand_staff.key_signature` (the header field) is
+currently set from whatever `self._key_signature` happens to hold at
+end-of-parse -- i.e. the *last* key signature token seen in the whole
+piece, not the first. A piece that changes key even once already gets the
+wrong header key today.
+
+**Steps:**
+1. In `_finalize_measure`, stamp the new `Measure`'s `key_signature`
+   (sharps/flats int) from `self._key_signature.sharps_or_flats` at the
+   point the measure is finalized -- this is parser state that already
+   exists and is already correctly updated per-token by
+   `_handle_key_signature`; it just isn't propagated to the `Measure`
+   object today.
+2. After parsing completes, derive `hand_staff.key_signature` from
+   `measures[0].key_signature` (wrapped in a `KeySignature` instance)
+   instead of from `self._key_signature` directly -- matching how
+   `musicxml_parser.py` already derives the staff-level key from the first
+   measure (~line 198-201), not the last token.
+3. Leave `self._key_signature`/`_key_signature_parsed` themselves alone --
+   they're still the right mechanism for tracking "current key as parsing
+   proceeds" (e.g. for accidental resolution during parsing); this ticket
+   only changes what gets attached to `Measure`/`Staff` from that state.
+
+**Definition of Done:**
+- [ ] A BRF fixture with two key signatures (e.g. C major, then a
+      mid-piece change to G major) has the correct `key_signature` on
+      every measure after the change point, not just the first
+- [ ] `Staff.key_signature` reflects the piece's first key signature, not
+      the last, on both the new fixture and existing single-key fixtures
+- [ ] Existing single-key BRF fixtures are unaffected (no regressions in
+      accidental spelling, which already reads `Measure.key_signature`)
+- [ ] `pytest tests/` passes with no regressions
+
+---
+
+### [ ] S11-2: Emit mid-piece `\key` changes in LilyPond output
+
+**Why:** This is the actual user-visible deliverable -- PDF/MIDI output
+that shows a real key change, not just correctly-spelled accidentals
+around it. `Staff.to_lilypond()` and `_render_volta_group()`
+(`models/staff.py`) currently read `Staff.key_signature` once for the
+header and never look at any measure's key again.
+
+**Steps:**
+1. Add `Measure.key_signature_mode: str = "major"` (`models/measure.py`) --
+   a small sibling to the existing `key_signature` int, used only when
+   emitting a LilyPond key change (braille has no mode marking, so this
+   field is LilyPond-only).
+2. In `Staff.to_lilypond()`'s measure loop and in `_render_volta_group()`,
+   track the last-emitted `(sharps_or_flats, mode)` pair, seeded from
+   `Staff.key_signature`. Before rendering each measure, compare its
+   `(key_signature, key_signature_mode)` against the tracked value; if
+   different, construct a `KeySignature(sharps_or_flats=..., mode=...)`
+   and prepend its `.to_lilypond()` output before that measure's line,
+   then update the tracked value.
+3. Add a break condition to the multi-measure-rest run builder in
+   `Staff.to_lilypond()` (~line 230-251) so a run stops when a measure's
+   key differs from the run's -- same shape as the existing duration break
+   check at line 244 -- so a key change can never be silently absorbed
+   into a compressed rest run.
+4. Add a real `lilypond`-binary compile test for the new fixture (project
+   convention, see `test_lilypond_formatter.py`'s
+   `shutil.which("lilypond")` skip pattern) -- check the compile log for
+   warnings, not just the exit code.
+
+**Definition of Done:**
+- [ ] A hand-authored two-key fixture compiles cleanly with `lilypond` and
+      shows the second `\key` directive at the correct measure
+- [ ] A key change occurring inside a `\repeat volta`/`\alternative`
+      section renders correctly
+- [ ] A key change immediately before or inside a run of whole-measure
+      rests is not swallowed by rest-run compression
+- [ ] `pytest tests/` passes with no regressions
+
+---
+
+### [ ] S11-3: Emit mid-piece key-signature cells in braille output + octave-mark reset
+
+**Why:** BANA Par. 6.5's braille-side placement rule ("placed wherever it
+occurs... generally on the same line as the following note") and its
+octave-mark reset rule ("the first note after a key signature requires an
+octave mark") have no implementation today.
+
+**Steps:**
+1. Confirm where the note stream is actually assembled for line output --
+   either `renderers/braille_renderer.py`'s layout functions or
+   `models/measure.py`'s `_render_note_list_to_braille` (which already
+   threads `key_signature` through per measure for accidental spelling,
+   so it already has the data this needs) -- and add inline
+   key-signature-cell emission at the point a measure's key differs from
+   the previous measure's, using `KeySignature.to_braille()` and BANA's
+   blank-space-before/after rule (Par. 6.5).
+2. Add `Note.after_key_change: bool = False` (`models/note.py`), the same
+   shape as the existing `after_numeric_indicator` field, and set it on
+   the first note of a measure whose key differs from the previous
+   measure's, in the BRF parser.
+3. Wire `after_key_change` into `BANAValidator._validate_octave_marks`'s
+   existing `is_reset` branch chain (`validation/validator.py` ~line 350)
+   alongside the `after_numeric_indicator` check, so a correctly-reset
+   octave mark after a key change doesn't false-positive, and a missing
+   one does get flagged.
+4. Add the same rest-run break-condition fix described in S11-2, Step 3,
+   to `BrailleRenderer._compress_multi_measure_rests` (~line 1263), which
+   today keeps only the first rest's key signature and silently drops any
+   change mid-run.
+
+**Definition of Done:**
+- [ ] Round-trip (BRF -> Model -> BRF) preserves a mid-piece key change:
+      the key-signature cell appears at the correct point and the
+      following note carries an octave mark
+- [ ] `BANAValidator --report` does not flag the post-key-change octave
+      mark as missing when it's correctly present, and does flag it when
+      it's absent
+- [ ] A key change immediately before or inside a run of whole-measure
+      rests is not swallowed by rest-run compression in braille output
+- [ ] `pytest tests/` passes with no regressions
+
+---
+
+### [ ] S11-4: Wire per-measure mode through MusicXML import and LilyPond reverse-parse; extend `--key-mode` to all measures
+
+**Why:** `musicxml_parser.py`'s `translate_measure()` and
+`lilypond_parser.py`'s `\key` handler both already compute the correct
+per-measure mode (major/minor) while parsing, but discard it before it
+reaches `Measure` -- only the first measure's mode survives, via the
+staff-level field. Once S11-2 relies on `Measure.key_signature_mode` for
+diff-based emission, this needs to be correct on every measure, not just
+the first. Separately, the CLI's `--key-mode` override
+(`cli.py` ~line 213-216) currently only updates the single
+`staff.key_signature.mode` field; once per-measure changes exist, an
+un-updated `Measure.key_signature_mode` would immediately look like a
+(false) key change at measure 1 relative to the just-overridden header.
+
+**Steps:**
+1. In `musicxml_parser.py`'s `translate_measure()`, pass the computed
+   `key_mode` through to the `Measure` constructor as
+   `key_signature_mode`, alongside the existing `key_signature=key_val`.
+2. In `lilypond_parser.py`'s `\key` token handler, set
+   `current_measure.key_signature_mode` alongside the existing
+   `current_measure.key_signature = sharps_or_flats`, and carry it forward
+   into each new `Measure` the same way `key_signature` already is
+   (~line 443).
+3. Extend the CLI's `--key-mode` override to iterate every measure on
+   every staff and set `key_signature_mode`, not just the header
+   `KeySignature.mode`.
+
+**Definition of Done:**
+- [ ] A MusicXML fixture with a mid-piece key change imports and
+      transcribes correctly to both LilyPond and BRF output
+- [ ] A LilyPond fixture with a mid-piece `\key` change round-trips
+      through BRF and back with the mode preserved at every change point
+- [ ] `--key-mode` applied to a multi-key-signature BRF piece updates
+      every key instance consistently, not just the header
+- [ ] `pytest tests/` passes with no regressions

@@ -306,6 +306,11 @@ class Measure:
     notes: list[MeasureItem] = field(default_factory=list)
     time_signature: tuple[int, int] = (4, 4)
     key_signature: int = 0
+    # Major/minor mode for this measure's effective key signature, used only
+    # when emitting a LilyPond `\key` change (S11-2/S11-4) -- braille has no
+    # mode marking (BANA Chapter 6), so key_signature (sharps/flats) alone
+    # is what braille output and accidental spelling (S10d-15) care about.
+    key_signature_mode: str = "major"
     clef: str = "treble"
     bar_line_type: str = 'measure_separator'
     text_markings: list[TextMarking] = field(default_factory=list)
@@ -405,7 +410,46 @@ class Measure:
         is_measure_start: bool = True,
         time_signature: Optional["TimeSignature"] = None,
         compression_level: str = "full",
+        key_signature_change: Optional[int] = None,
     ) -> tuple[str, Optional[Note]]:
+        # S11-3: `key_signature_change`, when not None, means this measure's
+        # effective key differs from the previous measure's -- the caller
+        # (BrailleRenderer/render_measure_slice) is expected to have already
+        # made that comparison, since only it knows the true previous-
+        # measure context across line-packing/lookahead. BANA Par. 6.5: "A
+        # change of key is placed wherever it occurs ... followed by a
+        # blank space (unless it is followed immediately by a meter
+        # signature)" -- meter-signature adjacency isn't handled here (no
+        # mid-piece meter-change support exists yet), so a trailing blank
+        # is always added. No leading blank is added: the preceding
+        # measure's own trailing bar-line cell is already a blank cell in
+        # the ordinary case, and nothing needs separating at a line start.
+        key_change_str = ""
+        if key_signature_change is not None:
+            from .key_signature import KeySignature as _KeySignatureChange
+            change_brl = _KeySignatureChange(
+                dots=frozenset(), category=None, raw_brl="",
+                sharps_or_flats=key_signature_change,
+            ).to_braille()
+            if change_brl:
+                key_change_str = change_brl + '⠀'
+            else:
+                # sharps_or_flats == 0: KeySignature.to_braille() has
+                # nothing to show for "no sharps or flats" as a HEADER
+                # signature, but BANA's braille form for cancelling a
+                # previous key signature back to C major/A minor mid-piece
+                # isn't confirmed anywhere in the manual excerpt this
+                # project has verified against -- flagging rather than
+                # guessing at a cancellation-naturals cell (CLAUDE.md's
+                # standing rule).
+                import warnings
+                warnings.warn(
+                    "A mid-piece key change back to 0 sharps/flats (C major/"
+                    "A minor) has no confirmed BANA braille form in this "
+                    "project yet -- omitting the change cell. Flag to the "
+                    "developer before transcribing this for real.",
+                    stacklevel=2,
+                )
         # BANA Par. 22.3's general rule: "Any number of single words,
         # abbreviations, and other expressions that do not contain spaces
         # may be brailled without interruption, each being introduced by
@@ -439,14 +483,19 @@ class Measure:
             # sign" -- a mid-measure text marking is rendered as a word-sign
             # expression right before this measure's own notes (see
             # `marking_strs` above), so it forces the same reset as a real
-            # line/measure start regardless of `is_measure_start`.
-            is_measure_start=is_measure_start or bool(self.text_markings),
+            # line/measure start regardless of `is_measure_start`. A key
+            # change (S11-3, BANA Par. 6.5) forces the same reset.
+            is_measure_start=is_measure_start or bool(self.text_markings) or key_signature_change is not None,
             time_signature=ts_obj,
             key_signature=key_sig_obj,
             compression_level=compression_level,
         )
 
-        if marking_strs and notes_str and (ord(notes_str[0]) - 0x2800) & 0x07 != 0:
+        # A key-change cell (S11-3), when present, sits right after
+        # marking_strs and before notes_str -- it's what the dot-3
+        # separator check below needs to look at first.
+        _after_markings = key_change_str or notes_str
+        if marking_strs and _after_markings and (ord(_after_markings[0]) - 0x2800) & 0x07 != 0:
             # BANA 22.3(d): the word-sign expression "must be followed by
             # dot 3 if the following sign contains dot 1, 2, or 3" -- e.g. a
             # rest cell (dots 1,2,3,6 for a quarter rest) right after the
@@ -529,11 +578,11 @@ class Measure:
             # (a volta always starts a measure), which independently
             # satisfies 17.1.1's "first note...requires a special octave
             # mark" -- no extra octave-forcing needed here.
-            following = marking_strs or notes_str
+            following = marking_strs or key_change_str or notes_str
             if following and (ord(following[0]) - 0x2800) & 0x07 != 0:
                 volta_str += '⠄'
 
-        return volta_str + marking_strs + notes_str + bar_cell, last_note
+        return volta_str + marking_strs + key_change_str + notes_str + bar_cell, last_note
 
     def musical_equals(self, other: Any) -> bool:
         if not isinstance(other, Measure):

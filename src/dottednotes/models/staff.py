@@ -212,20 +212,42 @@ class Staff:
                 header.append(f'    \\set Staff.midiInstrument = "{self.midi_instrument}"')
 
         from .note import Rest
+        from .key_signature import KeySignature as _KeySignature
 
         prev_midi = start_midi
         measure_lines: list[str] = []
 
         volta_groups_by_start = {g['shared_start']: g for g in self._find_volta_groups()}
 
+        # Tracks the last (sharps_or_flats, mode) pair actually emitted as a
+        # `\key` directive, seeded from the header -- S11-2. Whenever a
+        # measure's own effective key differs from this, a fresh `\key`
+        # directive is emitted right before that measure's content (BANA
+        # Par. 6.5: "a change of key is placed wherever it occurs").
+        last_key = (
+            (self.key_signature.sharps_or_flats, self.key_signature.mode)
+            if self.key_signature is not None else (0, "major")
+        )
+
         i = 0
         while i < len(self.measures):
             if i in volta_groups_by_start:
                 group = volta_groups_by_start[i]
-                group_lines, prev_midi = self._render_volta_group(group, prev_midi, measure_numbers)
+                group_lines, prev_midi, last_key = self._render_volta_group(
+                    group, prev_midi, measure_numbers, last_key
+                )
                 measure_lines.extend(group_lines)
                 i = group['group_end']
                 continue
+
+            current_key = (self.measures[i].key_signature, self.measures[i].key_signature_mode)
+            if current_key != last_key:
+                key_sig = _KeySignature(
+                    dots=frozenset(), category=None, raw_brl="",
+                    sharps_or_flats=current_key[0], mode=current_key[1],
+                )
+                measure_lines.append('    ' + key_sig.to_lilypond())
+                last_key = current_key
 
             # Look ahead to see if we can start/continue a run of rests
             run = []
@@ -242,6 +264,14 @@ class Staff:
                     break
 
                 if run and m.notes[0].duration != run[0].notes[0].duration:
+                    break
+
+                # A key change mid-run must not be silently absorbed into a
+                # compressed multi-measure rest (S11-2) -- same shape as the
+                # duration-break check above.
+                if run and (m.key_signature, m.key_signature_mode) != (
+                    run[0].key_signature, run[0].key_signature_mode
+                ):
                     break
 
                 run.append(m)
@@ -277,8 +307,7 @@ class Staff:
                 i = j
             else:
                 m = self.measures[i]
-                mode = self.key_signature.mode if self.key_signature else "major"
-                ly_str, prev_midi = m.to_lilypond(prev_midi=prev_midi, key_signature_mode=mode)
+                ly_str, prev_midi = m.to_lilypond(prev_midi=prev_midi, key_signature_mode=m.key_signature_mode)
                 if measure_numbers:
                     measure_lines.append(f'    % {m.number}')
                 measure_lines.append('    ' + ly_str)
@@ -348,8 +377,9 @@ class Staff:
         return groups
 
     def _render_volta_group(
-        self, group: dict, prev_midi: int, measure_numbers: bool
-    ) -> tuple[list[str], int]:
+        self, group: dict, prev_midi: int, measure_numbers: bool,
+        last_key: tuple[int, str] = (0, "major"),
+    ) -> tuple[list[str], int, tuple[int, str]]:
         """Render one `_find_volta_groups()` entry as
         `\\repeat volta N { ... } \\alternative { \\volta k { ... } ... }`
         (LilyPond Notation Reference Sec. 4.1.3).
@@ -365,16 +395,39 @@ class Staff:
         value returned here is the LAST branch's ending pitch, matching
         what a real `lilypond` run continues from after the `\\alternative`
         block closes.
+
+        `\\key` behaves the same way (S11-2) -- reverified directly against
+        the real `lilypond` 2.26.0 binary's `\\displayLilyMusic` output for
+        this specific construct (a `\\key` inside `\\repeat volta`/
+        `\\volta` is preserved literally in the linear token stream, with
+        no scoping/reset at any of those block boundaries), so `last_key`
+        threads through exactly like `cur_midi`: sequentially through the
+        shared section, then branch by branch, returning the LAST branch's
+        ending key.
         """
+        from .key_signature import KeySignature as _KeySignature
+
         lines: list[str] = []
         cur_midi = prev_midi
+        cur_key = last_key
+
+        def _emit_key_if_changed(m: Measure, indent: str) -> None:
+            nonlocal cur_key
+            key_pair = (m.key_signature, m.key_signature_mode)
+            if key_pair != cur_key:
+                key_sig = _KeySignature(
+                    dots=frozenset(), category=None, raw_brl="",
+                    sharps_or_flats=key_pair[0], mode=key_pair[1],
+                )
+                lines.append(indent + key_sig.to_lilypond())
+                cur_key = key_pair
 
         repeat_count = len(group['branches'])
         lines.append(f'    \\repeat volta {repeat_count} {{')
-        mode = self.key_signature.mode if self.key_signature else "major"
         for idx in range(group['shared_start'], group['shared_end']):
             m = self.measures[idx]
-            ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=mode)
+            _emit_key_if_changed(m, '        ')
+            ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=m.key_signature_mode)
             if measure_numbers:
                 lines.append(f'        % {m.number}')
             lines.append('        ' + ly_str)
@@ -386,14 +439,15 @@ class Staff:
             lines.append(f'        \\volta {numbers_str} {{')
             for idx in range(branch_start, branch_end):
                 m = self.measures[idx]
-                ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=mode)
+                _emit_key_if_changed(m, '            ')
+                ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=m.key_signature_mode)
                 if measure_numbers:
                     lines.append(f'            % {m.number}')
                 lines.append('            ' + ly_str)
             lines.append('        }')
         lines.append('    }')
 
-        return lines, cur_midi
+        return lines, cur_midi, cur_key
 
     def resolve_clef(self) -> str | None:
         """Public accessor for this staff's resolved \\clef directive (S5b-8),

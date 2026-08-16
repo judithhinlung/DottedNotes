@@ -67,6 +67,11 @@ class Note(BrailleSymbol):
     articulation_format: str = "single"
     parsed_tokens: list = field(default_factory=list)
     after_numeric_indicator: bool = False
+    # S11-3: True if this is the first note of a measure whose key
+    # signature differs from the previous measure's -- BANA Par. 6.5's
+    # octave-mark reset ("the first note after a key signature requires an
+    # octave mark"), the same shape as after_numeric_indicator above.
+    after_key_change: bool = False
     fermata: Optional[Fermata] = None
     breath_mark: Optional[BreathMark] = None
 
@@ -352,6 +357,7 @@ class Note(BrailleSymbol):
             self.tremolo == other.tremolo and
             self.pedal_sustain == other.pedal_sustain and
             self.after_numeric_indicator == other.after_numeric_indicator and
+            self.after_key_change == other.after_key_change and
             self.fermata == other.fermata and
             self.breath_mark == other.breath_mark
         )

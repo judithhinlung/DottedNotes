@@ -214,6 +214,15 @@ def _run_convert(args: argparse.Namespace) -> None:
         for staff in score.staves:
             if staff.key_signature:
                 staff.key_signature.mode = args.key_mode
+            # S11-4: a BRF source can now carry more than one key signature
+            # (mid-piece changes) -- --key-mode is a single, piece-wide
+            # override (no per-instance mode selection exists yet), so it
+            # must reach every measure's key_signature_mode too, or the
+            # diff-based \key emission (S11-2) would see a false mismatch
+            # between the just-overridden header and an unmodified
+            # mid-piece measure.
+            for measure in staff.measures:
+                measure.key_signature_mode = args.key_mode
 
     if args.single_line:
         # S12-1/S12-3: BANA Sec. 24 single-line format never states its

@@ -365,6 +365,25 @@ def pad_to_boundary(text: str, width: int) -> str:
     return text + blank * gap
 
 
+def key_signature_changes_by_index(measures: list[Measure], initial_key: int) -> dict[int, int]:
+    """Map absolute measure index -> new sharps/flats count, for every
+    measure whose effective key signature differs from the previous
+    measure's (S11-3, BANA Par. 6.5's "a change of key is placed wherever
+    it occurs"). `initial_key` is the key already stated in the header
+    (`Staff.key_signature`), so a first measure matching it correctly gets
+    no (redundant) change entry. Pure function of the static measure list
+    -- computed once per staff before any line-packing/lookahead, so it
+    can be looked up by absolute index regardless of how measures end up
+    grouped into lines."""
+    changes: dict[int, int] = {}
+    last = initial_key
+    for i, m in enumerate(measures):
+        if m.key_signature != last:
+            changes[i] = m.key_signature
+            last = m.key_signature
+    return changes
+
+
 def render_measure_slice(
     measures: list[Measure],
     start_idx: int,
@@ -373,6 +392,7 @@ def render_measure_slice(
     time_sig,
     compression_level: str = "full",
     force_all_starts: bool = False,
+    key_changes: Optional[dict[int, int]] = None,
 ) -> tuple[list[str], Optional[Note]]:
     """Helper to render a slice of measures. Only the first measure of the
     slice is treated as a line start, unless `force_all_starts` is set (the
@@ -381,9 +401,14 @@ def render_measure_slice(
     rendered = []
     curr_prev = prev_note
     for k in range(size):
-        m = measures[start_idx + k]
+        idx = start_idx + k
+        m = measures[idx]
         is_start = (k == 0) or force_all_starts
-        m_brl, curr_prev = m.to_braille(prev_note=curr_prev, is_measure_start=is_start, time_signature=time_sig, compression_level=compression_level)
+        m_brl, curr_prev = m.to_braille(
+            prev_note=curr_prev, is_measure_start=is_start, time_signature=time_sig,
+            compression_level=compression_level,
+            key_signature_change=(key_changes.get(idx) if key_changes else None),
+        )
         rendered.append(m_brl)
     return rendered, curr_prev
 
@@ -688,14 +713,17 @@ class BrailleRenderer:
         # Pack measures on the fly
         current_line = ""
         prev_note = None
+        key_changes = key_signature_changes_by_index(
+            staff.measures, staff.key_signature.sharps_or_flats if staff.key_signature else 0
+        )
 
         for idx, m in enumerate(staff.measures):
             # Render both possibilities
-            brl_start, prev_start = m.to_braille(prev_note=prev_note, is_measure_start=True, time_signature=staff.time_signature, compression_level=self.compression_level)
+            brl_start, prev_start = m.to_braille(prev_note=prev_note, is_measure_start=True, time_signature=staff.time_signature, compression_level=self.compression_level, key_signature_change=key_changes.get(idx))
             # A measure that fits mid-line only forces the octave-mark
             # reset when the reader-preference setting asks for it --
             # a line-starting measure (above) always forces it regardless.
-            brl_no_start, prev_no_start = m.to_braille(prev_note=prev_note, is_measure_start=self.octave_mark_every_measure, time_signature=staff.time_signature, compression_level=self.compression_level)
+            brl_no_start, prev_no_start = m.to_braille(prev_note=prev_note, is_measure_start=self.octave_mark_every_measure, time_signature=staff.time_signature, compression_level=self.compression_level, key_signature_change=key_changes.get(idx))
 
             if not current_line:
                 # BANA 24.1.1: "Each segment is introduced at the margin by
@@ -759,27 +787,33 @@ class BrailleRenderer:
 
         # Render measures for both hands
         lh_staff = score.staves[1]
-        
+        rh_key_changes = key_signature_changes_by_index(
+            rh_staff.measures, rh_staff.key_signature.sharps_or_flats if rh_staff.key_signature else 0
+        )
+        lh_key_changes = key_signature_changes_by_index(
+            lh_staff.measures, lh_staff.key_signature.sharps_or_flats if lh_staff.key_signature else 0
+        )
+
         idx = 0
         n_measures = len(rh_staff.measures)
         prev_note_rh = None
         prev_note_lh = None
-        
+
         while idx < n_measures:
             group_size = 1
             best_rh_lines = []
             best_lh_lines = []
             best_prev_rh = prev_note_rh
             best_prev_lh = prev_note_lh
-            
+
             while idx + group_size <= n_measures:
-                rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
-                lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
-                
+                rh_slice_strs, tmp_prev_rh = render_measure_slice(rh_staff.measures, idx, group_size, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure, key_changes=rh_key_changes)
+                lh_slice_strs, tmp_prev_lh = render_measure_slice(lh_staff.measures, idx, group_size, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure, key_changes=lh_key_changes)
+
                 m_num = self._display_measure_number(rh_staff.measures, idx)
                 test_rh = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
                 test_lh = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
-                
+
                 if len(test_rh) <= self.line_width and len(test_lh) <= self.line_width:
                     best_rh_lines = test_rh
                     best_lh_lines = test_lh
@@ -788,11 +822,11 @@ class BrailleRenderer:
                     group_size += 1
                 else:
                     break
-            
+
             if not best_rh_lines:
                 # Force at least one measure to avoid infinite loop
-                rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
-                lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure)
+                rh_slice_strs, best_prev_rh = render_measure_slice(rh_staff.measures, idx, 1, prev_note_rh, rh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure, key_changes=rh_key_changes)
+                lh_slice_strs, best_prev_lh = render_measure_slice(lh_staff.measures, idx, 1, prev_note_lh, lh_staff.time_signature, self.compression_level, force_all_starts=self.octave_mark_every_measure, key_changes=lh_key_changes)
                 m_num = self._display_measure_number(rh_staff.measures, idx)
                 best_rh_lines = self._build_piano_line_from_strings(m_num, rh_slice_strs, is_right=True)
                 best_lh_lines = self._build_piano_line_from_strings(m_num, lh_slice_strs, is_right=False)
@@ -925,6 +959,14 @@ class BrailleRenderer:
             prevs = []
             for s_idx in active:
                 staff = score.staves[s_idx]
+                # Mid-piece key changes are not wired in for ensemble
+                # rendering (key_changes omitted, so no key_signature_change
+                # is ever passed) -- BANA Par. 33.4.1's per-part differing-
+                # key-signature header rule is explicitly out of scope for
+                # S11-3 and left to its own follow-up ticket (Sprint 11's
+                # notes); wiring only the "all parts change together" case
+                # here without that rule would be inconsistent with
+                # whatever that ticket ends up designing for the header.
                 slice_strs, tmp_prev = render_measure_slice(
                     staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature, self.compression_level,
                     force_all_starts=self.octave_mark_every_measure,
@@ -1235,6 +1277,12 @@ class BrailleRenderer:
                     break
                 if run and m.notes[0].duration != run[0].notes[0].duration:
                     break
+                # A key change mid-run must not be silently absorbed into
+                # the compact rest sign (S11-3) -- same shape as the
+                # duration-break check above and Staff.to_lilypond()'s
+                # equivalent guard.
+                if run and m.key_signature != run[0].key_signature:
+                    break
                 run.append(m)
                 if m.bar_line_type != 'measure_separator':
                     # A special bar line (repeat/double bar) mid-run still
@@ -1261,6 +1309,7 @@ class BrailleRenderer:
                     notes=[compressed_rest],
                     time_signature=run[0].time_signature,
                     key_signature=run[0].key_signature,
+                    key_signature_mode=run[0].key_signature_mode,
                     clef=run[0].clef,
                     bar_line_type=last.bar_line_type,
                     bar_line_fermata=last.bar_line_fermata,

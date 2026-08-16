@@ -385,8 +385,18 @@ class LilypondParser:
                     else:
                         sharps_or_flats = key_map_major.get(key_note.lower(), 0)
                         
-                    staff.key_signature = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=sharps_or_flats, mode=mode)
+                    if not staff.measures:
+                        # S11-4: only the FIRST \key in the file is the
+                        # header signature -- staff.measures is still empty
+                        # at that point. A later mid-piece \key must not
+                        # overwrite it (same bug shape fixed in the BRF
+                        # parser, S11-1); it only affects current_measure
+                        # (and, via the carry-forward below, every measure
+                        # from here on) so Staff.to_lilypond()'s diff-based
+                        # emission (S11-2) can detect the change itself.
+                        staff.key_signature = KeySignature(dots=frozenset(), category=None, raw_brl="", sharps_or_flats=sharps_or_flats, mode=mode)
                     current_measure.key_signature = sharps_or_flats
+                    current_measure.key_signature_mode = mode
                     i += 3
                 else:
                     i += 1
@@ -440,7 +450,7 @@ class LilypondParser:
                 # Measure boundary
                 if current_measure.notes:
                     staff.add_measure(current_measure)
-                    current_measure = Measure(number=measure_number + 1, key_signature=current_measure.key_signature, time_signature=current_measure.time_signature, clef=current_measure.clef)
+                    current_measure = Measure(number=measure_number + 1, key_signature=current_measure.key_signature, key_signature_mode=current_measure.key_signature_mode, time_signature=current_measure.time_signature, clef=current_measure.clef)
                     measure_number += 1
                 i += 1
                 continue
@@ -549,6 +559,7 @@ class LilypondParser:
                         rest_measure = Measure(
                             number=measure_number + k,
                             key_signature=current_measure.key_signature,
+                            key_signature_mode=current_measure.key_signature_mode,
                             time_signature=current_measure.time_signature,
                             clef=current_measure.clef,
                         )
@@ -565,6 +576,7 @@ class LilypondParser:
                     current_measure = Measure(
                         number=measure_number,
                         key_signature=current_measure.key_signature,
+                        key_signature_mode=current_measure.key_signature_mode,
                         time_signature=current_measure.time_signature,
                         clef=current_measure.clef,
                     )

@@ -350,6 +350,9 @@ class BANAValidator:
             elif curr_note.after_numeric_indicator:
                 is_reset = True
                 reset_reason = "first note after numeric indicator"
+            elif curr_note.after_key_change:
+                is_reset = True
+                reset_reason = "first note after key change"
             elif last_measure_number is not None and m_num != last_measure_number:
                 # BANA resets octave tracking at the first note of a new
                 # PHYSICAL LINE, not at every measure boundary --

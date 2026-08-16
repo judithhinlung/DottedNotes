@@ -226,6 +226,7 @@ class _PendingNote:
     has_octave_mark: bool = False
     parsed_tokens: list = field(default_factory=list)
     after_numeric_indicator: bool = False
+    after_key_change: bool = False
 
 
 @dataclass
@@ -646,7 +647,18 @@ class BrailleParser:
             if not hand_staff.measures:
                 continue
             if self._key_signature_parsed:
-                hand_staff.key_signature = self._key_signature
+                # The header key signature is whatever was in force at the
+                # FIRST measure (S11-1), not self._key_signature's final
+                # value -- a piece with a mid-piece key change would
+                # otherwise report its header key as the *last* key seen
+                # in the whole piece instead of the first.
+                hand_staff.key_signature = KeySignature(
+                    dots=frozenset(),
+                    category=SymbolCategory.KEY_SIGNATURE,
+                    raw_brl='',
+                    sharps_or_flats=hand_staff.measures[0].key_signature,
+                    mode=self._key_signature.mode,
+                )
             if self._time_signature_parsed:
                 hand_staff.time_signature = self._time_signature
         if self._clef_parsed:
@@ -1437,6 +1449,8 @@ class BrailleParser:
 
         after_num = self._numeric_indicator_pending
         self._numeric_indicator_pending = False
+        after_key = self._key_change_pending
+        self._key_change_pending = False
 
         pnote = _PendingNote(
             note_name=note_name,
@@ -1453,6 +1467,7 @@ class BrailleParser:
             pedal_sustain=self._pending_pedal_down,
             has_octave_mark=has_octave_mark,
             after_numeric_indicator=after_num,
+            after_key_change=after_key,
         )
         self._pending_pedal_down = None
 
@@ -1550,6 +1565,12 @@ class BrailleParser:
             sharps_or_flats=KEY_SIGNATURE_CELLS[token.character],
         )
         self._key_signature_parsed = True
+        # BANA Par. 6.5: "the first note after a key signature requires an
+        # octave mark" -- applies to the header key signature too, but that
+        # note is already independently covered by the "first note of
+        # piece"/"first note in voice" reset (S11-3), so no special-casing
+        # is needed here.
+        self._key_change_pending = True
 
     def _handle_time_signature(self, token: BrailleToken) -> None:
         numerator, denominator = TIME_SIGNATURE_CELLS[token.character]
@@ -1782,6 +1803,7 @@ class BrailleParser:
                 has_octave_mark=pnote.has_octave_mark,
                 parsed_tokens=list(pnote.parsed_tokens),
                 after_numeric_indicator=pnote.after_numeric_indicator,
+                after_key_change=pnote.after_key_change,
             )
             if pnote.is_divisi_octave and pnote.interval_notes:
                 # Divisi-in-octaves (BANA 33.4.2): the octave partner is a
@@ -1957,7 +1979,13 @@ class BrailleParser:
     ) -> Measure:
         text_markings = list(self._pending_text_markings)
         self._pending_text_markings = []
-        measure = Measure(number=number, bar_line_type=bar_line_type, text_markings=text_markings, line=line)
+        measure = Measure(
+            number=number,
+            bar_line_type=bar_line_type,
+            text_markings=text_markings,
+            line=line,
+            key_signature=self._key_signature.sharps_or_flats,
+        )
 
         if self._pending_repeat_count > 0:
             self._finalize_repeat_measure(measure, pending, staff)
@@ -2546,6 +2574,10 @@ class BrailleParser:
         self._tremolo_carry_subdivision: int | None = None
         self._current_note_tokens: list[BrailleToken] = []
         self._numeric_indicator_pending: bool = False
+        # S11-3: mirrors _numeric_indicator_pending -- set whenever a
+        # KEY_SIGNATURE token changes the active key, consumed by the next
+        # note buffered (BANA Par. 6.5's octave-mark reset).
+        self._key_change_pending: bool = False
 
         if self._preserve_state and self._initial_state is not None:
             self.set_state(self._initial_state)

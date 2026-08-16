@@ -351,6 +351,7 @@ class MusicXMLTranslator:
             number=m21_measure.number,
             clef=clef_name,
             key_signature=key_val,
+            key_signature_mode=key_mode,
             time_signature=time_val
         )
         
