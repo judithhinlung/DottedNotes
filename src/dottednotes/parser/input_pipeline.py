@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Union
 
+from ..exceptions import BrailleParseError
+
 # North American Braille ASCII (BRF) encoding.
 # Maps each ASCII character to a 6-bit dot pattern where bit N-1 = dot N.
 # That bitmask is also the offset into the Unicode braille block (U+2800+).
@@ -120,11 +122,34 @@ class BRLInputPipeline:
         return "unknown"
 
     def _ascii_to_unicode(self, text: str) -> str:
-        """Convert ASCII braille text to Unicode braille, preserving newlines and tabs."""
+        """Convert ASCII braille text to Unicode braille, preserving newlines and tabs.
+
+        Raises on a character outside the North American Braille ASCII table
+        rather than silently treating it as a blank cell -- a blank cell
+        reads downstream as a bar line, so a single stray/corrupted
+        character used to inject a spurious mid-measure bar line with no
+        error at all (found via a real corrupted-file repro: two stray
+        'Ï' (U+00CF) characters silently fragmented two measures and threw
+        off octave tracking for the rest of the piece). Matches CLAUDE.md's
+        "never silent failures" rule.
+        """
         result = []
+        line = 1
+        col = 0
         for char in text:
             if char in ("\n", "\r", "\t"):
+                if char == "\n":
+                    line += 1
+                    col = 0
                 result.append(char)
-            else:
-                result.append(ascii_braille_char_to_unicode(char))
+                continue
+            col += 1
+            if char.upper() not in ASCII_TO_DOTS:
+                raise BrailleParseError(
+                    f"Line {line}, column {col}: '{char}' is not a valid "
+                    "North American Braille ASCII character. Check the "
+                    "source file for a typo or a corrupted character at "
+                    "this position."
+                )
+            result.append(ascii_braille_char_to_unicode(char))
         return "".join(result)
