@@ -195,6 +195,36 @@ def test_ensemble_parser_sao_mai_first_marker_off_by_one_does_not_swallow_leadin
     assert [n.octave for n in m2_notes] == [5, 5]
 
 
+def test_ensemble_parser_sao_mai_severely_misaligned_marker_uses_whole_line_split():
+    # Real Sao Mai exports sometimes drift by more than the one-cell offset
+    # the carry-forward repair (previous two tests) is built to recover --
+    # here measure 2's note sits 4 cells before its own marker (col 8, not
+    # marker col 12), not just 1. Naive column slicing merges it into
+    # measure 1's chunk as "overflow" containing a whole NOTE token, which
+    # the carry-forward repair drops (a bare NOTE isn't a carriable prefix
+    # stub -- it's a complete construct, and merging it into the wrong
+    # measure would be wrong anyway). Left unhandled this drops a note
+    # entirely and desyncs measure numbering for every later measure of
+    # this instrument (this is what "The Bear Under the Floorboard" hit
+    # around measure 40: a dropped note starves a tied-continuation
+    # measure of its only content, which then produces no Measure object
+    # at all, cascading into a spurious mid-piece key change and empty
+    # measures downstream). Splitting the whole line once on its own real
+    # bar lines instead of column position recovers the correct 1:1
+    # assignment regardless of exactly how far off each marker is.
+    header = '⠀⠀⠀⠀⠀⠼⠁⠀⠀⠀⠀⠀⠼⠃⠀⠀⠀⠀⠀⠀⠀⠼⠉'  # markers at cols 5, 12, 21
+    flute_line = '⠜⠋⠇⠄⠹⠀⠀⠀⠑⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠋'  # C at col 4, D at col 8, E at col 20
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠼⠙⠲\n'
+        f'{header}\n{flute_line}\n'
+    )
+    score = EnsembleParser().parse(raw)
+    flute = score.staves[0]
+    assert len(flute.measures) == 3
+    assert [n.note_name for m in flute.measures for n in m.notes] == ["C", "D", "E"]
+
+
 def test_ensemble_parser_parallel_movement():
     # Violin II doubles Violin I
     # System starts at measure 1

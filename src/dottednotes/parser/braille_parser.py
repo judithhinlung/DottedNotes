@@ -579,7 +579,10 @@ class BrailleParser:
                         duration=dur,
                         is_full_measure=True,
                     )
-                    m = Measure(number=m_num)
+                    m = Measure(
+                        number=m_num,
+                        key_signature=self._key_signature.sharps_or_flats,
+                    )
                     m.add_note(rest_obj)
                     active.add_measure(m)
             elif token.category == SymbolCategory.MEASURE_NUMBER:

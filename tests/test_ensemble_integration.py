@@ -4,6 +4,7 @@ import pytest
 
 from dottednotes.parser.ensemble_parser import EnsembleParser
 from dottednotes.parser.input_pipeline import BRLInputPipeline
+from dottednotes.models.note import Note
 
 from pathlib import Path
 
@@ -81,6 +82,47 @@ def test_tchaikovsky_quartet_header_is_found_and_parsing_reaches_real_music():
     text = pipeline.load(FIXTURES / "Tchaikovsky_String_Quartet_No_1_with_header.brf")
     with pytest.raises(NumeralRepeatError, match="numeral repeats"):
         EnsembleParser().parse(text)
+
+
+def test_bear_under_the_floorboard_no_empty_measures_or_spurious_key_changes():
+    """Regression for a user-reported bug: several instrument lines in
+    this fixture drift by more than the usual one-cell marker/content
+    offset in the measures-38-45 region (e.g. Double Bass's measure 44
+    content sits 4 cells before its own marker). Naive column slicing
+    merged a note into the wrong measure as unrecoverable "overflow",
+    starving a BANA tied-continuation measure (just an augmentation dot
+    + tie, no restated pitch) of its only content. That measure's
+    braille_parser.py `pending` list ended up empty, so no Measure object
+    was created at all and the measure-number counter never advanced --
+    desyncing every later measure number for that instrument until
+    EnsembleParser's own measure-reconciliation fell back to an empty,
+    key-signature-0 placeholder. That showed up as a spurious mid-piece
+    `\\key c \\major` and empty measures 41-45 in the converted LilyPond,
+    at a point that differed per instrument.
+    """
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / "The Bear Under the Floorboard Week 3.brf")
+    score = EnsembleParser().parse(text)
+
+    for staff in score.staves:
+        assert len(staff.measures) == 45, f"{staff.name} has {len(staff.measures)} measures, expected 45"
+        assert all(m.notes for m in staff.measures), (
+            f"{staff.name} has empty measure(s): "
+            f"{[m.number for m in staff.measures if not m.notes]}"
+        )
+        assert len({m.key_signature for m in staff.measures}) == 1, (
+            f"{staff.name} has inconsistent key signatures: "
+            f"{sorted({(m.number, m.key_signature) for m in staff.measures})}"
+        )
+
+    db = next(s for s in score.staves if s.name == "Double bass")
+    tail_pitches = [
+        n.note_name
+        for m in db.measures[37:45]
+        for n in m.notes
+        if isinstance(n, Note)
+    ]
+    assert tail_pitches == ["G", "G", "A", "G", "E", "A", "G", "F"]
 
 
 # Beethoven_Ludwig_Van_String_Quartet_No_1-1.brf and

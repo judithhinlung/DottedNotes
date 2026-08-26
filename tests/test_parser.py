@@ -5015,6 +5015,22 @@ def test_multi_measure_rest_parsing():
     assert 'R2.*4' in ly4
 
 
+def test_multi_measure_rest_carries_current_key_signature():
+    from dottednotes.parser.tokenizer import BrailleTokenizer
+    from dottednotes.parser.braille_parser import BrailleParser
+
+    # D major (2 sharps) key signature, then a 2-measure rest (⠍⠍). Every
+    # other measure-construction path threads the parser's current key
+    # signature onto the Measure it builds; the MULTI_MEASURE_REST
+    # expansion loop built its Measure objects directly and skipped that,
+    # defaulting to key_signature=0 (C major) regardless of the real key --
+    # a false "\key c \major" diff downstream from any piece that isn't
+    # already in C major and contains a multi-measure rest.
+    tokens = BrailleTokenizer().tokenize('⠩⠩⠍⠍')
+    score = BrailleParser(tokens=tokens).parse()
+    assert [m.key_signature for m in score.staves[0].measures] == [2, 2]
+
+
 def test_ensemble_omission_rest_reconstruction():
     from dottednotes.parser.tokenizer import BrailleTokenizer
     from dottednotes.parser.braille_parser import BrailleParser

@@ -988,15 +988,44 @@ class EnsembleParser:
                     leading_ws = len(line) - len(line.lstrip('⠀ '))
                     abbrev_end = leading_ws + len(abbrev_cells)
                     cols[0] = min(cols[0], abbrev_end)
-                for idx, marker_system in enumerate(group_systems):
-                    start = cols[idx]
-                    end = cols[idx + 1] if idx + 1 < len(cols) else len(line)
-                    chunk = line[start:end].lstrip('⠀ ')
-                    if abbrev_cells is not None:
-                        marker_system.parts[abbrev_cells] = chunk
-                        marker_system.last_abbrev = abbrev_cells
-                    elif marker_system.last_abbrev is not None:
-                        marker_system.parts[marker_system.last_abbrev] += " " + chunk
+
+                # The column offset between a marker and its measure's real
+                # content isn't always the same one cell the carry-forward
+                # repair below is built to recover -- some files misalign by
+                # several cells, differently per instrument/boundary, which
+                # can drop a whole NOTE/REST as unrecoverable overflow (not
+                # just a prefix modifier) and silently desync every later
+                # measure number for that instrument. Real BAR_LINE tokens
+                # in the content are the actual ground truth for where
+                # measures divide, independent of column position: tokenize
+                # this instrument's *entire* line content once and split it
+                # on its own bar lines. If that yields exactly as many
+                # sub-measures as this header group has markers, assign them
+                # 1:1 in order and skip column-slicing entirely. Otherwise
+                # fall back to the column-sliced + carry-forward path below
+                # unchanged, for lines that don't fit this shape.
+                assigned_whole_line = False
+                if cols and abbrev_cells is not None:
+                    whole_tokens = BrailleTokenizer().tokenize(
+                        line[cols[0]:], at_line_start=False
+                    )
+                    whole_measures = split_tokens_into_measures(whole_tokens)
+                    if len(whole_measures) == len(group_systems):
+                        for marker_system, toks in zip(group_systems, whole_measures):
+                            marker_system.parts[abbrev_cells] = "".join(t.raw for t in toks)
+                            marker_system.last_abbrev = abbrev_cells
+                        assigned_whole_line = True
+
+                if not assigned_whole_line:
+                    for idx, marker_system in enumerate(group_systems):
+                        start = cols[idx]
+                        end = cols[idx + 1] if idx + 1 < len(cols) else len(line)
+                        chunk = line[start:end].lstrip('⠀ ')
+                        if abbrev_cells is not None:
+                            marker_system.parts[abbrev_cells] = chunk
+                            marker_system.last_abbrev = abbrev_cells
+                        elif marker_system.last_abbrev is not None:
+                            marker_system.parts[marker_system.last_abbrev] += " " + chunk
             elif (
                 line[0] not in ('⠀', ' ')
                 and extract_line_abbreviation(line)[0] is None
@@ -1218,6 +1247,15 @@ class EnsembleParser:
                 staff = instrument_staves[inst_name]
                 measure_obj = next((m for m in staff.measures if m.number == m_num), None)
                 if measure_obj is None:
+                    warnings.warn(
+                        f"{inst_name}: Measure {m_num} could not be recovered "
+                        "from this instrument's own reconstructed content -- "
+                        "emitting an empty measure with no key signature "
+                        "carried over. Check the source for a missing bar "
+                        "line, mismatched measure-number markers, or other "
+                        "notation this parser could not reconcile.",
+                        stacklevel=2,
+                    )
                     measure_obj = Measure(number=m_num)
             elif res_type == 'consolidated':
                 primary_inst_name = val1
