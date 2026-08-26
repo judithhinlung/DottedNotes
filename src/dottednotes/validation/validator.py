@@ -95,11 +95,28 @@ RULE_REGISTRY: dict[str, Rule] = {
         citation="MBC 2015 Par. 22.3.3(b), Table 22(C)",
         default_severity="info",
     ),
+    "measure-number-indent": Rule(
+        rule_id="measure-number-indent",
+        name="Measure-Number Indentation Offset",
+        description=(
+            "A measure-number indication should be indented one cell "
+            "beyond the first music sign of the measure it labels. This "
+            "check is scoped to the inline multi-marker header row layout "
+            "some transcription software (e.g. Sao Mai) uses to pack "
+            "several measure numbers onto one header line -- itself a "
+            "software convention with no official BANA text of its own, "
+            "so this is tolerated and does not block conversion (the "
+            "content is still recovered correctly), just flagged as a "
+            "deviation from the indentation Sec. 33.4.6 specifies."
+        ),
+        citation="MBC 2015 Sec. 33.4.6",
+        default_severity="warning",
+    ),
 }
 
 VALIDATION_PROFILES: dict[str, list[str]] = {
-    "standard": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S11c-2", "hairpin-terminator-omission"],
-    "strict": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S9c-redundant-accidental", "S9c-measure-repeat", "S11c-2", "hairpin-terminator-omission"],
+    "standard": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S11c-2", "hairpin-terminator-omission", "measure-number-indent"],
+    "strict": ["S9b-2", "S9b-3", "S9b-4", "S9b-sign-order", "S9c-beat-count", "S9c-slur-matching", "S9c-redundant-accidental", "S9c-measure-repeat", "S11c-2", "hairpin-terminator-omission", "measure-number-indent"],
 }
 
 
@@ -214,6 +231,9 @@ class BANAValidator:
 
         if "S11c-2" in self.enabled_rules and raw_brl_text:
             corrections.extend(self._validate_page_layout(score, raw_brl_text))
+
+        if "measure-number-indent" in self.enabled_rules and raw_brl_text:
+            corrections.extend(self._validate_marker_indentation(raw_brl_text))
 
         # Deduplicate corrections based on unique attributes
         seen = set()
@@ -957,4 +977,97 @@ class BANAValidator:
                         ))
             global_line_offset += len(p_lines) + 1
 
+        return corrections
+
+    def _validate_marker_indentation(self, raw_brl_text: str) -> list[Correction]:
+        """Flag inline multi-marker header rows (Sao Mai's own convention,
+        `extract_all_measure_numbers`) that don't indent each marker one
+        cell beyond the real content it labels (MBC 2015 Sec. 33.4.6).
+
+        Slicing an instrument's content at the header's declared column
+        boundaries and tokenizing it tells us which convention that header
+        actually follows: if any instrument's slice resolves to *more*
+        than one measure's worth of tokens, something that truly belongs
+        to the next measure spilled into this one -- direct evidence the
+        marker sits one cell to the right of the content, exactly as Sec.
+        33.4.6 requires (EnsembleParser's own carry-forward repair, see
+        "swallowed" in `EnsembleParser.parse`, recovers that spillover).
+        If a whole header's worth of content -- every marker, every
+        instrument line under it -- slices cleanly with no such spillover,
+        that's the opposite: the header is column-registered flush with
+        the content instead, which is a real (if common and tolerated)
+        deviation from the indentation Sec. 33.4.6 specifies. A per-slice
+        check alone can't tell "flush" from "compliant, but this one
+        instrument happens to have nothing straddling this one boundary",
+        so evidence is gathered across an entire header block before
+        deciding -- only reported once no slice anywhere under that header
+        ever shows spillover.
+        """
+        from dottednotes.parser.ensemble_parser import (
+            extract_all_measure_numbers,
+            extract_line_abbreviation,
+            split_tokens_into_measures,
+        )
+        from dottednotes.parser.tokenizer import BrailleTokenizer
+
+        corrections: list[Correction] = []
+        header_line_idx: Optional[int] = None
+        group_boundaries: list[tuple[int, int]] | None = None
+        checked_any = False
+        saw_spillover = False
+
+        def flush() -> None:
+            if header_line_idx is not None and checked_any and not saw_spillover:
+                corrections.append(Correction(
+                    line_number=header_line_idx + 1,
+                    measure_number=group_boundaries[0][1] if group_boundaries else 0,
+                    message=(
+                        "This measure-number header's markers are column-"
+                        "registered flush with each instrument's content "
+                        "instead of indented one cell beyond it -- "
+                        "conversion still recovers the content correctly, "
+                        "but the source doesn't follow the indentation "
+                        "BANA Sec. 33.4.6 specifies."
+                    ),
+                    severity="warning",
+                    rule_id="measure-number-indent",
+                ))
+
+        for idx, line in enumerate(raw_brl_text.splitlines()):
+            if not line.strip():
+                continue
+
+            markers = extract_all_measure_numbers(line)
+            if markers is not None:
+                flush()
+                header_line_idx = idx
+                group_boundaries = markers
+                checked_any = False
+                saw_spillover = False
+                continue
+
+            if group_boundaries is None:
+                continue
+
+            abbrev_cells, _ = extract_line_abbreviation(line)
+            if abbrev_cells is None:
+                # Not a per-instrument content line under this header --
+                # e.g. a new solo/single-marker system starting instead.
+                flush()
+                header_line_idx = None
+                group_boundaries = None
+                continue
+
+            cols = [col for col, _ in group_boundaries]
+            for i in range(len(cols) - 1):
+                chunk = line[cols[i]:cols[i + 1]]
+                tokens = BrailleTokenizer().tokenize(chunk, at_line_start=False)
+                measures = split_tokens_into_measures(tokens)
+                if not measures:
+                    continue
+                checked_any = True
+                if len(measures) > 1:
+                    saw_spillover = True
+
+        flush()
         return corrections

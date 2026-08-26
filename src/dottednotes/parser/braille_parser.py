@@ -1182,9 +1182,14 @@ class BrailleParser:
         Three signs are recognized here (BANA 14.2/14.3), all positional --
         none of these cells are tokenized as TREMOLO by BrailleTokenizer,
         exactly like FINGERING_CELLS:
-          - doubled repeated-tremolo value cell (e.g. ⠃⠃): starts a carry
-            run -- attaches to this note and activates
-            self._tremolo_carry_active for subsequent bare notes.
+          - doubled repeated-tremolo sign (prefix + value cell + value cell
+            again, e.g. ⠘⠇⠇ -- confirmed against MBC 2015 Par. 14.2's own
+            text, "the braille sign may be doubled by writing the second
+            cell of the sign twice", and its worked example ("R^LLO"):
+            starts a carry run -- attaches to this note and activates
+            self._tremolo_carry_active for subsequent bare notes. Some
+            real transcriptions double the *prefix* cell too (⠘⠘⠇⠇, not
+            just the documented ⠘⠇⠇) -- both are accepted here.
           - full repeated-tremolo sign (prefix + value cell, e.g. ⠘⠃):
             a plain single-note tremolo, or -- if a carry run is open --
             the terminating sign that closes it.
@@ -1201,24 +1206,32 @@ class BrailleParser:
         idx = current_idx + 1
         if idx < len(self._tokens):
             t1 = self._tokens[idx]
+
+            if t1.character == TREMOLO_REPEATED_PREFIX:
+                # Consume every consecutive prefix cell (BANA only ever
+                # writes one; some real files double it too) before
+                # looking for the value cell(s) that follow.
+                j = idx + 1
+                while j < len(self._tokens) and self._tokens[j].character == TREMOLO_REPEATED_PREFIX:
+                    j += 1
+                t2 = self._tokens[j] if j < len(self._tokens) else None
+                t3 = self._tokens[j + 1] if j + 1 < len(self._tokens) else None
+
+                if (t2 is not None and t2.character in TREMOLO_REPEATED_VALUE_CELLS
+                        and t3 is not None and t3.character == t2.character):
+                    subdivision = TREMOLO_REPEATED_VALUE_CELLS[t2.character]
+                    pnote.tremolo = RepeatedTremolo(subdivision=subdivision)
+                    self._tremolo_carry_active = True
+                    self._tremolo_carry_subdivision = subdivision
+                    return j + 1
+
+                if t2 is not None and t2.character in TREMOLO_REPEATED_VALUE_CELLS:
+                    pnote.tremolo = RepeatedTremolo(subdivision=TREMOLO_REPEATED_VALUE_CELLS[t2.character])
+                    self._tremolo_carry_active = False
+                    self._tremolo_carry_subdivision = None
+                    return j
+
             t2 = self._tokens[idx + 1] if idx + 1 < len(self._tokens) else None
-
-            if (t2 is not None and t1.character == t2.character
-                    and t1.character in TREMOLO_REPEATED_VALUE_CELLS
-                    and t1.character != '⠄'):
-                subdivision = TREMOLO_REPEATED_VALUE_CELLS[t1.character]
-                pnote.tremolo = RepeatedTremolo(subdivision=subdivision)
-                self._tremolo_carry_active = True
-                self._tremolo_carry_subdivision = subdivision
-                return idx + 1
-
-            if (t1.character == TREMOLO_REPEATED_PREFIX and t2 is not None
-                    and t2.character in TREMOLO_REPEATED_VALUE_CELLS):
-                pnote.tremolo = RepeatedTremolo(subdivision=TREMOLO_REPEATED_VALUE_CELLS[t2.character])
-                self._tremolo_carry_active = False
-                self._tremolo_carry_subdivision = None
-                return idx + 1
-
             if (t1.character == TREMOLO_ALTERNATING_PREFIX and t2 is not None
                     and t2.character in TREMOLO_ALTERNATING_VALUE_CELLS):
                 pnote.alternating_tremolo_subdivision = TREMOLO_ALTERNATING_VALUE_CELLS[t2.character]

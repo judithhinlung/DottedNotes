@@ -15,6 +15,8 @@ from dottednotes.parser.input_pipeline import BRLInputPipeline
 from dottednotes.models.orchestra_score import OrchestraScore
 from dottednotes.models.note import Note, Rest
 from dottednotes.models.measure import Measure
+from dottednotes.models.accidental import AccidentalType
+from dottednotes.models.dynamic import DynamicLevel
 
 
 def test_extract_measure_number():
@@ -124,6 +126,73 @@ def test_ensemble_parser_sao_mai_inline_multi_measure_numbers():
     assert [n.note_name for n in violin.measures[0].notes] == ["C", "D"]
     assert [n.note_name for n in violin.measures[1].notes] == ["E", "F"]
     assert [n.octave for n in violin.measures[0].notes] == [3, 3]
+
+
+def test_ensemble_parser_sao_mai_marker_off_by_one_does_not_swallow_leading_accidental():
+    # Real Sao Mai exports don't always keep an instrument's content
+    # column-registered with the header row's marker to the cell: here the
+    # flat before measure 2's first note ('⠣') actually sits one column to
+    # the left of the '#2' marker (col 11, not col 12), so a naive column
+    # slice cuts it into measure 1's raw chunk instead of measure 2's. Left
+    # unhandled, that flat is silently dropped -- "the first character of
+    # the [next] measure gets swallowed" -- and the note that should be E
+    # flat comes out as plain E.
+    header = '⠀⠀⠀⠀⠀⠼⠁⠀⠀⠀⠀⠀⠼⠃'  # measure 1 marker col 5, measure 2 marker col 12
+    flute_line = '⠜⠋⠇⠄⠀⠐⠹⠱⠀⠀⠀⠣⠫⠻'  # flat at col 11, one column before the marker
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠼⠙⠲\n'  # 3/4, no key signature (C major)
+        f'{header}\n{flute_line}\n'
+    )
+    parser = EnsembleParser()
+    score = parser.parse(raw)
+
+    flute = score.staves[0]
+    assert len(flute.measures) == 2
+    assert [n.note_name for n in flute.measures[0].notes] == ["C", "D"]
+
+    m2_notes = flute.measures[1].notes
+    assert [n.note_name for n in m2_notes] == ["E", "F"]
+    assert m2_notes[0].accidental is not None
+    assert m2_notes[0].accidental.type == AccidentalType.FLAT
+
+
+def test_ensemble_parser_sao_mai_first_marker_off_by_one_does_not_swallow_leading_word_sign():
+    # The same one-cell offset (previous test) also afflicts the very
+    # *first* marker in a group -- but there's no earlier measure's chunk
+    # for the ordinary carry-forward repair to have caught it in, since
+    # there's nothing before the first marker to spill from. Here a
+    # dynamic word-sign ('p', written ⠜⠏) sits directly after the
+    # abbreviation, but the first marker's column (5) lands one cell
+    # *into* it (col 5 is '⠏', not the construct's real start at col 4,
+    # the '⠜' opener). Left unhandled, the naive slice starts at col 5,
+    # dropping the '⠜' entirely -- corrupting the whole word-sign and, in
+    # the real fixture this was found in, cascading into wrong octaves for
+    # every following note (the leftover cells get misread as plain octave
+    # marks). The second measure's own leading octave mark (⠨, col 9) is
+    # also one cell beyond its content (col 10, not 9) -- the ordinary
+    # interior carry-forward repair (previous test) handles that half.
+    header = '⠀⠀⠀⠀⠀⠼⠁⠀⠀⠀⠼⠃'  # measure 1 marker col 5, measure 2 marker col 10
+    flute_line = '⠜⠋⠇⠄⠜⠏⠐⠹⠱⠨⠫⠻'  # 'p' dynamic at cols 4-5, octave 5 mark at col 9
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠼⠙⠲\n'
+        f'{header}\n{flute_line}\n'
+    )
+    parser = EnsembleParser()
+    score = parser.parse(raw)
+
+    flute = score.staves[0]
+    assert len(flute.measures) == 2
+
+    m1_notes = flute.measures[0].notes
+    assert [n.note_name for n in m1_notes] == ["C", "D"]
+    assert [n.octave for n in m1_notes] == [4, 4]
+    assert [d.level for d in m1_notes[0].dynamics] == [DynamicLevel.P]
+
+    m2_notes = flute.measures[1].notes
+    assert [n.note_name for n in m2_notes] == ["E", "F"]
+    assert [n.octave for n in m2_notes] == [5, 5]
 
 
 def test_ensemble_parser_parallel_movement():

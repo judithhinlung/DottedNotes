@@ -418,3 +418,49 @@ def test_validation_hairpin_terminator_omission_in_both_profiles():
     assert "hairpin-terminator-omission" in BANAValidator(profile="standard").enabled_rules
     assert "hairpin-terminator-omission" in BANAValidator(profile="strict").enabled_rules
 
+
+def test_validation_marker_indent_flags_flush_column_registered_header():
+    # Some real ensemble files (e.g. this codebase's own Tchaikovsky quartet
+    # fixture) column-register an inline multi-measure-number header row
+    # flush with each instrument's content instead of indenting the marker
+    # one cell beyond it, as MBC 2015 Sec. 33.4.6 specifies. Conversion
+    # still recovers correctly either way, but this should surface as an
+    # advisory warning, not silently pass. The gap of blank cells between
+    # measure 1's content (cols 5-7) and measure 2's (cols 11-13) matters:
+    # without it there's no blank cell anywhere near the boundary for the
+    # detector to key off, so this can't be told apart from the compliant
+    # layout below (that's also why real column-marker layouts pad content
+    # out to a shared column in the first place).
+    header = '⠀⠀⠀⠀⠀⠼⠁⠀⠀⠀⠀⠼⠃'  # measure 1 marker at col 5, measure 2 marker at col 11 -- flush with content
+    flute_line = '⠜⠋⠇⠄⠀⠐⠹⠱⠀⠀⠀⠐⠫⠻'
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠼⠙⠲\n'
+        f'{header}\n{flute_line}\n'
+    )
+    corrections = BANAValidator()._validate_marker_indentation(raw)
+    assert len(corrections) == 1
+    assert corrections[0].rule_id == "measure-number-indent"
+    assert corrections[0].severity == "warning"
+
+
+def test_validation_marker_indent_no_warning_for_compliant_offset_header():
+    # Identical content line to the flush case above, but the header now
+    # indents measure 2's marker one cell beyond where that measure's real
+    # content starts (col 12, not col 11) -- the Sec. 33.4.6-compliant
+    # layout -- so no deviation should be reported.
+    header = '⠀⠀⠀⠀⠀⠼⠁⠀⠀⠀⠀⠀⠼⠃'  # measure 1 marker at col 5, measure 2 marker at col 12 (content still starts at col 11)
+    flute_line = '⠜⠋⠇⠄⠀⠐⠹⠱⠀⠀⠀⠐⠫⠻'
+    raw = (
+        '⠠⠋⠇⠥⠞⠑⠀⠐⠐⠐⠐⠐⠀⠀⠜⠋⠇⠄\n'
+        '⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠼⠙⠲\n'
+        f'{header}\n{flute_line}\n'
+    )
+    corrections = BANAValidator()._validate_marker_indentation(raw)
+    assert corrections == []
+
+
+def test_validation_marker_indent_enabled_in_both_profiles():
+    assert "measure-number-indent" in BANAValidator(profile="standard").enabled_rules
+    assert "measure-number-indent" in BANAValidator(profile="strict").enabled_rules
+

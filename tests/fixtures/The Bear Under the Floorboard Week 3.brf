@@ -1,0 +1,109 @@
+,PIANO RIGHT HAND  >PR'
+,PIANO LEFT HAND    >PL'
+,VIOLIN ,I          >V1'
+,VIOLIN ,,II        >V2'
+,VIOLA              >VL'
+,VIOLONCELLO        >VC'
+,DOUBLE BASS        >DB'
+              %%#C4
+     #A            #B
+>VC'>P_:][        <JCI@CI8GJCI@C
+>DB'>PIZZ'>P^O'   _O'@C 
+    #C         #D    
+>VC_I8G<JCIV  <[*[<W
+>DB'_:^]V     O' 
+     #E              #F
+>VC'<_JCE@CE8J<IC*I <JCI@C[V
+>DB'^R*]@C          *]%]V
+     #G         #H 
+>VC'<_I*I<JGIE "I<J*D_H<J_E
+>DB'*^]':'    ]':'
+     #I      #AJ           #AA 
+>VC'<_W*?%? DCE@CE8DDCE@C E8%DDCEV
+>DB' ^\[<W <W\W          \]V
+     #AB          #AC
+>V2'>MF":][      <JCI@CI8GJCI@C
+>VL'>MF":][      <JCI@CI8GJCI@C
+>VC'>MF_O'       <P' 
+>DB'>ARCO'^O'@C        O'@C 
+     #AD        #AE
+>V2'"I8G<JCIV  <[*[<W
+>VL'"I8G<JCIV  <[*[<W
+>VC'_O'        N'
+>DB'^O'@C        O'@C 
+     #AF             #AG
+>V2'<"JCE@CE8J<IC*I <JCI@C[V
+>VL'"JCE@CE8J<IC*I <JCI@C[V
+>VC'<_P:@C           OV
+>DB'^O'@C          O'
+     #AH        #AI 
+>V2'<"I*I<JGIE "I<J*D_H<J"E
+>VL'<"I*I<JGIE "I<JD_H<J"E
+>VC'<_P'       O'
+>DB'^Q'@C      Q' 
+     #BJ     #BA           #BB
+>V2'<"W*?%? DCE@CE8DDCE@C E8%DDCEV
+>VL'<"W*?%? DCE@CE8DDCE@C E8%DDCEV
+>VC'_N'    <P'           *N'
+>DB'R'@C   R'            QV
+     #BC          #BD    #BE
+>V1'>C.8<.S^^LL\ .8<T<[ >D.8N:^L
+>V2'>C.8.O'^LL   .8O'   >D.8R]^L
+>VL'>C.8*"N'      .8N'  >D.8O'
+>VC'>C.8_O'      .8P'   >D.8O'
+>DB'>C.8^O'      .8P'   >D.8O'
+     #BF     #BG
+>V1'>P;O'@C O'@C
+>PL'>P":[.: ":S
+     #BH   #BI
+>V1';O'@C O'@C
+>PR'M     U.[
+>PL'":[.: ":[_[
+     #CJ
+>V1';O'@C O'@C   
+>PR'>F.TICH
+>PL'>F_\":\ 
+     #CA     #CB
+>V1';O'@C   O'@C
+>PR'.O.W    *NICH
+>PL'_W:\    _["$[ 
+     #CC      #CD
+>V1';O'@C    O'@C
+>PR'.]:.JC*D :W:
+>PL'":[.:    _W%"]W 
+     #CE   #CF
+>V1';O'@C O'@C
+>PR';]\:  $'CE*DCJ
+>PL'*"?\.? _["$[ 
+     #CG   #CH
+>V1';O'   >MP.O'@C
+>V2' M    >MP"T'@C
+>VL'M     >MP_R'@C
+>VC'M     >MP_O'@C
+>DB'M     >MP^R'@C
+>PR'.S"[  >MF'TICH
+>PL'_:[": >MF^\_:\ 
+    #CI      #DJ
+>V1'.O'      P'
+>V2'"T'     *N'
+>VL'_R'     P'
+>VC'_O'     *N'
+>DB'^R'     S'
+>PR'"O"W    *NICH
+>PL'^W:\    ^[_$[ 
+     #DA      #DB
+>V1'.O'      Q'
+>V2'"S'      T'
+>VL'"O'      P'
+>VC'_O'      *N'
+>DB'^R'      P'
+>PR'"]:"JC*D :W:
+>PL'^:[_:   ^W%_]W 
+     #DC    #DD      #DE
+>V1'.P'    O'       O'<K
+>V2'"R'    R'       Q'<K
+>VL'*"N'    S'       "O'<K
+>VC'_P'    O'       O'<K
+>DB'^S' R'          Q'<K
+>PR'.$*?W     SJC*D O'<K
+>PL'*_?\"?    _:[": _][":<K

@@ -39,6 +39,40 @@ LITERARY_DIGIT_MAP = {
     '⠋': '6', '⠛': '7', '⠓': '8', '⠊': '9', '⠚': '0'
 }
 
+# Note-prefix categories only -- see the group-boundaries carry-forward
+# logic below (search "swallowed") for why overflow tokens are only ever
+# carried across a system boundary when every one of them is one of these.
+# KEY_SIGNATURE is included because a lone flat/sharp cell stranded at the
+# very end of a column-sliced chunk (with nothing left in that isolated
+# chunk to look ahead at) is read by BrailleTokenizer's own
+# end-of-input/whitespace rule as a 1-accidental key signature even when
+# it's really just a flat/sharp accidental that got cut off from the note
+# it belongs to -- carrying its raw cells forward and letting the final,
+# fully-reconstructed per-instrument stream get re-tokenized with full
+# context (in BrailleParser) resolves it correctly either way.
+_CARRIABLE_PREFIX_CATEGORIES = frozenset({
+    SymbolCategory.ACCIDENTAL,
+    SymbolCategory.DYNAMIC,
+    SymbolCategory.OCTAVE_MARK,
+    SymbolCategory.KEY_SIGNATURE,
+})
+
+# The word-sign/clef opener cell (⠜, dots 3,4,5 -- BrailleTokenizer's
+# `_CLEF_PREFIX`). A genuine word-sign/dynamic construct always decodes to
+# more than just this one cell (BrailleTokenizer greedily collects until an
+# END_WORD_SIGN, octave mark, or other terminator); a WORD_SIGN token whose
+# `raw` is *only* this cell can only mean the tokenizer ran out of chunk
+# before finding one -- i.e. it's a truncation artifact, never a complete
+# construct in its own right -- so it's carriable too, unlike WORD_SIGN in
+# general (see _is_carriable_overflow below).
+_BARE_WORD_SIGN_OPENER = '⠜'
+
+
+def _is_carriable_overflow(token: BrailleToken) -> bool:
+    if token.category in _CARRIABLE_PREFIX_CATEGORIES:
+        return True
+    return token.category == SymbolCategory.WORD_SIGN and token.raw == _BARE_WORD_SIGN_OPENER
+
 def extract_measure_number(line_str: str) -> tuple[int | None, str]:
     """Extract a leading measure number and return (measure_number, remaining_line).
 
@@ -927,7 +961,33 @@ class EnsembleParser:
                 current_system.add_line(remaining, instruments, self.category_override)
             elif group_boundaries is not None:
                 abbrev_cells, _ = extract_line_abbreviation(line)
+                # BANA Sec. 33.4.6 says a measure-number indication is
+                # "indented one cell beyond the first music signs of the
+                # parallel" -- but that rule describes BANA's own one-
+                # marker-alone-per-line convention (`extract_measure_number`),
+                # not this inline multi-marker layout, which is a Sao Mai
+                # software extension with no official BANA text governing
+                # it. Real files disagree on whether it still applies here:
+                # some are exactly column-registered with their header row
+                # (marker column == content's first cell), others carry the
+                # Sec. 33.4.6 offset through (content starts one cell left
+                # of the marker) -- see the carry-forward repair below,
+                # which recovers either case from the content itself rather
+                # than assuming a fixed offset.
                 cols = [col for col, _ in group_boundaries]
+                # The very first marker's column can suffer the same
+                # one-cell offset as any interior boundary, but with no
+                # *previous* measure's chunk for the carry-forward repair
+                # below to have caught it in -- there's nothing before the
+                # first marker to spill from. Recover it directly here
+                # instead: widen the first chunk to start right after the
+                # abbreviation (never later than the marker column, so a
+                # flush-registered header -- abbrev end == marker column --
+                # is unaffected).
+                if cols and abbrev_cells is not None:
+                    leading_ws = len(line) - len(line.lstrip('⠀ '))
+                    abbrev_end = leading_ws + len(abbrev_cells)
+                    cols[0] = min(cols[0], abbrev_end)
                 for idx, marker_system in enumerate(group_systems):
                     start = cols[idx]
                     end = cols[idx + 1] if idx + 1 < len(cols) else len(line)
@@ -987,14 +1047,62 @@ class EnsembleParser:
         measure_cells_list = {inst.name: [] for inst in instruments}
         resolutions = {inst.name: {} for inst in instruments}
 
+        # Column slicing under the Sao Mai group-boundaries convention (see
+        # the `elif group_boundaries is not None:` branch above) cuts each
+        # instrument's per-measure chunk at the *next* marker's column, but
+        # real-world files don't always keep every instrument's content
+        # column-registered with the header row that precisely -- a note's
+        # leading accidental or dynamic marking can land one column early,
+        # inside the *previous* marker's slice. `split_tokens_into_measures`
+        # then reports that slice as more than one measure's worth of
+        # tokens even though a span-1 (group-boundary) system is only ever
+        # supposed to hold one. Rather than silently dropping that overflow
+        # (which reads as "the first character of the next measure got
+        # swallowed"), carry it forward and prepend it to the very next
+        # system's tokens for the same instrument key.
+        carry_tokens: dict[str, list[BrailleToken]] = {}
+        prev_end_measure_number: int | None = None
         for sys in systems:
+            if prev_end_measure_number != sys.measure_number - 1:
+                carry_tokens = {}
+
             sys_measure_toks = {}
             for key, music_cells in sys.parts.items():
                 # at_line_start=False: same reason as above -- this fragment's
                 # first cell is real music content, not a line-start context.
                 tokens = BrailleTokenizer().tokenize(music_cells, at_line_start=False)
                 measure_tokens = split_tokens_into_measures(tokens)
+                leftover = carry_tokens.pop(key, None)
+                if leftover:
+                    if measure_tokens:
+                        measure_tokens[0] = leftover + measure_tokens[0]
+                    else:
+                        measure_tokens = [leftover]
                 sys_measure_toks[key] = measure_tokens
+
+            if sys.end_measure_number == sys.measure_number:
+                for key, measure_tokens in sys_measure_toks.items():
+                    if len(measure_tokens) > 1:
+                        overflow: list[BrailleToken] = []
+                        for extra in measure_tokens[1:]:
+                            overflow.extend(extra)
+                        # Only ever carry a bare run of note-prefix modifiers
+                        # (an accidental/dynamic/octave mark with no note or
+                        # rest of its own) or a truncated word-sign opener --
+                        # a self-contained construct (NOTE, REST,
+                        # NUMERAL_REPEAT, a *complete* WORD_SIGN, ...) in the
+                        # overflow means this isn't a stray column-boundary
+                        # split of one note's prefix, and gluing it onto the
+                        # next system's tokens with no blank-cell separator
+                        # would corrupt constructs that rely on being
+                        # terminated by a blank cell (e.g. NUMERAL_REPEAT,
+                        # BANA Sec. 19) -- so leave those to the old
+                        # (drop the overflow) behavior instead.
+                        if overflow and all(_is_carriable_overflow(t) for t in overflow):
+                            carry_tokens[key] = overflow
+                        sys_measure_toks[key] = measure_tokens[:1]
+
+            prev_end_measure_number = sys.end_measure_number
 
             inst_to_key = {}
             for inst in instruments:

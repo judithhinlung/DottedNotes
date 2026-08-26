@@ -107,9 +107,13 @@ def test_parse_repeated_tremolo_after_fingering():
 # --- Parser: repeated-note tremolo doubling (4+ notes, BANA 14.2) ---
 
 def test_parse_repeated_tremolo_doubling_carries_across_run():
-    # C quarter x4; doubled 8ths sign starts the run after note 1,
-    # notes 2-3 are bare, the full sign terminates the run after note 4.
-    notes = _parse('⠐⠹⠃⠃⠹⠹⠹⠘⠃')
+    # C quarter x4; doubled 8ths sign (MBC 2015 Par. 14.2: "the braille
+    # sign may be doubled by writing the second cell of the sign twice" --
+    # prefix ⠘ + value ⠃ written twice, confirmed against the worked
+    # example "R^LLO" in the manual's own text) starts the run after note
+    # 1, notes 2-3 are bare, the full (un-doubled) sign terminates the run
+    # after note 4.
+    notes = _parse('⠐⠹⠘⠃⠃⠹⠹⠹⠘⠃')
     assert len(notes) == 4
     for note in notes:
         assert note.tremolo == RepeatedTremolo(subdivision=8)
@@ -118,11 +122,31 @@ def test_parse_repeated_tremolo_doubling_carries_across_run():
 
 def test_parse_repeated_tremolo_doubling_does_not_leak_past_terminator():
     # Doubled run of two 16th-tremolo notes, terminated, then a plain note.
-    notes = _parse('⠐⠹⠇⠇⠹⠘⠇⠹')
+    notes = _parse('⠐⠹⠘⠇⠇⠹⠘⠇⠹')
     assert len(notes) == 3
     assert notes[0].tremolo == RepeatedTremolo(subdivision=16)
     assert notes[1].tremolo == RepeatedTremolo(subdivision=16)
     assert notes[2].tremolo is None
+
+
+def test_parse_repeated_tremolo_doubling_with_doubled_prefix_cell_too():
+    # Some real transcriptions double the prefix cell as well (⠘⠘⠇⠇, not
+    # just the MBC-2015-documented ⠘⠇⠇) -- both forms start the same carry.
+    notes = _parse('⠐⠹⠘⠘⠇⠇⠹⠹⠹⠘⠇')
+    assert len(notes) == 4
+    for note in notes:
+        assert note.tremolo == RepeatedTremolo(subdivision=16)
+
+
+def test_parse_bare_doubled_value_cell_without_prefix_is_not_tremolo():
+    # A doubled value cell with no preceding prefix cell at all (⠃⠃, not
+    # ⠘⠃⠃) isn't the BANA 14.2 doubling sign -- it has no prefix, so per
+    # the manual's own wording ("doubled by writing the *second* cell of
+    # the sign twice") there's no "sign" here to double in the first
+    # place. Confirms the fix didn't just loosen matching to bare doubled
+    # value cells.
+    notes = _parse('⠐⠹⠃⠃')
+    assert notes[0].tremolo is None
 
 
 def test_doubled_fingering_same_value_not_misread_as_tremolo_collision():
