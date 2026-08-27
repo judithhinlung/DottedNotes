@@ -127,7 +127,7 @@ violinOneMusic = \relative c'' {
     % 31
     d2.~ |
     % 32
-    d2. |
+    d2.~ |
     % 33
     d2.~ |
     % 34
