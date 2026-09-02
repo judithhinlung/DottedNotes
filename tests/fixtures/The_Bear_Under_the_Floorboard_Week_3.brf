@@ -1,0 +1,106 @@
+,PIANO RIGHT HAND  >PR'
+,PIANO LEFT HAND    >PL'
+,VIOLIN ,I          >V1'
+,VIOLIN ,,II        >V2'
+,VIOLA              >VL'
+,VIOLONCELLO        >VC'
+,DOUBLE BASS        >DB'
+              %%#C4
+     #A               #B
+>VC'>P_:][           <JCI@CI8GJCI@C
+>DB'>PIZZ'>P^:_:^[   ^][_: 
+    #C         #D    
+>VC_I8G<JCIV  <[*[<W
+>DB'^[][      *]%]\ 
+     #E              #F
+>VC'<_JCE@CE8J<IC*I <JCI@C[V
+>DB'^\<W:           HCG@C]V
+     #G         #H 
+>VC'<_I*I<JGIE _I<J*D_H<J_E
+>DB'^:H[I      ]G\<J
+     #I      #AJ           #AA 
+>VC'<_W*?%? DCE@CE8DDCE@C E8%DDCEV
+>DB' ^\[<W <W\W          \]V
+     #AB            #AC
+>V2'>MF":][        <JCI@CI8GJCI@C
+>VL'>MF":][        <JCI@CI8GJCI@C
+>VC'>MF88_EGI"E_IG *G%GI"E_IG       <P' 
+>DB'>ARCO'8^:VV    8[VV 
+     #AD        #AE
+>V2'"I8G<JCIV  <[*[<W
+>VL'"I8G<JCIV  <[*[<W
+>VC'_EGI"E_IG  *]%]\
+>DB'8_:VV      8^[VV 
+     #AF             #AG
+>V2'<"JCE@CE8J<IC*I <JCI@C[V
+>VL'<"JCE@CE8J<IC*I <JCI@C[V
+>VC'_\<W8:          HCG@C]V
+>DB'8^:VV           8[VV
+     #AH        #AI 
+>V2'<"I*I<JGIE "I<J*D"HJ"E
+>VL'<"I*I<JGIE I<J*D"HJ"E
+>VC'"E_IGIGE   EGIEH<J
+>DB'^:'['      :'\' 
+     #BJ       #BA           #BB
+>V2'<"W*?%?   DCE@CE8DDCE@C E8%DDCEV
+>VL'<"W*?%?   DCE@CE8DDCE@C E8%DDCEV
+>VC'88_\*]<$  ?:<$          :8:V
+>DB'^N'       P'            OV
+     #BC          #BD    #BE
+>V1'>C.8<.S^^LL\ .8<T<[ >D.8N:^L
+>V2'>C.8<P^LL:   .8P:   >D.8R^L]^B
+>VL'>C.8*"N^LL<W        .8<S]  >D.8R^L\^B
+>VC'>C.8*^N^L<W      .8<S\   >D.8R^L\^B
+>DB'>C.8^N'      .8<S'   >D.8R'
+     #BF        #BG
+>V1'>P;O'@C    O'@C
+>PR'M          U.[
+>PL'>P^H_HJEHJ ^H_HJEHJ
+     #BH
+>V1';O'@C O'@C   
+>PR'>F.TICH
+>PL'>F^H_HJEHJ 
+     #BI      #CJ
+>V1';O'@C    O'@C
+>PR'.O.W     *NICH
+>PL'^JEHJEH  *_DFH"DFH 
+     #CA       #CB
+>V1';O'@C     O'@C
+>PR'.]:.JC*D :W:
+>PL'_EGI"EGI ^J%EGJEG 
+     #CC       #CD
+>V1';O'@C     O'@C
+>PR';]\:      $'CE*DCJ
+>PL'*_DFH"DFH ^I_I*DF[ 
+     #CE      #CF
+>V1';O'      >PPP.O'@C
+>V2' M       >PPP"T'@C
+>VL'M        >PPP_R'@C
+>VC'M        >PPP_O'@C
+>DB'M        >PPP^R'@C
+>PR'.S"[     >MF'TICH
+>PL'^E_EGI": >MF@H^HJEHJ 
+    #CG       #CH
+>V1'.O'      P'
+>V2'"T'      *N'
+>VL'_R'      P'
+>VC'_O'      *N'
+>DB'^R'      S'
+>PR'"O"W     *NICH
+>PL'@J^HJEHJ @I*DFIDF 
+     #CI      #DJ
+>V1'.O'      Q'
+>V2'"S'      T'
+>VL'"O'      P'
+>VC'_O'      *N'
+>DB'^R'      P'
+>PR'"]:"JC*D :W:
+>PL'^EGI_EGI @J%EGJ%EG 
+     #DA    #DB         #DC
+>V1'.P'    O'          O'<L<K
+>V2'"R'    R'          Q'<L<K
+>VL'*"N'   S'          "O'<L<K
+>VC'_P'    O'          O'<L<K
+>DB'^S'    R'          Q'<L<K
+>PR'.$*?W     SJC*D    O'<L<K
+>PL'*^DFH_DFH ^EGI_EGI ^GI_EGI"E<L<K

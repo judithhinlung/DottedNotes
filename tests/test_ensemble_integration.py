@@ -101,11 +101,11 @@ def test_bear_under_the_floorboard_no_empty_measures_or_spurious_key_changes():
     at a point that differed per instrument.
     """
     pipeline = BRLInputPipeline()
-    text = pipeline.load(FIXTURES / "The Bear Under the Floorboard Week 3.brf")
+    text = pipeline.load(FIXTURES / "The_Bear_Under_the_Floorboard_Week_3.brf")
     score = EnsembleParser().parse(text)
 
     for staff in score.staves:
-        assert len(staff.measures) == 45, f"{staff.name} has {len(staff.measures)} measures, expected 45"
+        assert len(staff.measures) == 43, f"{staff.name} has {len(staff.measures)} measures, expected 43"
         assert all(m.notes for m in staff.measures), (
             f"{staff.name} has empty measure(s): "
             f"{[m.number for m in staff.measures if not m.notes]}"
@@ -118,7 +118,7 @@ def test_bear_under_the_floorboard_no_empty_measures_or_spurious_key_changes():
     db = next(s for s in score.staves if s.name == "Double bass")
     tail_pitches = [
         n.note_name
-        for m in db.measures[37:45]
+        for m in db.measures[-8:]
         for n in m.notes
         if isinstance(n, Note)
     ]

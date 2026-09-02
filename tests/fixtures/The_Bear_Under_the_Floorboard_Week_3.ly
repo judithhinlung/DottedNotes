@@ -17,90 +17,85 @@
 pianoRightHandMusic = \relative c'' {
     \key d \major
     \time 3/4
-    \tempo 4 = 100
-    % 1-28
-    R2.*28 |
-    % 29
-    r2 a'4
-    %30
+    % 1-26
+    R2.*26 |
+    % 27
+    r2 a'4 |
+    % 28
     b2\f a8( g8) |
+    % 29
+    d2 b'4 |
+    % 30
+    c2 a8( g8) |
     % 31
-    d2 b'4 |
+    fis4 d4 b'8( c8) |
     % 32
-    c2 a8( g8) |
+    d4 b4 d4 |
     % 33
-    fis4 d4 b'8( c8) |
-    % 34
-    d4 b4 d4 |
-    % 35
     fis4 g4 d4 |
-    % 36
+    % 34
     e4.( d8) c8( b8) |
-    % 37
+    % 35
     a2 a,4 |
-    % 38
+    % 36
     b2\mf a8( g8) |
-    % 39
+    % 37
     d2 b'4 |
-    % 40
+    % 38
     c2 a8( g8) |
-    % 41
+    % 39
     fis4 d4 b'8( c8) |
-    % 42
+    % 40
     d4 b4 d4 |
-    % 43
+    % 41
     e4 c4 b4 |
-    % 44
+    % 42
     a2 b8( c8) |
-    % 45
-     d2. \bar "|." |
+    % 43
+    d2. |
 }
 
-pianoLeftHandMusic = \relative c' {
+pianoLeftHandMusic = \relative c, {
     \key d \major
     \time 3/4
     % 1-25
     R2.*25 |
     % 26
-d4\p a'4 d4 |
+    g'8\p g'8 b8 d8 g8 b8 |
     % 27
-    d,4 a'2 |
+    g,,8 g'8 b8 d8 g8 b8 |
     % 28
-    d,4 a'4 d4 |
+    g,,8\f g'8 b8 d8 g8 b8 |
     % 29
-    d,4 a'4 a,4 |
+    b,,8 d8 g8 b8 d8 g8 |
     % 30
-    g4\f d'4 g4 |
-    %31
-    b,4 d4 g4 |
-    %32
-    a,4 e'4 a4 |
-    %33
-    d,4 a4 d4 |
+    c,,8 e8 g8 c'8 e8 g8 |
+    % 31
+    d,8 fis8 a8 d8 fis8 a8 |
+    % 32
+    b,,8 dis8 fis8 b8 d8 fis8 |
+    % 33
+    c,8 e8 g8 c'8 e8 g8 |
     % 34
-    b4 fis4 b4 |
+    a,,8 a'8 c8 e8 a4 |
     % 35
-    c,4 g'4 c4 |
+    d,,,8 d'8 fis8 a8 d4 |
     % 36
-    a,4 e'4 a4 |
+    g,,,8\mf g'8 b8 d8 g8 b8 |
     % 37
-    d,4 a'4 d4 |
+    b,,8 g'8 b8 d8 g8 b8 |
     % 38
-    g,,4\mf d'4 g4 |
+    a,,8 c8 e8 a8 cis8 e8 |
     % 39
-    b,4 d4 g4 |
+    d,8 fis8 a8 d8 fis8 a8 |
     % 40
-    a,4 e4 a4 |
+    b,,8 dis8 fis8 b8 dis8 fis8 |
     % 41
-    d,,4 a'4 d4 |
+    c,8 e8 g8 c'8 e8 g8 |
     % 42
-    b4 fis4 b4 |
+    d,8 fis8 a8 d8 fis8 a8 |
     % 43
-    c,4 g'4 c4 |
-    % 44
-    d,4 a'4 d4 |
-    % 45
-    fis,4 a4 d'4 \bar "|." |
+    fis,8 a8 d8 fis8 a8 d8 |
 }
 
 violinOneMusic = \relative c'' {
@@ -115,7 +110,7 @@ violinOneMusic = \relative c'' {
     % 25
     cis2:16->\> d4:16 |
     % 26
-    d2.~ |
+    d2.~\p |
     % 27
     d2.~ |
     % 28
@@ -133,27 +128,23 @@ violinOneMusic = \relative c'' {
     % 34
     d2.~ |
     % 35
-    d2.~ |
+    d2. |
     % 36
-    d2.~ |
+    d,2.~\ppp |
     % 37
     d2. |
     % 38
-    d,2.\mp~ |
+    e2. |
     % 39
     d2. |
     % 40
-    e2. |
-    % 41
-    d2. |
-    % 42
     fis2. |
-    % 43
+    % 41
     e2. |
-    % 44
+    % 42
     d2. |
-    % 45
-    d2. \bar "|." |
+    % 43
+    d2. |
 }
 
 violinTwoMusic = \relative c' {
@@ -184,30 +175,30 @@ violinTwoMusic = \relative c' {
     % 22
     d8 cis8-. cis8( d8) r4 |
     % 23
-    d2.:16->\< |
+    ees2:16->\< d4:16 |
     % 24
-    d2.:16-. |
+    e2:16-> d4:16 |
     % 25
-    g2:16->\> fis4:16 |
-    % 26-37
-    R2.*12 |
+    g2:16->\> fis4:8 |
+    % 26-35
+    R2.*10 |
+    % 36
+    b,2.~\ppp |
+    % 37
+    b2. |
     % 38
-    b2.\mp |
-    % 39
-    b2. |
-    % 40
     c2. |
-    % 41
+    % 39
     a2. |
-    % 42
+    % 40
     b2. |
+    % 41
+    g2. |
+    % 42
+    g2. |
     % 43
-    g2. |
-    % 44
-    g2. |
-    %45
-    fis2. \bar "|." |
-    }
+    fis2. |
+}
 
 violaMusic = \relative c' {
     \key d \major
@@ -237,29 +228,29 @@ violaMusic = \relative c' {
     % 22
     d8 cis8-. cis8( d8) r4 |
     % 23
-    c,2.->\< |
+    c,2:16->\< bes4:16 |
     % 24
-    cis2.-> |
+    aes2:16-> fis4:16 |
     % 25
-    d2.->\> |
-    % 26-37
-    R2.*12 |
+    g2:16->\> g4:8 |
+    % 26-35
+    R2.*10 |
+    % 36
+    g2.~\ppp |
+    % 37
+    g2. |
     % 38
-g,2.\mp |
+    e2. |
     % 39
-g2. |
+    d'2. |
     % 40
     e2. |
     % 41
-    d'2. | |
-    % 42
-    e2. |
-    % 43
     c2. |
-    % 44
+    % 42
     a2. |
-    %45
-    d2. \bar "|." |
+    % 43
+    d2. |
 }
 
 violoncelloMusic = \relative c {
@@ -269,17 +260,15 @@ violoncelloMusic = \relative c {
     d4\p fis4 a4 |
     % 2
     bes8( a8~) a8 fis8-. bes8( a8~) |
-%3
-a8 fis8-. bes8( a8) r4 |
-    % 4
-    aes4 a4 bes4 |
+    % 3-4
+    R2.*2 |
     % 5
     bes8( d8~) d8 bes8-. aes8( a8) |
     % 6
     bes8( a8~) a4 r4 |
     % 7
     aes8 a8 bes8 fis8 a8 d,8 |
-    % 8 
+    % 8
     a'8 bes8 c8 g8 bes8 d,8 |
     % 9
     bes'4 c4 cis4 |
@@ -288,51 +277,51 @@ a8 fis8-. bes8( a8) r4 |
     % 11
     d8 cis8-. cis8( d8) r4 |
     % 12
-    d,2.\mf |
+    d,8-.\mf fis8-. a8-. d8-. a8-. fis8-. |
     % 13
-    ees2. |
+    f8-. fis8-. a8-. d8-. a8-. fis8-. |
     % 14
-    d2. |
+    d8-. fis8-. a8-. d8-. a8-. fis8-. |
     % 15
-    cis2. |
+    f4-. fis4-. g4-. |
     % 16
-    ees2 d4~ |
+    g4-. bes4-. d4-. |
     % 17
-    d2 r4 |
+    g8( fis8~) fis4 r4 |
     % 18
-    ees2. |
+    d8 a8 fis8 a8 fis8 d8 |
     % 19
-    d2. |
+    d8 fis8 a8 d,8 g8 bes8 |
     % 20
-    c2. |
+    g4-. f4-. ees4-. |
     % 21
-    ees2. |
+    cis4-. d4-. ees4-. |
     % 22
-    c2. |
+    d4-. d4-. r4 |
     % 23
-    d2.->\< |
+    c,2:16->\< bes4 |
     % 24
-    e2.-> |
+    aes2-> g4 |
     % 25
-    d2.->\> |
-    % 26-37
-    R2.*12 |
+    g2:16->\> g4:8 |
+    % 26-35
+    R2.*10 |
+    % 36
+    d''2.~\ppp |
+    % 37
+    d2. |
     % 38
-    d2.\mp~ |
+    c2. |
     % 39
     d2. |
     % 40
     c2. |
     % 41
-    d2. |
-    % 42
-    c2. |
-    % 43
     e2. |
-    % 44
+    % 42
     d2. |
-    % 45
-    d2. \bar "|." |
+    % 43
+    d2. |
 }
 
 doubleBassMusic = \relative c, {
@@ -340,21 +329,21 @@ doubleBassMusic = \relative c, {
     \time 3/4
     \mark \markup { "pizz" }
     % 1
-    d2.\p |
+    d4\p d'4 a4 |
     % 2
-    d'2.~ |
+    fis4 a4 d4 |
     % 3
-    d4 fis,4 r4 |
+    a4 fis4 a4 |
     % 4
-    d2. |
+    f4 fis4 g4 |
     % 5
-    g2 f4~ |
+    g4 bes4 d4 |
     % 6
-    f4 fis4 r4 |
+    g8( fis8~) fis4 r4 |
     % 7
-    f4. d4. |
+    d,4 g8 a4 a8 |
     % 8
-    fis4. d4. |
+    fis4 fis8 g4 bes8 |
     % 9
     g4 a4 bes4 |
     % 10
@@ -362,54 +351,52 @@ doubleBassMusic = \relative c, {
     % 11
     g4 fis4 r4 |
     % 12
-    \mark \markup { "arco" }
-    d2.~ |
+    \mark \markup { "arco" } d4-. r4 r4 |
     % 13
-  d2.~ |
+    a'4-. r4 r4 |
     % 14
-    d2.~ |
+    d4-. r4 r4 |
     % 15
-    d2.~
-    %16
-    d2.~
+    a4-. r4 r4 |
+    % 16
+    d,4-. r4 r4 |
     % 17
-    d2 r4 |
+    a'4-. r4 r4 |
     % 18
-    fis2.~ |
+    d,4. a'4. |
     % 19
-    fis2. |
+    d,4. g4. |
     % 20
-g2.~ |
-% 21
-g2. |
-% 22
-fis2 r4 |
-% 23
-d2.->\< |
-% 24
-e2.-> |
-% 25
-d2.->\> |
-% 26-37
-    
-    r2.*12
+    cis2. |
+    % 21
+    e2. |
+    % 22
+    d2 r4 |
+    % 23
+    cis2.->\< |
+    % 24
+    aes2.-> |
+    % 25
+    g2.->\> |
+    % 26-35
+    R2.*10 |
+    % 36
+    g'2.~\ppp |
+    % 37
+    g2. |
     % 38
-    g2.\mp~ |
+    a2. |
     % 39
     g2. |
     % 40
-    a2. |
-    % 41
-    g2. |
-    % 42
     e2. |
-    % 43
+    % 41
     a2. |
-    % 44
+    % 42
     g2. |
-    % 45
-    fis2. \bar "|." |
-    }
+    % 43
+    fis2. |
+}
 
 
 \score {
@@ -428,7 +415,7 @@ d2.->\> |
       instrumentName = "Piano left hand"
       shortInstrumentName = "pl"
     } {
-      \clef treble
+      \clef bass
       \set Staff.instrumentName = "Piano left hand"
       \set Staff.midiInstrument = "acoustic grand"
       \pianoLeftHandMusic
