@@ -70,6 +70,32 @@ document.addEventListener('DOMContentLoaded', () => {
     // MIDI Player elements
     const midiPlayerContainer = document.getElementById('midi-player-container');
     const midiPlayer = document.getElementById('midi-player');
+    const midiPlayToggle = document.getElementById('midi-play-toggle');
+    const midiPlayToggleLabel = document.getElementById('midi-play-toggle-label');
+
+    // Keeps the accessible Play/Pause button in sync with actual
+    // <midi-player> playback state. The button is disabled whenever there's
+    // no source loaded, so .start()/.stop() (called only from the click
+    // handler below) are never reachable with nothing to play.
+    function setMidiPlayingState(isPlaying, hasSource = !!midiPlayer.src) {
+        midiPlayToggle.setAttribute('aria-pressed', String(isPlaying));
+        midiPlayToggleLabel.textContent = isPlaying ? 'Pause' : 'Play';
+        midiPlayToggle.disabled = !hasSource;
+    }
+
+    midiPlayToggle.addEventListener('click', () => {
+        if (midiPlayToggle.getAttribute('aria-pressed') === 'true') {
+            midiPlayer.stop();
+        } else {
+            midiPlayer.start();
+        }
+    });
+
+    // html-midi-player fires these on both user- and library-driven
+    // start/stop (including natural end-of-playback), so listening here
+    // keeps the button correct beyond just the click handler above.
+    midiPlayer.addEventListener('start', () => setMidiPlayingState(true));
+    midiPlayer.addEventListener('stop', () => setMidiPlayingState(false));
 
     function updateSectionState(section, state, details = {}) {
         if (section === 'validation') {
@@ -254,6 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 midiPlayer.src = `/api/jobs/${jobId}/parts/${val}/midi`;
             }
+            setMidiPlayingState(false);
         }
     });
 
@@ -444,6 +471,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset MIDI player state
         midiPlayerContainer.classList.add('hidden');
         midiPlayer.src = '';
+        setMidiPlayingState(false);
 
         // XMLHttpRequest (not fetch) is used here specifically because it's
         // the only option that exposes upload progress events -- fetch has
@@ -506,6 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset MIDI player state
         midiPlayerContainer.classList.add('hidden');
         midiPlayer.src = '';
+        setMidiPlayingState(false);
 
         announceStatus(`Conversion failed. Error details: ${message}`, 'assertive');
     }
@@ -537,6 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
             midiPlayerContainer.classList.add('hidden');
             midiPlayer.src = '';
         }
+        setMidiPlayingState(false);
 
         // 1. Compile status check and state transitions
         let badgeText = 'Success';
@@ -746,6 +776,7 @@ document.addEventListener('DOMContentLoaded', () => {
             midiPlayerContainer.classList.add('hidden');
             midiPlayer.src = '';
         }
+        setMidiPlayingState(false);
 
         let badgeText = 'Success';
         let badgeClass = 'success';

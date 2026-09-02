@@ -704,6 +704,22 @@ footer {
     outline-offset: 2px;
 }
 
+.btn-secondary.midi-play-btn {
+    padding: 0.5rem 1rem;
+    font-size: 0.95rem;
+    margin-bottom: 0.75rem;
+}
+
+.btn-secondary.midi-play-btn[aria-pressed="true"] {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+}
+
+.btn-secondary.midi-play-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* MIDI Player Styling */
 .midi-player-container {
     margin-bottom: 1.5rem;
@@ -730,12 +746,11 @@ footer {
     color: var(--text-primary);
 }
 
+/* html-midi-player@1.5.0's internal play button isn't accessible (no
+   keyboard/AT-friendly semantics inside its shadow DOM); hidden here and
+   replaced by the real #midi-play-toggle button in index.html. */
 #midi-player::part(play-button) {
-    color: var(--accent-blue);
-}
-
-#midi-player::part(play-button):hover {
-    color: var(--accent-purple);
+    display: none;
 }
 
 #midi-player::part(seek-bar) {
