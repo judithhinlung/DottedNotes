@@ -7675,6 +7675,25 @@ This is not something DottedNotes can solve generically -- doing so requires rea
 
 ---
 
+### [ ] S11c-20: Choral-ensemble parsing can't recover a mid-piece tacet-voice omission; §37.1(j) interval reading direction not wired
+
+**Why:** Two scope decisions made while implementing S11c-12 (§37.1 choral-ensemble format), documented here rather than silently left as gaps:
+
+1. **Tacet-voice omission (§37.1(c)) is render-only.** `_render_choral_ensemble()` correctly omits a voice's word/music lines from a parallel where it has nothing to sing (reusing the same `active_staff_indices()`/`rest_only_grid` mechanism as §33's ENSEMBLE tacet omission). But `parse_choral_ensemble()` (`parser/choral_ensemble_parser.py`) has no way to know how many measures an *omitted* voice should have a synthesized rest for during that stretch -- it would need to infer the omitted parallel's measure count from a *different* voice's content (e.g. counting `BAR_LINE` tokens in whichever voice was present) and back-fill whole-measure rests for the missing voice to keep every staff's measure list aligned. Today, a tacet-voice omission produces a per-voice measure-count mismatch, which the parser detects and raises on explicitly (`test_choral_ensemble_omits_tacet_voice_from_its_own_parallel` in `tests/test_choral_ensemble.py` covers exactly this) rather than silently misaligning voices -- but round-tripping real choral music with tacet stretches doesn't work yet.
+2. **§37.1(j) reading direction not wired.** *"Intervals and in-accords are read downward in soprano and alto parts and upward in tenor and bass parts."* This is voice-*type*-dependent (unlike §33.4.2's ensemble "always upward" rule, or the plain per-clef convention `BrailleParser._apply_interval()` already implements via `self._current_hand`). `parse_choral_ensemble()` currently parses every voice's music line through a plain `BrailleParser()` instance with no per-voice direction override, so it inherits whatever `_apply_interval()`'s existing clef/hand-based fallback produces -- correct only by coincidence, not because the voice-type rule is implemented. Likely low-impact in practice (choral writing is predominantly single notes per voice, not chords/intervals within one vocal line), but not correct as-is.
+
+**Steps:**
+1. For tacet-voice support: when building each voice's music-line stream in `parse_choral_ensemble()`, track which parallels each voice was absent from (comparing the set of identifiers seen in each music block against the full voice set established across the piece), count that parallel's measure span from a present voice's `BAR_LINE` tokens, and splice in that many synthesized whole-measure `Rest`s for the absent voice at the correct position.
+2. For §37.1(j): give `BrailleParser` (or a thin wrapper used only by `choral_ensemble_parser.py`) an explicit interval-direction override parameter, and pass "descending" for soprano/alto voices and "ascending" for tenor/bass, determined from `get_instrument_family`/voice-name matching rather than clef or ensemble-upward inference.
+3. Add regression tests: a tacet stretch in the middle of a piece (not just at the end) round-trips with the correct rest-filled measure count; a chord/interval written in an alto part resolves to the same absolute pitches as a chord/interval written (mirrored) in a tenor part, confirming direction is voice-type-driven, not clef-driven.
+
+**Definition of Done:**
+- [ ] A mid-piece tacet-voice omission round-trips correctly (the omitted voice's measures are filled with rests, staying aligned with the other voices).
+- [ ] Soprano/alto vs. tenor/bass interval/in-accord reading direction is applied per §37.1(j), not inherited from clef or ensemble-upward defaults.
+- [ ] `pytest tests/` passes with no regressions.
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

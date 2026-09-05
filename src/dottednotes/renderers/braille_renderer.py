@@ -614,6 +614,7 @@ class TranscriptionMode(Enum):
     ENSEMBLE = auto()
     VOCAL_SOLO = auto()
     SOLO_WITH_ACCOMPANIMENT = auto()
+    CHORAL_ENSEMBLE = auto()
 
 
 def _item_has_ensemble_resolved_chord(item: Any) -> bool:
@@ -765,6 +766,17 @@ class BrailleRenderer:
             )
         ):
             return TranscriptionMode.SOLO_WITH_ACCOMPANIMENT
+        # BANA §37.1: a vocal ensemble (2+ all-vocal staves, no
+        # accompaniment) is its own "expanded bar-over-bar format" --
+        # word lines then music lines per parallel -- never the generic
+        # §33 ENSEMBLE layout. Checked before the isinstance(OrchestraScore)
+        # branch below for the same reason as SOLO_WITH_ACCOMPANIMENT above.
+        if (
+            len(score.staves) >= 2
+            and all(get_instrument_family(s.name) == InstrumentFamily.VOCAL for s in score.staves)
+            and any(s.lyrics for s in score.staves)
+        ):
+            return TranscriptionMode.CHORAL_ENSEMBLE
         # BANA §35.1: a lone vocal staff with lyrics is its own dedicated
         # line-by-line format (words at cell 1, music at cell 3), never the
         # generic instrumental SINGLE_LINE layout -- checked before the
@@ -894,6 +906,10 @@ class BrailleRenderer:
             and score.staves[0].lyrics
         ):
             skip_staff_indices = frozenset({0})
+        elif mode == TranscriptionMode.CHORAL_ENSEMBLE:
+            skip_staff_indices = frozenset(
+                i for i, staff in enumerate(score.staves) if staff.lyrics
+            )
 
         measure_repeat_originals: dict[tuple[int, int], list] = {}
         if self.compression_level != "none" and self.full_measure_repeat != "off":
@@ -908,6 +924,8 @@ class BrailleRenderer:
             return self._render_vocal_solo(score)
         elif mode == TranscriptionMode.SOLO_WITH_ACCOMPANIMENT:
             return self._render_solo_with_accompaniment(score)
+        elif mode == TranscriptionMode.CHORAL_ENSEMBLE:
+            return self._render_choral_ensemble(score, rest_only_grid)
         else:
             return self._render_single_line(score)
 
@@ -1226,6 +1244,160 @@ class BrailleRenderer:
             idx += fit_size
 
         return "\n".join(lines) + "\n"
+
+    def _render_choral_ensemble(self, score: Score, rest_only_grid: list[list[bool]]) -> str:
+        """BANA §37.1 "Expanded Bar-over-Bar Format": a vocal ensemble
+        parallel with all word lines given first, then all music lines
+        (never interleaved per staff the way §33's ENSEMBLE format is).
+        Word lines begin at cell 1 (run-overs at cell 5); music lines begin
+        at cell 3 (run-overs at cell 5) -- §37.1(d)/(e). Word-line content
+        (shared-vs-per-voice) is decided by `_build_choral_word_lines`
+        (S11c-13/S11c-14)."""
+        lines = []
+        if score.title:
+            lines.append(center_line(encode_literary_braille(score.title), self.line_width))
+
+        first_staff = score.staves[0]
+        signature_parts = []
+        if first_staff.key_signature:
+            signature_parts.append(first_staff.key_signature.to_braille())
+        if first_staff.time_signature:
+            signature_parts.append(first_staff.time_signature.to_braille())
+        tempo_brl = first_staff.tempo.to_braille() if first_staff.tempo else ""
+        sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
+        if sig_line:
+            # §37 has no §33.2 instrument-list header to align a signature
+            # line's indent against (unlike ENSEMBLE's cell-8 convention);
+            # cell 9 matches the general solo/vocal signature placement
+            # (S11c-2) absent a more specific citation for choral ensembles.
+            lines.append('⠀' * 8 + sig_line)
+
+        n_measures = len(first_staff.measures)
+        n_staves = len(score.staves)
+        idx = 0
+        prev_notes: list[Optional[Note]] = [None] * n_staves
+        syllables_remaining = [list(staff.lyrics) for staff in score.staves]
+
+        def active_staff_indices(group_size: int) -> list[int]:
+            # BANA §37.1(c): "A part that has rests throughout the music
+            # included in a parallel is omitted in that parallel" -- same
+            # rule and mechanism as §33.1's ensemble tacet-staff omission.
+            active = [
+                s_idx for s_idx in range(n_staves)
+                if any(
+                    not rest_only_grid[s_idx][m_idx]
+                    for m_idx in range(idx, idx + group_size)
+                )
+            ]
+            return active or list(range(n_staves))
+
+        def render_candidate(group_size: int, active: list[int]):
+            slices = []
+            prevs = []
+            for s_idx in active:
+                staff = score.staves[s_idx]
+                # §37.1(i): "The first note of every music line requires an
+                # octave mark" -- already exactly what render_measure_slice
+                # gives by default (is_start at k==0, i.e. the first
+                # measure of this line/parallel), with no extra forcing
+                # needed beyond the reader's own octave_mark_every_measure
+                # preference.
+                slice_strs, tmp_prev = render_measure_slice(
+                    staff.measures, idx, group_size, prev_notes[s_idx], staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                )
+                slices.append(slice_strs)
+                prevs.append(tmp_prev)
+
+            prefixes = ensemble_abbrev_prefixes(
+                [score.staves[s].name for s in active],
+                ["".join(slice_strs) for slice_strs in slices],
+            )
+            max_prefix_len = max(len(p) for p in prefixes)
+            measure_widths = [
+                max(len(slices[k][m]) for k in range(len(active))) + 2
+                for m in range(group_size - 1)
+            ]
+
+            music_lines = []
+            for k in range(len(active)):
+                prefix = prefixes[k] + chr(0x2800) * (max_prefix_len - len(prefixes[k]))
+                body = "".join(
+                    pad_to_boundary(slices[k][m], measure_widths[m])
+                    for m in range(group_size - 1)
+                )
+                body += slices[k][group_size - 1]
+                # §37.1(e): music lines begin in cell 3.
+                music_lines.append(_MUSIC_LINE_MARGIN + prefix + body)
+
+            return music_lines, prevs, prefixes
+
+        while idx < n_measures:
+            group_size = 1
+            best = None
+            while idx + group_size <= n_measures:
+                active = active_staff_indices(group_size)
+                music_lines, prevs, prefixes = render_candidate(group_size, active)
+                if any(len(l) > self.line_width for l in music_lines):
+                    break
+                best = (group_size, active, music_lines, prevs, prefixes)
+                group_size += 1
+
+            if best is None:
+                active = active_staff_indices(1)
+                music_lines, prevs, prefixes = render_candidate(1, active)
+                best = (1, active, music_lines, prevs, prefixes)
+
+            fit_size, active, music_lines, prevs, prefixes = best
+
+            word_lines = self._build_choral_word_lines(
+                score, active, prefixes, fit_size, idx, syllables_remaining,
+            )
+            for wl in word_lines:
+                lines.extend(wrap_run_over_line(wl, self.line_width, indent_cells=4))
+            for ml in music_lines:
+                lines.extend(wrap_run_over_line(ml, self.line_width, indent_cells=4))
+
+            for k, s_idx in enumerate(active):
+                prev_notes[s_idx] = prevs[k]
+            idx += fit_size
+
+        return "\n".join(lines) + "\n"
+
+    def _build_choral_word_lines(
+        self,
+        score: Score,
+        active: list[int],
+        music_line_prefixes: list[str],
+        fit_size: int,
+        idx: int,
+        syllables_remaining: list[list[str]],
+    ) -> list[str]:
+        """BANA §37.3 baseline: one identified word line per active voice
+        (S11c-13 adds the §37.2 shared-single-line case on top of this).
+        `music_line_prefixes` are reused as-is: §37.1(f)'s word-line and
+        music-line identifiers use the same abbreviation, just with a
+        mandatory trailing space (word lines) instead of a conditional
+        dot-3-only gap (music lines)."""
+        def _with_mandatory_space(prefix: str) -> str:
+            stripped = prefix.rstrip(chr(0x2800))
+            if not stripped.endswith('⠄'):
+                stripped += '⠄'
+            return stripped + chr(0x2800)
+
+        word_prefixes = [_with_mandatory_space(prefix) for prefix in music_line_prefixes]
+        max_len = max(len(p) for p in word_prefixes)
+        word_prefixes = [p + chr(0x2800) * (max_len - len(p)) for p in word_prefixes]
+
+        word_lines = []
+        for k, s_idx in enumerate(active):
+            staff = score.staves[s_idx]
+            n_slots = len(group_pitched_elements_by_slur(staff.measures[idx:idx + fit_size]))
+            consumed = syllables_remaining[s_idx][:n_slots]
+            syllables_remaining[s_idx] = syllables_remaining[s_idx][n_slots:]
+            lyric_str = encode_lyric_line(consumed) if consumed else ""
+            word_lines.append(word_prefixes[k] + lyric_str)
+        return word_lines
 
     def _render_piano(self, score: Score) -> str:
         lines = []
