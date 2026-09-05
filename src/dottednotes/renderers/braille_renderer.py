@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Union, Any
@@ -13,7 +14,9 @@ from dottednotes.models.in_accord import InAccord
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
 from dottednotes.bana_symbols import TABLE_29_ENGLISH
 from dottednotes.exceptions import BrailleParseError
-from dottednotes.parser.ensemble_parser import group_pitched_elements_by_slur, _LYRIC_PUNCTUATION
+from dottednotes.parser.ensemble_parser import (
+    group_pitched_elements_by_slur, _LYRIC_PUNCTUATION, _ACCENT_MODIFIERS,
+)
 from dottednotes.parser.input_pipeline import ASCII_TO_DOTS
 
 _HAIRPIN_END_LEVELS = (DynamicLevel.CRESCENDO_END, DynamicLevel.DECRESCENDO_END)
@@ -144,15 +147,51 @@ def encode_literary_braille(text: str) -> str:
     return encoded + '⠲'
 
 
+_REVERSE_ACCENT_MODIFIERS: dict[str, tuple[str, str]] = {
+    mark: (prefix, selector)
+    for prefix, group in _ACCENT_MODIFIERS.items()
+    for selector, mark in group.items()
+}
+
+
+def _encode_accented_letter(char: str, all_caps: bool) -> str:
+    """Encode one accented letter (e.g. "é", "Ö") to its UEB 4.2
+    accent-modifier prefix + selector + base-letter cells -- the inverse
+    of `ensemble_parser._decode_accented_letter()`, built from that same
+    `_ACCENT_MODIFIERS` table (so it covers exactly what that decoder
+    covers, not a separate guess). Per UEB 4.2.2, a capitalized accented
+    letter places the capital indicator *before* the accent prefix, not
+    where a plain letter's capital indicator would go."""
+    decomposed = unicodedata.normalize('NFD', char)
+    if len(decomposed) != 2 or decomposed[1] not in _REVERSE_ACCENT_MODIFIERS:
+        raise BrailleParseError(
+            f"Cannot encode lyric character {char!r} to braille -- not a "
+            "plain letter, basic punctuation, or a UEB 4.2 accented letter "
+            "this codebase's accent table covers."
+        )
+    base, mark = decomposed
+    if base.upper() not in ASCII_TO_DOTS:
+        raise BrailleParseError(f"Cannot encode lyric character {char!r} to braille.")
+    prefix, selector = _REVERSE_ACCENT_MODIFIERS[mark]
+    result = []
+    if char.isupper() and not all_caps:
+        result.append('⠠')
+    result.append(chr(0x2800 + ASCII_TO_DOTS[prefix]))
+    result.append(chr(0x2800 + ASCII_TO_DOTS[selector]))
+    result.append(chr(0x2800 + ASCII_TO_DOTS[base.upper()]))
+    return ''.join(result)
+
+
 def _encode_lyric_word(word: str) -> str:
     """Encode one lyric word to BANA §35.1.1 braille cells: capital
-    indicator(s), letters, hyphens, and the UEB 7.1/7.6.6 punctuation
-    `_LYRIC_PUNCTUATION` (in `ensemble_parser.py`) already decodes. This is
-    that decoder's inverse, so it only covers what it covers -- accented
-    letters, quotation marks, and numerals (which `parse_lyrics()` also
-    decodes) are not emitted here, since lyrics DottedNotes itself renders
-    (from MusicXML/LilyPond import) are plain ASCII text in practice;
-    extend this if that changes."""
+    indicator(s), letters, hyphens, UEB 4.2 accented letters (BANA
+    §35.1.1(d): "foreign words in an English language context"), and the
+    UEB 7.1/7.6.6 punctuation `_LYRIC_PUNCTUATION` (in
+    `ensemble_parser.py`) already decodes. This is that decoder's inverse,
+    so it only covers what it covers -- quotation marks and numerals
+    (which `parse_lyrics()` also decodes) are not emitted here, since
+    those are rare in the plain-text lyrics DottedNotes itself renders
+    (from MusicXML/LilyPond import); extend this if that changes."""
     reverse_punctuation = {v: k for k, v in _LYRIC_PUNCTUATION.items()}
     letters_only = [c for c in word if c.isalpha()]
     all_caps = len(letters_only) >= 2 and all(c.isupper() for c in letters_only)
@@ -161,10 +200,21 @@ def _encode_lyric_word(word: str) -> str:
     if all_caps:
         result.append('⠠⠠')
     for char in word:
-        if char.isalpha():
+        # MusicXML/LilyPond sources routinely spell a contraction apostrophe
+        # as the Unicode "smart" right single quotation mark (U+2019, e.g.
+        # "sagen's") rather than a plain ASCII "'" -- treated the same as
+        # a plain apostrophe here (BANA's single apostrophe cell, dot 3),
+        # since a genuine closing single quotation mark (which decodes
+        # differently, via the two-cell `,0` sign) is comparatively rare
+        # in song lyrics.
+        if char == '’':
+            char = "'"
+        if char.isalpha() and char.upper() in ASCII_TO_DOTS:
             if not all_caps and char.isupper():
                 result.append('⠠')
             result.append(chr(0x2800 + ASCII_TO_DOTS[char.upper()]))
+        elif char.isalpha():
+            result.append(_encode_accented_letter(char, all_caps))
         elif char == '-':
             result.append(chr(0x2800 + ASCII_TO_DOTS['-']))
         elif char in reverse_punctuation:
@@ -172,8 +222,8 @@ def _encode_lyric_word(word: str) -> str:
         else:
             raise BrailleParseError(
                 f"Cannot encode lyric character {char!r} to braille -- only "
-                "letters, hyphens, and basic UEB 7.1/7.6.6 punctuation "
-                "(,.;:!') are supported."
+                "letters, hyphens, UEB 4.2 accented letters, and basic UEB "
+                "7.1/7.6.6 punctuation (,.;:!') are supported."
             )
     return ''.join(result)
 
@@ -484,6 +534,50 @@ def render_measure_slice(
     return rendered, curr_prev
 
 
+def _strip_note_item_for_outline(item) -> None:
+    """Recursively clear every per-note marking BANA §29.8 excludes from a
+    keyboard accompaniment's solo-outline line ("nuances, slurs, word-sign
+    expressions, or ... lyrics") from `item` in place, leaving only what
+    §29.8 says the outline keeps: "notes, ties, rests, and other essential
+    marks such as fermatas." """
+    if isinstance(item, Tuplet):
+        for sub in item.items:
+            _strip_note_item_for_outline(sub)
+    elif isinstance(item, InAccord):
+        for part in item.parts:
+            for sub in part:
+                _strip_note_item_for_outline(sub)
+    elif isinstance(item, Chord):
+        for note in item.notes:
+            _strip_note_item_for_outline(note)
+    elif isinstance(item, Note):
+        item.dynamics = []
+        item.articulations = []
+        item.ornaments = []
+        item.grace_note = None
+        item.slur_start = False
+        item.slur_end = False
+        item.slur_bracket_open = False
+        item.slur_bracket_close = False
+        item.fingerings = []
+    elif isinstance(item, Rest):
+        item.pedal_sustain = None
+
+
+def build_solo_outline_measures(measures: list[Measure]) -> list[Measure]:
+    """Build a BANA §29.8 solo-outline projection of `measures`: a deep
+    copy with every note/chord's dynamics, articulations, ornaments, grace
+    notes, slurs, and fingerings cleared (ties and fermatas survive
+    untouched), for use as the outline line placed above a keyboard
+    accompaniment's right hand."""
+    import copy as _copy
+    stripped = _copy.deepcopy(measures)
+    for measure in stripped:
+        for note_item in measure.notes:
+            _strip_note_item_for_outline(note_item)
+    return stripped
+
+
 class TranscriptionMode(Enum):
     """Which of BANA's braille layouts a score gets transcribed in. This is
     an explicit, named result of structural detection (staff count/family/
@@ -519,6 +613,7 @@ class TranscriptionMode(Enum):
     PIANO = auto()
     ENSEMBLE = auto()
     VOCAL_SOLO = auto()
+    SOLO_WITH_ACCOMPANIMENT = auto()
 
 
 def _item_has_ensemble_resolved_chord(item: Any) -> bool:
@@ -641,11 +736,35 @@ class BrailleRenderer:
         # "PianoStaff" as an OrchestraScore, so a 2-staff piano score must
         # not automatically fall into ensemble layout.
         from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
-        is_piano = len(score.staves) == 2 and any(
+        # `all`, not `any`: a genuine 2-hand piano solo has *both* staves
+        # KEYBOARD_HARP. A solo instrument plus a single-staff keyboard
+        # reduction (one non-keyboard staff + one keyboard staff) is BANA
+        # §29.8's solo-with-accompaniment shape instead (checked below),
+        # not a piano solo -- treating it as PIANO would read the solo
+        # instrument's own staff as if it were a piano right hand.
+        is_piano = len(score.staves) == 2 and all(
             get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP for s in score.staves
         )
         if is_piano:
             return TranscriptionMode.PIANO
+        # BANA §29.8: a solo (vocal or instrumental) part with a keyboard
+        # accompaniment is transcribed as two separate blocks -- the solo
+        # part transcribed individually, the keyboard part transcribed
+        # separately with a solo-outline line above the right hand -- never
+        # as one flat ENSEMBLE parallel. Checked before the
+        # isinstance(OrchestraScore) / staff-count ENSEMBLE branch below
+        # since EnsembleParser always returns an OrchestraScore, which
+        # would otherwise force ENSEMBLE first for exactly this shape (the
+        # bug this mode exists to fix).
+        if (
+            len(score.staves) in (2, 3)
+            and get_instrument_family(score.staves[0].name) != InstrumentFamily.KEYBOARD_HARP
+            and all(
+                get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP
+                for s in score.staves[1:]
+            )
+        ):
+            return TranscriptionMode.SOLO_WITH_ACCOMPANIMENT
         # BANA §35.1: a lone vocal staff with lyrics is its own dedicated
         # line-by-line format (words at cell 1, music at cell 3), never the
         # generic instrumental SINGLE_LINE layout -- checked before the
@@ -758,20 +877,28 @@ class BrailleRenderer:
 
         mode = self._detect_transcription_mode(score)
 
-        measure_repeat_originals: dict[tuple[int, int], list] = {}
-        # Never compress a vocal solo's measures into a measure-repeat sign:
-        # the sign has no discrete notes for §35.1's "syllables and notes
-        # must always be exactly paired" rule to align lyrics against, and
-        # a musically-identical measure sung to different words (a very
-        # common case -- e.g. a repeated melodic phrase with new lyrics)
-        # would be actively wrong to collapse.
-        if (
-            self.compression_level != "none"
-            and self.full_measure_repeat != "off"
-            and mode != TranscriptionMode.VOCAL_SOLO
+        from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
+
+        # Never compress a lyric-bearing staff's measures into a
+        # measure-repeat sign: the sign has no discrete notes for §35.1's
+        # "syllables and notes must always be exactly paired" rule to align
+        # lyrics against, and a musically-identical measure sung to
+        # different words (a very common case -- e.g. a repeated melodic
+        # phrase with new lyrics) would be actively wrong to collapse.
+        skip_staff_indices: frozenset[int] = frozenset()
+        if mode == TranscriptionMode.VOCAL_SOLO:
+            skip_staff_indices = frozenset({0})
+        elif (
+            mode == TranscriptionMode.SOLO_WITH_ACCOMPANIMENT
+            and get_instrument_family(score.staves[0].name) == InstrumentFamily.VOCAL
+            and score.staves[0].lyrics
         ):
+            skip_staff_indices = frozenset({0})
+
+        measure_repeat_originals: dict[tuple[int, int], list] = {}
+        if self.compression_level != "none" and self.full_measure_repeat != "off":
             # Pass 2: Measure repeat compression pass
-            measure_repeat_originals = self._compress_measure_repeats(score)
+            measure_repeat_originals = self._compress_measure_repeats(score, skip_staff_indices)
 
         if mode == TranscriptionMode.ENSEMBLE:
             return self._render_ensemble(score, rest_only_grid, measure_repeat_originals)
@@ -779,6 +906,8 @@ class BrailleRenderer:
             return self._render_piano(score)
         elif mode == TranscriptionMode.VOCAL_SOLO:
             return self._render_vocal_solo(score)
+        elif mode == TranscriptionMode.SOLO_WITH_ACCOMPANIMENT:
+            return self._render_solo_with_accompaniment(score)
         else:
             return self._render_single_line(score)
 
@@ -946,6 +1075,158 @@ class BrailleRenderer:
 
         return "\n".join(lines) + "\n"
 
+    def _render_solo_with_accompaniment(self, score: Score) -> str:
+        """BANA §29.8: "the solo or instrumental parts are transcribed
+        individually, and the accompaniment is transcribed separately" --
+        two blocks, not one ENSEMBLE parallel. `score.staves[0]` is the
+        solo (vocal or instrumental); `score.staves[1:]` are 1-2 keyboard
+        staves (right hand, and optionally left hand)."""
+        from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
+
+        solo_staff = score.staves[0]
+        keyboard_staves = score.staves[1:]
+        if len(keyboard_staves) not in (1, 2):
+            raise ValueError(
+                "BANA §29.8 keyboard-accompaniment rendering expects 1 or 2 "
+                f"keyboard staves after the solo staff, got {len(keyboard_staves)}."
+            )
+
+        solo_score = Score(title=score.title)
+        solo_score.add_staff(solo_staff)
+        if get_instrument_family(solo_staff.name) == InstrumentFamily.VOCAL and solo_staff.lyrics:
+            solo_block = self._render_vocal_solo(solo_score)
+        else:
+            solo_block = self._render_single_line(solo_score)
+
+        rh_staff = keyboard_staves[0]
+        lh_staff = keyboard_staves[1] if len(keyboard_staves) > 1 else None
+        if lh_staff is not None and len(lh_staff.measures) != len(rh_staff.measures):
+            raise ValueError(
+                "BANA §29.8 keyboard-accompaniment rendering expects the right- "
+                f"and left-hand staves to share the same measure count, got "
+                f"{len(rh_staff.measures)} and {len(lh_staff.measures)}."
+            )
+        if len(rh_staff.measures) != len(solo_staff.measures):
+            raise ValueError(
+                "BANA §29.8 keyboard-accompaniment rendering expects the solo "
+                f"and accompaniment staves to share the same measure count, got "
+                f"{len(solo_staff.measures)} and {len(rh_staff.measures)}."
+            )
+        outline_measures = build_solo_outline_measures(solo_staff.measures)
+        accompaniment_block = self._render_accompaniment_with_outline(rh_staff, lh_staff, outline_measures)
+
+        # Two separate transcriptions (§29.8), not one parallel -- a single
+        # blank line marks the section break, matching the blank-line-
+        # before-a-new-heading convention already used elsewhere (S11c-2).
+        return solo_block.rstrip("\n") + "\n\n" + accompaniment_block
+
+    def _render_accompaniment_with_outline(
+        self, rh_staff: Staff, lh_staff: Optional[Staff], outline_measures: list[Measure],
+    ) -> str:
+        """BANA §29.8's keyboard-accompaniment block: a solo-outline line
+        (bare ⠜, carrying the measure number) above the right hand (⠨⠜),
+        with the left hand (⠸⠜, if present) below."""
+        lines = []
+        signature_parts = []
+        if rh_staff.key_signature:
+            signature_parts.append(rh_staff.key_signature.to_braille())
+        if rh_staff.time_signature:
+            signature_parts.append(rh_staff.time_signature.to_braille())
+        tempo_brl = rh_staff.tempo.to_braille() if rh_staff.tempo else ""
+        sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
+        if sig_line:
+            lines.append('⠀' * 8 + sig_line)
+
+        rh_key_changes = key_signature_changes_by_index(
+            rh_staff.measures, rh_staff.key_signature.sharps_or_flats if rh_staff.key_signature else 0
+        )
+        lh_key_changes = key_signature_changes_by_index(
+            lh_staff.measures, lh_staff.key_signature.sharps_or_flats if lh_staff.key_signature else 0
+        ) if lh_staff is not None else {}
+        outline_key_changes = key_signature_changes_by_index(
+            outline_measures, rh_staff.key_signature.sharps_or_flats if rh_staff.key_signature else 0
+        )
+
+        idx = 0
+        n_measures = len(rh_staff.measures)
+        prev_rh = prev_lh = prev_outline = None
+
+        while idx < n_measures:
+            group_size = 1
+            best = None
+
+            while idx + group_size <= n_measures:
+                rh_strs, tmp_rh = render_measure_slice(
+                    rh_staff.measures, idx, group_size, prev_rh, rh_staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=rh_key_changes,
+                )
+                lh_strs, tmp_lh = (render_measure_slice(
+                    lh_staff.measures, idx, group_size, prev_lh, lh_staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=lh_key_changes,
+                ) if lh_staff is not None else ([], None))
+                outline_strs, tmp_outline = render_measure_slice(
+                    outline_measures, idx, group_size, prev_outline, rh_staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=outline_key_changes,
+                )
+
+                m_num = self._display_measure_number(rh_staff.measures, idx)
+                test_outline = self._build_outline_line_from_strings(m_num, outline_strs)
+                test_rh = self._build_piano_line_from_strings(m_num, rh_strs, is_right=True, show_number=False)
+                test_lh = (
+                    self._build_piano_line_from_strings(m_num, lh_strs, is_right=False, show_number=False)
+                    if lh_staff is not None else None
+                )
+
+                fits = (
+                    len(test_outline) <= self.line_width
+                    and len(test_rh) <= self.line_width
+                    and (test_lh is None or len(test_lh) <= self.line_width)
+                )
+                if fits:
+                    best = (group_size, test_outline, test_rh, test_lh, tmp_rh, tmp_lh, tmp_outline)
+                    group_size += 1
+                else:
+                    break
+
+            if best is None:
+                # Force at least one measure to avoid an infinite loop.
+                rh_strs, tmp_rh = render_measure_slice(
+                    rh_staff.measures, idx, 1, prev_rh, rh_staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=rh_key_changes,
+                )
+                lh_strs, tmp_lh = (render_measure_slice(
+                    lh_staff.measures, idx, 1, prev_lh, lh_staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=lh_key_changes,
+                ) if lh_staff is not None else ([], None))
+                outline_strs, tmp_outline = render_measure_slice(
+                    outline_measures, idx, 1, prev_outline, rh_staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=outline_key_changes,
+                )
+                m_num = self._display_measure_number(rh_staff.measures, idx)
+                test_outline = self._build_outline_line_from_strings(m_num, outline_strs)
+                test_rh = self._build_piano_line_from_strings(m_num, rh_strs, is_right=True, show_number=False)
+                test_lh = (
+                    self._build_piano_line_from_strings(m_num, lh_strs, is_right=False, show_number=False)
+                    if lh_staff is not None else None
+                )
+                best = (1, test_outline, test_rh, test_lh, tmp_rh, tmp_lh, tmp_outline)
+
+            fit_size, outline_line, rh_line, lh_line, tmp_rh, tmp_lh, tmp_outline = best
+            lines.append(outline_line)
+            lines.append(rh_line)
+            if lh_line is not None:
+                lines.append(lh_line)
+            prev_rh, prev_lh, prev_outline = tmp_rh, tmp_lh, tmp_outline
+            idx += fit_size
+
+        return "\n".join(lines) + "\n"
+
     def _render_piano(self, score: Score) -> str:
         lines = []
         # Title
@@ -1022,10 +1303,19 @@ class BrailleRenderer:
 
         return "\n".join(lines) + "\n"
 
-    def _build_piano_line_from_strings(self, measure_num: int, measure_strs: list[str], is_right: bool) -> str:
-        if self.show_measure_numbers:
-            num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(measure_num))
+    def _build_piano_line_from_strings(
+        self, measure_num: int, measure_strs: list[str], is_right: bool, show_number: bool = True,
+    ) -> str:
+        num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(measure_num))
+        if self.show_measure_numbers and show_number:
             prefix = num_str + '⠀'
+        elif self.show_measure_numbers and not show_number:
+            # BANA §29.8: in a keyboard-accompaniment-with-outline layout,
+            # "the marginal measure number is placed in [the outline] line
+            # instead of in the right-hand line" -- both hands still need
+            # blank padding of the width the number would otherwise have
+            # taken, so their content stays aligned under the outline's.
+            prefix = '⠀' * (len(num_str) + 1)
         else:
             prefix = ""
 
@@ -1040,6 +1330,26 @@ class BrailleRenderer:
             return prefix + hand_sign + music_str
         else:
             return '⠀' * len(prefix) + hand_sign + music_str
+
+    def _build_outline_line_from_strings(self, measure_num: int, measure_strs: list[str]) -> str:
+        """BANA §29.8: the solo-outline line above the right hand, marked
+        with the bare solo-outline indicator (⠜, "treated as a hand sign")
+        and carrying the measure number that would otherwise sit on the
+        right-hand line."""
+        if self.show_measure_numbers:
+            num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(measure_num))
+            prefix = num_str + '⠀'
+        else:
+            prefix = ""
+
+        hand_sign = '⠜'
+        music_str = "".join(measure_strs)
+        if music_str:
+            first_cell = music_str[0]
+            if (ord(first_cell) - 0x2800) & 0x07 != 0:
+                hand_sign += '⠄'
+
+        return prefix + hand_sign + music_str
 
     def _render_ensemble(
         self,
@@ -1339,7 +1649,9 @@ class BrailleRenderer:
                 flat.extend(self._flatten_items_raw(item.items))
         return flat
 
-    def _compress_measure_repeats(self, score: Score) -> dict[tuple[int, int], list]:
+    def _compress_measure_repeats(
+        self, score: Score, skip_staff_indices: frozenset[int] = frozenset(),
+    ) -> dict[tuple[int, int], list]:
         """Replace runs of `self.min_repeated_measures` or more consecutive
         musically-identical measures with `MeasureRepeat` signs (every
         member but the run's first). Returns a `(staff_index,
@@ -1347,7 +1659,15 @@ class BrailleRenderer:
         compresses, so a later layout pass (`_render_ensemble`, per BANA
         33.4.3) can restore a measure's real content if it turns out to
         start a new braille line -- this pass runs before line-breaking is
-        known, so it can't make that call itself."""
+        known, so it can't make that call itself.
+
+        `skip_staff_indices` excludes staves that must keep every measure's
+        real notes regardless of repetition -- e.g. a solo-with-
+        accompaniment score's lyric-bearing solo staff (BANA §29.8/S11c-9):
+        a measure-repeat sign has no discrete notes for lyrics to align
+        against, so it must never replace a texted staff's measure even
+        when the melody repeats verbatim (a very common case, since the
+        words usually differ each time)."""
         from dottednotes.models.measure_repeat import MeasureRepeat
         from dottednotes.models.in_accord import InAccord
 
@@ -1379,6 +1699,8 @@ class BrailleRenderer:
             return True
 
         for staff_idx, staff in enumerate(score.staves):
+            if staff_idx in skip_staff_indices:
+                continue
             measures = staff.measures
             n = len(measures)
             i = 0

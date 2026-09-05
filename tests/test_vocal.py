@@ -401,6 +401,27 @@ def test_vocal_solo_renderer_omits_print_hyphen_between_syllables():
     assert lines[1] == encode_lyric_line(["Holy"])
 
 
+def test_encode_lyric_line_handles_accented_letters_round_trip():
+    # BANA §35.1.1(d): "Accented letters in foreign words in an English
+    # language context" -- e.g. a German lied's "schön". Real-world
+    # regression: Schumann's Dichterliebe (tests/fixtures/
+    # dichterliebe01.musicxml) has umlauts in its German lyrics, which
+    # crashed BrailleRenderer._render_vocal_solo() the first time a real
+    # vocal+piano MusicXML fixture exercised this code path end to end.
+    encoded = encode_lyric_line(["schön", "Übung"])
+    syllables = parse_lyrics(encoded)
+    assert [s for s, _ in syllables] == ["schön", "Übung"]
+
+
+def test_encode_lyric_line_treats_smart_apostrophe_as_plain_apostrophe():
+    # MusicXML sources commonly spell a contraction apostrophe as the
+    # Unicode "smart" right single quotation mark (U+2019) rather than a
+    # plain ASCII "'" -- also a real Dichterliebe regression.
+    encoded = encode_lyric_line(["sagen’s"])
+    syllables = parse_lyrics(encoded)
+    assert [s for s, _ in syllables] == ["sagen's"]
+
+
 def test_vocal_solo_round_trips_through_parser():
     score = _vocal_solo_score()
     output = BrailleRenderer(line_width=40).render(score)
