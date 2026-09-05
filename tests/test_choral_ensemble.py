@@ -194,3 +194,76 @@ def test_choral_ensemble_does_not_compress_repeated_measure_into_measure_repeat_
     parsed = parse_choral_ensemble(output)
     assert parsed.staves[0].lyrics == sop.lyrics
     assert parsed.staves[1].lyrics == alto.lyrics
+
+
+# ---------------------------------------------------------------------------
+# S11c-13: BANA §37.2 shared word line -- one unidentified word line when
+# every active voice sings the same words, instead of S11c-14's baseline
+# one-identified-line-per-voice.
+# ---------------------------------------------------------------------------
+
+
+def _shared_lyrics_score():
+    score = Score(title="")
+    sop = Staff(name="Soprano")
+    sop.time_signature = TimeSignature(
+        dots=frozenset(), category=None, raw_brl="", numerator=4, denominator=4
+    )
+    alto = Staff(name="Alto")
+    alto.time_signature = sop.time_signature
+
+    m1 = Measure(number=1)
+    for name in ("C", "D", "E", "F"):
+        m1.add_note(_note(name, 5))
+    sop.add_measure(m1)
+    sop.lyrics = ["Sing", "a", "song", "now"]
+
+    m2 = Measure(number=1)
+    for name in ("A", "B", "C", "D"):
+        m2.add_note(_note(name, 4))
+    alto.add_measure(m2)
+    alto.lyrics = ["Sing", "a", "song", "now"]  # identical words, different notes/rhythm
+
+    score.add_staff(sop)
+    score.add_staff(alto)
+    return score
+
+
+def test_choral_ensemble_shared_lyrics_render_as_one_unidentified_word_line():
+    score = _shared_lyrics_score()
+    output = BrailleRenderer(line_width=40).render(score)
+    lines = [l for l in output.split("\n") if l]
+
+    # lines[0] is the signature header; lines[1] is the (single) word line.
+    assert not lines[1].startswith('⠜')
+    # Exactly one word line, followed directly by two identified music lines.
+    assert lines[2].lstrip('⠀').startswith('⠜')
+    assert lines[3].lstrip('⠀').startswith('⠜')
+
+
+def test_choral_ensemble_shared_lyrics_round_trip():
+    score = _shared_lyrics_score()
+    output = BrailleRenderer(line_width=40).render(score)
+
+    parsed = parse_choral_ensemble(output)
+
+    assert len(parsed.staves) == 2
+    soprano, alto = parsed.staves
+    assert soprano.lyrics == ["Sing", "a", "song", "now"]
+    assert alto.lyrics == ["Sing", "a", "song", "now"]
+    assert [(n.note_name, n.octave) for n in soprano.measures[0].notes] == [
+        ("C", 5), ("D", 5), ("E", 5), ("F", 5),
+    ]
+    assert [(n.note_name, n.octave) for n in alto.measures[0].notes] == [
+        ("A", 4), ("B", 4), ("C", 4), ("D", 4),
+    ]
+
+
+def test_choral_ensemble_differing_lyrics_still_use_per_voice_identified_lines():
+    # Sanity check that S11c-13's shared-line detection doesn't fire when
+    # words actually differ (S11c-14's baseline still applies).
+    score = _two_voice_score()
+    output = BrailleRenderer(line_width=40).render(score)
+    lines = [l for l in output.split("\n") if l]
+    assert lines[1].startswith('⠜')
+    assert lines[2].startswith('⠜')

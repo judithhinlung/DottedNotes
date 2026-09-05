@@ -1373,9 +1373,12 @@ class BrailleRenderer:
         idx: int,
         syllables_remaining: list[list[str]],
     ) -> list[str]:
-        """BANA §37.3 baseline: one identified word line per active voice
-        (S11c-13 adds the §37.2 shared-single-line case on top of this).
-        `music_line_prefixes` are reused as-is: §37.1(f)'s word-line and
+        """BANA §37.2/§37.3: one shared, unidentified word line when every
+        active voice sings the same words for this parallel (§37.2: "It is
+        not necessary to show an identifier in the word line to indicate
+        the name(s) of the part(s)"); otherwise one identified word line
+        per active voice (§37.3, S11c-14's baseline). `music_line_prefixes`
+        are reused as-is for the identified case: §37.1(f)'s word-line and
         music-line identifiers use the same abbreviation, just with a
         mandatory trailing space (word lines) instead of a conditional
         dot-3-only gap (music lines)."""
@@ -1385,16 +1388,36 @@ class BrailleRenderer:
                 stripped += '⠄'
             return stripped + chr(0x2800)
 
+        consumed_per_voice = []
+        for s_idx in active:
+            staff = score.staves[s_idx]
+            n_slots = len(group_pitched_elements_by_slur(staff.measures[idx:idx + fit_size]))
+            consumed = syllables_remaining[s_idx][:n_slots]
+            syllables_remaining[s_idx] = syllables_remaining[s_idx][n_slots:]
+            consumed_per_voice.append(consumed)
+
+        # §37.2: shared line only when *every* active voice has the same
+        # (non-empty) words -- an all-empty parallel (no voice has lyrics
+        # left, e.g. an instrumental-only stretch of a texted piece) still
+        # gets §37.3's per-voice identified lines, since there's no shared
+        # word content to justify dropping the identifiers. Also requires
+        # 2+ active voices: with only one voice active (the rest tacet this
+        # parallel), keeping that voice's identifier is clearer than a bare
+        # line with no other voice around to contrast it against, even
+        # though a single voice trivially "shares its own words".
+        if (
+            len(consumed_per_voice) >= 2
+            and consumed_per_voice[0]
+            and all(c == consumed_per_voice[0] for c in consumed_per_voice[1:])
+        ):
+            return [encode_lyric_line(consumed_per_voice[0])]
+
         word_prefixes = [_with_mandatory_space(prefix) for prefix in music_line_prefixes]
         max_len = max(len(p) for p in word_prefixes)
         word_prefixes = [p + chr(0x2800) * (max_len - len(p)) for p in word_prefixes]
 
         word_lines = []
-        for k, s_idx in enumerate(active):
-            staff = score.staves[s_idx]
-            n_slots = len(group_pitched_elements_by_slur(staff.measures[idx:idx + fit_size]))
-            consumed = syllables_remaining[s_idx][:n_slots]
-            syllables_remaining[s_idx] = syllables_remaining[s_idx][n_slots:]
+        for k, consumed in enumerate(consumed_per_voice):
             lyric_str = encode_lyric_line(consumed) if consumed else ""
             word_lines.append(word_prefixes[k] + lyric_str)
         return word_lines
