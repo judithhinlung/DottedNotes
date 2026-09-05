@@ -24,7 +24,9 @@ from ..exceptions import BrailleParseError
 from ..models.orchestra_score import OrchestraScore
 from ..models.score import Score
 from .braille_parser import BrailleParser
-from .ensemble_parser import group_pitched_elements_by_slur, map_syllables_to_groups, parse_lyrics
+from .ensemble_parser import (
+    group_pitched_elements_by_slur, map_syllables_to_groups, parse_lyrics, extract_stage_directions,
+)
 from .input_pipeline import decode_literary_braille
 from .instrument_list import parse_instrument_list
 from .instrument_list import _parse_line as _parse_character_list_line
@@ -244,9 +246,11 @@ def parse_choral_ensemble(text: str) -> Score:
         staff = voice_score.staves[0]
 
         word_text = ''.join(word_by_voice[abbrev])
+        word_text, stage_directions = extract_stage_directions(word_text)
         syllables = parse_lyrics(word_text) if word_text.strip('⠀') else []
         groups = group_pitched_elements_by_slur(staff.measures)
         staff.lyrics = map_syllables_to_groups(syllables, groups, abbrev)
+        staff.stage_directions = stage_directions
         # §38.2's character-list table is the only place a real name
         # exists in the content for a choral voice -- without it (a plain
         # SATB-style ensemble), the name isn't recoverable at all (same

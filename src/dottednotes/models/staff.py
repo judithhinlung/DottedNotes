@@ -42,6 +42,15 @@ class Staff:
     lyrics: list[str] = field(default_factory=list)
     verses: list[list[str]] = field(default_factory=list)
     verse_prefixes: list[str | None] = field(default_factory=list)
+    # BANA §38.3 (S11c-18): a short stage direction placed directly in a
+    # character's word line -- "Single words or short phrases may be
+    # placed in the word lines of the characters to whom they apply." Not
+    # sung, so it can't live in `lyrics` (which BANA §35.1 requires to
+    # pair exactly 1:1 with note-groups). Each entry is (syllable_index,
+    # text): insert `text`, rendered in italics, immediately before
+    # `lyrics[syllable_index]` (or after the last syllable, if
+    # `syllable_index == len(lyrics)`), without consuming a syllable slot.
+    stage_directions: list[tuple[int, str]] = field(default_factory=list)
     # (written_pitch, concert_pitch) LilyPond absolute pitches, set by the
     # MusicXML importer (S10b-2) when the source carries structured
     # transposition data -- takes priority over the BRF path's name-string

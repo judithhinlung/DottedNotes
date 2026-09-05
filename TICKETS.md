@@ -7727,6 +7727,26 @@ This is not something DottedNotes can solve generically -- doing so requires rea
 
 ---
 
+### [ ] S11c-23: Music-drama numbered/footnoted stage directions (§38.3) not yet supported
+
+**Why:** S11c-18 implemented §38.3's short form only: *"Single words or short phrases may be placed in the word lines of the characters to whom they apply"* (`Staff.stage_directions`, spliced into the rendered word line in italics via the newly-added `ITALIC_WORD_INDICATOR`/`ITALIC_PASSAGE_INDICATOR`/`ITALIC_TERMINATOR` cells, without consuming a syllable/note-group slot). The manual's other form is structurally different and was out of scope for that pass: *"Longer directions, especially if there are many, may be numbered and placed on separate pages at the ends of scenes or acts. The number is given in the music line, introduced by the appropriate italic indicator and enclosed between blank spaces. If it occurs at the beginning of a measure, the number is excluded from the alignment of parts; if it begins the parallel, the spaced number follows the identifier."*
+
+This needs: (a) a reference number embedded in the *music* line (not the word line), italicized, whose presence must not disturb the cross-voice measure-alignment padding (`_render_choral_ensemble`'s `measure_widths` column logic) when it falls at a measure boundary mid-parallel, but does follow right after the identifier when it opens the parallel; (b) a collected footnote text block (scene/act-level, not per-parallel) mapping each number to its literary-text content, rendered at the end of the scene/act; and (c) parsing both directions back, resolving each in-music-line number against its corresponding footnote entry.
+
+**Steps:**
+1. Add a way to record a numbered stage-direction footnote (number -> text) at the scene/act level -- likely a new field on `Score`/`OrchestraScore` rather than `Staff`, since it's shared across all characters, not owned by one voice.
+2. Extend `_render_choral_ensemble()`'s music-line construction to accept an optional numbered reference per (staff, measure) position, rendering it italicized and correctly excluded from/included in the alignment column per the position rule above.
+3. Render the collected footnote block as literary text at the end of the scene/act (after the last parallel).
+4. Parser: recognize an italicized number in a music line (distinct from ordinary note/rest content), resolve it against the footnote block, and attach the resolved text back to the correct position.
+5. Add tests for both position cases (number opening the parallel vs. mid-parallel at a measure boundary) and for the footnote block round-tripping.
+
+**Definition of Done:**
+- [ ] A numbered stage-direction reference in a music line renders with correct position-dependent formatting (excluded from alignment mid-parallel; follows the identifier when opening the parallel).
+- [ ] The footnote block (number -> text) renders at the end of the scene/act and round-trips through the parser.
+- [ ] `pytest tests/` passes with no regressions.
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

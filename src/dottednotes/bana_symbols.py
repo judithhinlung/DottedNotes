@@ -926,3 +926,31 @@ CHORD_ITALIC_SEVENTH_CELLS: str = '⠨⠼⠛'    # dots 4,6 + NUMBER_SIGN + G --
 # this module's own letter tables once the leading capital indicator(s) are
 # stripped -- no new cell constants needed beyond CAPITAL_INDICATOR itself.
 
+# ---------------------------------------------------------------------------
+# UEB literary italic indicators (Par. 38.3's "appropriate italic indicator"
+# for stage directions, both the short inline form and the numbered
+# footnote-reference form). Developer-confirmed dot patterns, not derived
+# from a bana_reference.md table -- cross-check against a primary UEB source
+# before reuse elsewhere.
+#
+# ITALIC_TERMINATOR (dots 3,4,6) is the *same cell* as
+# CHORD_AUGMENTED_OR_RAISE_CELL above and as the "3rd" entry in
+# INTERVAL_CELLS -- disambiguated by context exactly like this module's
+# other documented overlaps (e.g. HAND_SIGN_CELLS): it only means "end of
+# italics" immediately following an ITALIC_WORD/SYMBOL/PASSAGE_INDICATOR
+# with no intervening bar line, never in isolation.
+# ---------------------------------------------------------------------------
+
+ITALIC_WORD_INDICATOR: str = '⠪'      # dots 2,4,6 -- italicizes a single
+                                       # following word; no explicit
+                                       # terminator needed, scope ends at
+                                       # the next space/word boundary.
+ITALIC_SYMBOL_INDICATOR: str = '⠮'    # dots 2,3,4,6 -- italicizes a single
+                                       # following symbol (e.g. a numeral).
+ITALIC_PASSAGE_INDICATOR: str = '⠾'   # dots 2,3,4,5,6 -- italicizes a
+                                       # multi-word passage; requires
+                                       # ITALIC_TERMINATOR to end it.
+ITALIC_TERMINATOR: str = '⠬'          # dots 3,4,6 -- ends an
+                                       # ITALIC_PASSAGE_INDICATOR span (see
+                                       # overlap warning above).
+

@@ -13,7 +13,9 @@ from dottednotes.models.chord import Chord
 from dottednotes.models.tuplet import Tuplet
 from dottednotes.models.in_accord import InAccord
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
-from dottednotes.bana_symbols import TABLE_29_ENGLISH
+from dottednotes.bana_symbols import (
+    TABLE_29_ENGLISH, ITALIC_WORD_INDICATOR, ITALIC_PASSAGE_INDICATOR, ITALIC_TERMINATOR,
+)
 from dottednotes.exceptions import BrailleParseError
 from dottednotes.parser.ensemble_parser import (
     group_pitched_elements_by_slur, _LYRIC_PUNCTUATION, _ACCENT_MODIFIERS,
@@ -251,6 +253,60 @@ def encode_lyric_line(lyrics: list[str]) -> str:
             parts.append(blank_cell)
         parts.append(_encode_lyric_word(text))
         pending_continuation = continues
+    return ''.join(parts)
+
+
+def encode_italic_phrase(text: str) -> str:
+    """Encode a BANA §38.3 stage direction in italics: a single word uses
+    ITALIC_WORD_INDICATOR (scope ends at the next space, no explicit
+    terminator needed); a multi-word phrase uses ITALIC_PASSAGE_INDICATOR,
+    explicitly closed with ITALIC_TERMINATOR."""
+    words = text.split(' ')
+    if len(words) == 1:
+        return ITALIC_WORD_INDICATOR + _encode_lyric_word(words[0])
+    blank_cell = chr(0x2800)
+    encoded_words = blank_cell.join(_encode_lyric_word(w) for w in words)
+    return ITALIC_PASSAGE_INDICATOR + encoded_words + ITALIC_TERMINATOR
+
+
+def encode_lyric_line_with_stage_directions(
+    phrase_syllables: list[str], consumed_start: int, stage_directions: list[tuple[int, str]],
+) -> str:
+    """Like `encode_lyric_line()`, but splices in any BANA §38.3 stage
+    directions (rendered in italics, per `encode_italic_phrase()`) whose
+    anchor index falls within this parallel's syllable range --
+    `consumed_start` is the absolute syllable index of
+    `phrase_syllables[0]` within the staff's full lyric stream. A
+    direction never consumes a syllable slot, so it never disturbs
+    `phrase_syllables`' own §35.1 exact-pairing with note-groups."""
+    directions_by_index = dict(stage_directions)
+    blank_cell = chr(0x2800)
+    parts: list[str] = []
+    run: list[str] = []
+
+    def flush_run():
+        if run:
+            if parts:
+                parts.append(blank_cell)
+            parts.append(encode_lyric_line(run))
+            run.clear()
+
+    for offset, syllable in enumerate(phrase_syllables):
+        abs_idx = consumed_start + offset
+        if abs_idx in directions_by_index:
+            flush_run()
+            if parts:
+                parts.append(blank_cell)
+            parts.append(encode_italic_phrase(directions_by_index[abs_idx]))
+        run.append(syllable)
+    flush_run()
+
+    end_idx = consumed_start + len(phrase_syllables)
+    if end_idx in directions_by_index:
+        if parts:
+            parts.append(blank_cell)
+        parts.append(encode_italic_phrase(directions_by_index[end_idx]))
+
     return ''.join(parts)
 
 
@@ -1130,6 +1186,7 @@ class BrailleRenderer:
         n_measures = len(staff.measures)
         prev_note = None
         parallel_index = 0
+        consumed_count = 0
 
         while idx < n_measures:
             # Pack as many measures as fit the music line (cell 3) into one
@@ -1172,7 +1229,13 @@ class BrailleRenderer:
             n_slots = len(group_pitched_elements_by_slur(staff.measures[idx:idx + fit_size]))
             phrase_syllables = syllables_remaining[:n_slots]
             syllables_remaining = syllables_remaining[n_slots:]
-            lyric_str = encode_lyric_line(phrase_syllables)
+            if staff.stage_directions:
+                lyric_str = encode_lyric_line_with_stage_directions(
+                    phrase_syllables, consumed_count, staff.stage_directions,
+                )
+            else:
+                lyric_str = encode_lyric_line(phrase_syllables)
+            consumed_count += len(phrase_syllables)
 
             # §35.9/S11c-16: a real measure number, when shown at all,
             # goes at the very start of the word line with no word signs
@@ -1389,6 +1452,7 @@ class BrailleRenderer:
         idx = 0
         prev_notes: list[Optional[Note]] = [None] * n_staves
         syllables_remaining = [list(staff.lyrics) for staff in score.staves]
+        consumed_counts = [0] * n_staves
 
         def active_staff_indices(group_size: int) -> list[int]:
             # BANA §37.1(c): "A part that has rests throughout the music
@@ -1463,7 +1527,7 @@ class BrailleRenderer:
             fit_size, active, music_lines, prevs, prefixes = best
 
             word_lines = self._build_choral_word_lines(
-                score, active, prefixes, fit_size, idx, syllables_remaining,
+                score, active, prefixes, fit_size, idx, syllables_remaining, consumed_counts,
             )
             for wl in word_lines:
                 lines.extend(wrap_run_over_line(wl, self.line_width, indent_cells=4))
@@ -1484,6 +1548,7 @@ class BrailleRenderer:
         fit_size: int,
         idx: int,
         syllables_remaining: list[list[str]],
+        consumed_counts: list[int],
     ) -> list[str]:
         """BANA §37.2/§37.3: one shared, unidentified word line when every
         active voice sings the same words for this parallel (§37.2: "It is
@@ -1501,12 +1566,18 @@ class BrailleRenderer:
             return stripped + chr(0x2800)
 
         consumed_per_voice = []
+        consumed_start_per_voice = []
+        any_stage_directions = False
         for s_idx in active:
             staff = score.staves[s_idx]
             n_slots = len(group_pitched_elements_by_slur(staff.measures[idx:idx + fit_size]))
             consumed = syllables_remaining[s_idx][:n_slots]
             syllables_remaining[s_idx] = syllables_remaining[s_idx][n_slots:]
             consumed_per_voice.append(consumed)
+            consumed_start_per_voice.append(consumed_counts[s_idx])
+            if staff.stage_directions:
+                any_stage_directions = True
+            consumed_counts[s_idx] += len(consumed)
 
         # §37.2: shared line only when *every* active voice has the same
         # (non-empty) words -- an all-empty parallel (no voice has lyrics
@@ -1516,9 +1587,13 @@ class BrailleRenderer:
         # 2+ active voices: with only one voice active (the rest tacet this
         # parallel), keeping that voice's identifier is clearer than a bare
         # line with no other voice around to contrast it against, even
-        # though a single voice trivially "shares its own words".
+        # though a single voice trivially "shares its own words". A
+        # stage direction (§38.3) anchored in this parallel also forces
+        # the per-voice identified path -- whose direction it is would be
+        # ambiguous on a shared, unidentified line.
         if (
-            len(consumed_per_voice) >= 2
+            not any_stage_directions
+            and len(consumed_per_voice) >= 2
             and consumed_per_voice[0]
             and all(c == consumed_per_voice[0] for c in consumed_per_voice[1:])
         ):
@@ -1529,8 +1604,15 @@ class BrailleRenderer:
         word_prefixes = [p + chr(0x2800) * (max_len - len(p)) for p in word_prefixes]
 
         word_lines = []
-        for k, consumed in enumerate(consumed_per_voice):
-            lyric_str = encode_lyric_line(consumed) if consumed else ""
+        for k, s_idx in enumerate(active):
+            staff = score.staves[s_idx]
+            consumed = consumed_per_voice[k]
+            if staff.stage_directions:
+                lyric_str = encode_lyric_line_with_stage_directions(
+                    consumed, consumed_start_per_voice[k], staff.stage_directions,
+                )
+            else:
+                lyric_str = encode_lyric_line(consumed) if consumed else ""
             word_lines.append(word_prefixes[k] + lyric_str)
         return word_lines
 

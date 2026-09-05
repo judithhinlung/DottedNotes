@@ -21,7 +21,9 @@ from ..bana_symbols import LITERARY_DIGITS
 from ..exceptions import BrailleParseError
 from ..models.score import Score
 from .braille_parser import BrailleParser
-from .ensemble_parser import group_pitched_elements_by_slur, map_syllables_to_groups, parse_lyrics
+from .ensemble_parser import (
+    group_pitched_elements_by_slur, map_syllables_to_groups, parse_lyrics, extract_stage_directions,
+)
 from .lead_sheet_parser import _is_header_line
 from .tokenizer import BrailleTokenizer
 
@@ -145,8 +147,10 @@ def parse_vocal_solo(text: str, has_measure_numbers: bool = False) -> Score:
     staff = score.staves[0]
 
     lyric_text = ''.join(lyric_parts)
+    lyric_text, stage_directions = extract_stage_directions(lyric_text)
     syllables = parse_lyrics(lyric_text) if lyric_text.strip('⠀') else []
     groups = group_pitched_elements_by_slur(staff.measures)
     staff.lyrics = map_syllables_to_groups(syllables, groups, staff.name or "Vocal solo")
+    staff.stage_directions = stage_directions
 
     return score

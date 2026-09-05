@@ -623,3 +623,34 @@ def test_vocal_solo_measure_number_every_1_shows_every_parallel():
 def test_vocal_solo_rejects_negative_measure_number_cadence():
     with pytest.raises(ValueError):
         BrailleRenderer(vocal_measure_number_every=-1)
+
+
+# ---------------------------------------------------------------------------
+# S11c-18: BANA §38.3 "Single words or short phrases may be placed in the
+# word lines of the characters to whom they apply" -- a stage direction is
+# not sung, so it's a separate Staff.stage_directions channel, not part of
+# the exact-pairing `lyrics` stream, spliced into the rendered word line in
+# italics without consuming a syllable/note-group slot.
+# ---------------------------------------------------------------------------
+
+
+def test_vocal_solo_stage_direction_round_trips():
+    score = _vocal_solo_score(lyrics=["Sing", "high"])
+    score.staves[0].stage_directions = [(0, "dials impatiently")]
+
+    output = BrailleRenderer(line_width=40).render(score)
+    parsed = parse_vocal_solo(output)
+
+    assert parsed.staves[0].lyrics == ["Sing", "high"]
+    assert parsed.staves[0].stage_directions == [(0, "dials impatiently")]
+
+
+def test_vocal_solo_stage_direction_at_end_round_trips():
+    score = _vocal_solo_score(lyrics=["Sing", "high"])
+    score.staves[0].stage_directions = [(2, "smiles")]  # after all lyrics
+
+    output = BrailleRenderer(line_width=40).render(score)
+    parsed = parse_vocal_solo(output)
+
+    assert parsed.staves[0].lyrics == ["Sing", "high"]
+    assert parsed.staves[0].stage_directions == [(2, "smiles")]

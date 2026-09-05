@@ -114,3 +114,53 @@ def test_ordinary_instrument_list_does_not_warn_about_single_letters():
         warnings.simplefilter("always")
         render_name_abbreviation_table(["C"], 40)  # warn_disallowed_single_letters defaults to False
     assert not any("c/d/f, or p" in str(w.message) for w in caught)
+
+
+# ---------------------------------------------------------------------------
+# S11c-18: BANA §38.3 stage directions -- "Single words or short phrases
+# may be placed in the word lines of the characters to whom they apply,"
+# rendered in italics. Covers only the short inline form; the longer
+# numbered-footnote form is deferred (see TICKETS.md S11c-23).
+# ---------------------------------------------------------------------------
+
+
+def test_music_drama_stage_directions_round_trip():
+    score = _two_character_score()
+    score.staves[0].stage_directions = [(0, "dials impatiently")]
+    score.staves[1].stage_directions = [(4, "smiles")]  # anchored after all lyrics
+
+    output = BrailleRenderer(line_width=40, include_character_list=True).render(score)
+    parsed = parse_choral_ensemble(output)
+
+    assert parsed.staves[0].stage_directions == [(0, "dials impatiently")]
+    assert parsed.staves[1].stage_directions == [(4, "smiles")]
+    # Lyrics are unaffected by the stage direction splice.
+    assert parsed.staves[0].lyrics == ["Who's", "at", "the", "door"]
+    assert parsed.staves[1].lyrics == ["I'll", "answer", "it", "now"]
+
+
+def test_music_drama_stage_direction_forces_identified_word_lines():
+    # Even if both characters happened to share identical words, a stage
+    # direction anchored in the parallel must force S11c-14's per-voice
+    # identified lines (S11c-13's shared-line compression would make it
+    # ambiguous whose direction it is).
+    score = _two_character_score()
+    score.staves[0].lyrics = ["Hello"]
+    score.staves[1].lyrics = ["Hello"]
+    score.staves[0].measures[0].notes = score.staves[0].measures[0].notes[:1]
+    score.staves[1].measures[0].notes = score.staves[1].measures[0].notes[:1]
+    score.staves[0].stage_directions = [(0, "waves")]
+
+    output = BrailleRenderer(line_width=40, include_character_list=True).render(score)
+    lines = [l for l in output.split("\n") if l]
+    # lines[0:2] are the character-list table rows, lines[2] the signature.
+    word_lines = lines[3:5]
+    assert all(l.startswith('⠜') for l in word_lines)
+
+
+def test_vocal_solo_stage_direction_single_word_uses_word_indicator_not_passage():
+    from dottednotes.bana_symbols import ITALIC_WORD_INDICATOR, ITALIC_PASSAGE_INDICATOR
+    from dottednotes.renderers.braille_renderer import encode_italic_phrase
+    assert encode_italic_phrase("smiles").startswith(ITALIC_WORD_INDICATOR)
+    assert encode_italic_phrase("dials impatiently").startswith(ITALIC_PASSAGE_INDICATOR)
+    assert encode_italic_phrase("dials impatiently").endswith('⠬')

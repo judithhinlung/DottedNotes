@@ -14,6 +14,9 @@ from ..bana_symbols import (
     KEY_SIGNATURE_CELLS,
     TIME_SIGNATURE_CELLS,
     TABLE_29_ENGLISH,
+    ITALIC_WORD_INDICATOR,
+    ITALIC_PASSAGE_INDICATOR,
+    ITALIC_TERMINATOR,
 )
 from ..exceptions import BrailleParseError
 from ..models.instrument import InstrumentInfo, InstrumentFamily
@@ -787,6 +790,58 @@ def _expand_repeat_signs(ascii_str: str) -> str:
         result.append(ascii_str[i])
         i += 1
     return "".join(result)
+
+
+def extract_stage_directions(lyric_cells: str) -> tuple[str, list[tuple[int, str]]]:
+    """Split BANA §38.3 italicized stage-direction spans out of raw
+    word-line lyric-cell text, returning (remaining_lyric_cells_with_
+    directions_removed, [(syllable_index, direction_text), ...]).
+    `syllable_index` is how many syllables `parse_lyrics()` would decode
+    from the remaining text before that point -- matching
+    `Staff.stage_directions`' own (syllable_index, text) convention, so a
+    direction anchors to the correct position once the surrounding lyric
+    text is decoded normally."""
+    directions: list[tuple[int, str]] = []
+    remaining_parts: list[str] = []
+    syllable_count = 0
+    plain_start = 0
+    i = 0
+    n = len(lyric_cells)
+
+    def flush_plain(end: int) -> None:
+        nonlocal syllable_count
+        chunk = lyric_cells[plain_start:end]
+        remaining_parts.append(chunk)
+        if chunk.strip('⠀'):
+            syllable_count += len(parse_lyrics(chunk))
+
+    while i < n:
+        char = lyric_cells[i]
+        if char in (ITALIC_WORD_INDICATOR, ITALIC_PASSAGE_INDICATOR):
+            flush_plain(i)
+            is_passage = char == ITALIC_PASSAGE_INDICATOR
+            content_start = i + 1
+            if is_passage:
+                end = lyric_cells.find(ITALIC_TERMINATOR, content_start)
+                if end == -1:
+                    raise BrailleParseError(
+                        "BANA §38.3 italic passage indicator has no terminator"
+                    )
+                content = lyric_cells[content_start:end]
+                i = end + 1
+            else:
+                end = content_start
+                while end < n and lyric_cells[end] != '⠀':
+                    end += 1
+                content = lyric_cells[content_start:end]
+                i = end
+            direction_text = ' '.join(s for s, _ in parse_lyrics(content))
+            directions.append((syllable_count, direction_text))
+            plain_start = i
+            continue
+        i += 1
+    flush_plain(n)
+    return ''.join(remaining_parts), directions
 
 
 def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
