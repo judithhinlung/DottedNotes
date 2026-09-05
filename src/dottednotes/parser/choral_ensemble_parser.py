@@ -26,6 +26,8 @@ from ..models.score import Score
 from .braille_parser import BrailleParser
 from .ensemble_parser import group_pitched_elements_by_slur, map_syllables_to_groups, parse_lyrics
 from .input_pipeline import decode_literary_braille
+from .instrument_list import parse_instrument_list
+from .instrument_list import _parse_line as _parse_character_list_line
 from .lead_sheet_parser import _is_header_line
 from .tokenizer import BrailleTokenizer
 
@@ -85,6 +87,20 @@ def parse_choral_ensemble(text: str) -> Score:
     lines = text.split('\n')
     while lines and lines[-1] == '':
         lines.pop()
+
+    # §38.2 (S11c-17): an optional "List of Characters" table at the very
+    # start (name + ⠜abbrev⠄ per line, identical shape to §33.2's
+    # instrument-list header) -- reused verbatim via parse_instrument_list().
+    # A genuine word/music line never matches this (both start directly
+    # with the ⠜ identifier, no real name text before it, which
+    # _parse_line() requires).
+    character_names_by_abbrev: dict[str, str] = {}
+    table_lines: list[str] = []
+    while lines and _parse_character_list_line(lines[0]) is not None:
+        table_lines.append(lines.pop(0))
+    if table_lines:
+        for info in parse_instrument_list('\n'.join(table_lines)):
+            character_names_by_abbrev[info.abbreviation.lower()] = info.name
 
     header_lines: list[str] = []
     while lines and _is_header_line(lines[0]):
@@ -231,6 +247,12 @@ def parse_choral_ensemble(text: str) -> Score:
         syllables = parse_lyrics(word_text) if word_text.strip('⠀') else []
         groups = group_pitched_elements_by_slur(staff.measures)
         staff.lyrics = map_syllables_to_groups(syllables, groups, abbrev)
+        # §38.2's character-list table is the only place a real name
+        # exists in the content for a choral voice -- without it (a plain
+        # SATB-style ensemble), the name isn't recoverable at all (same
+        # limitation as S11c-9's vocal solo), so it's left as the bare
+        # abbreviation.
+        staff.name = character_names_by_abbrev.get(abbrev, abbrev)
         staves.append(staff)
 
     measure_counts = {len(s.measures) for s in staves}

@@ -7711,6 +7711,22 @@ This is not something DottedNotes can solve generically -- doing so requires rea
 
 ---
 
+### [ ] S11c-22: Music-drama character identifiers can't be explicitly assigned, only auto-derived
+
+**Why:** S11c-17 (§38.2) validates that a character's identifier isn't a disallowed single letter (c/d/f/p), but the identifier itself is always whatever `staff_abbreviation()` auto-derives (first two letters of the name, lowercased) -- there's no way for a caller to explicitly assign a different one- or two-letter identifier per character, which is what §38.2 actually describes: *"a one- or two-letter unique identifier of the name of each character must be **assigned**"*. In practice this means: (a) the disallowed-single-letter check can only ever fire for a one-character-long name (an edge case), since the two-letter fallback rarely lands on a bare single letter, and (b) two characters whose names share the same first two letters (e.g. "Donna Elvira" and "Don Giovanni", both -> "do") would silently collide with no way to disambiguate, unlike §33.2.1's non-Table-29 instrument path (`resolve_abbreviation()`), which already requires an explicit override rather than guessing.
+
+**Steps:**
+1. Add an explicit per-staff abbreviation override mechanism for the character-list case, mirroring `resolve_abbreviation()`'s `overrides` dict pattern -- likely a `character_abbreviations: dict[str, str] | None` parameter threaded through `BrailleRenderer`/`render_name_abbreviation_table()`, checked before falling back to `staff_abbreviation()`.
+2. Detect and raise (not warn) on a genuine collision: two characters whose resolved identifiers (explicit or auto-derived) are identical.
+3. Add tests: two similarly-named characters get distinct explicit identifiers; an unresolved collision raises with a clear message naming both characters.
+
+**Definition of Done:**
+- [ ] A caller can explicitly assign each character's one-/two-letter identifier rather than relying solely on the auto-derived fallback.
+- [ ] Two characters resolving to the same identifier (explicit or auto-derived) raises a clear error rather than silently colliding.
+- [ ] `pytest tests/` passes with no regressions.
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

@@ -1,5 +1,6 @@
 import re
 import unicodedata
+import warnings
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Union, Any
@@ -433,6 +434,58 @@ def wrap_run_over_line(line: str, width: int, indent_cells: int = 2) -> list[str
     return result
 
 
+_DISALLOWED_SINGLE_LETTER_IDENTIFIERS = frozenset({'c', 'd', 'f', 'p'})
+
+
+def render_name_abbreviation_table(
+    staff_names: list[str], line_width: int, warn_disallowed_single_letters: bool = False,
+) -> list[str]:
+    """Render a BANA §33.2/§38.2 "name + identifier" table: one line per
+    name, its abbreviation right-aligned to a shared column two cells
+    beyond the longest name, terminated with dot 3. Shared by §33's
+    instrument-list header (`_render_ensemble`) and §38.2's music-drama
+    "List of Characters" table (`_render_choral_ensemble`) -- both use the
+    identical name/abbreviation/column-alignment shape, just for
+    instruments vs. characters.
+
+    §38.2: "The single-letter identifiers c, d, f, and p should not be
+    used, to avoid appearing to be dynamic markings" -- `warn_disallowed_
+    single_letters` (only ever set for the §38.2 character-list case, not
+    §33's ordinary instrument list) warns (does not raise) when a name's
+    computed abbreviation is exactly one of those, matching this
+    codebase's existing warn-not-error convention for BANA "should" rules
+    (e.g. `parse_instrument_list()`'s Table-29-mismatch warning)."""
+    name_brls = [encode_literary_braille(name)[:-1] for name in staff_names]
+    max_name_len = max((len(n) for n in name_brls), default=0)
+    blank_cell = chr(0x2800)
+    lines = []
+    for name, name_brl in zip(staff_names, name_brls):
+        abbrev = staff_abbreviation(name)
+        if warn_disallowed_single_letters and abbrev in _DISALLOWED_SINGLE_LETTER_IDENTIFIERS:
+            warnings.warn(
+                f"Identifier '{abbrev}' for '{name}' is a single letter "
+                "c/d/f, or p, which BANA §38.2 says should not be used "
+                "(it could be mistaken for a dynamic marking) -- supply a "
+                "different one- or two-letter identifier.",
+                stacklevel=2,
+            )
+
+        # BANA 33.2(d): "Two or more dot-5 guide dots are inserted to fill
+        # out the width of a column when a name ends three or more cells
+        # before the end of the longest name. One space separates the end
+        # of the name and the beginning of the guide dots." A smaller
+        # deficit (1-2 cells) is plain blank fill instead.
+        deficit = max_name_len - len(name_brl)
+        if deficit >= 3:
+            padding = blank_cell + '⠐' * (deficit - 1)
+        else:
+            padding = blank_cell * deficit
+
+        abbrev_brl = '⠜' + abbrev_to_brl(abbrev) + '⠄'
+        lines.append(name_brl + padding + '⠀⠀' + abbrev_brl)
+    return lines
+
+
 def ensemble_abbrev_prefixes(staff_names: list[str], music_strs: Optional[list[str]] = None) -> list[str]:
     """Build the '⠜XX' abbreviation prefixes for one system's staff lines,
     aligned to a common column (BANA 33.4: "the music of each line begins
@@ -684,6 +737,7 @@ class BrailleRenderer:
         min_repeated_measures: int = 2,
         include_clef_sign: bool = False,
         vocal_measure_number_every: int = 0,
+        include_character_list: bool = False,
     ):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
@@ -746,6 +800,15 @@ class BrailleRenderer:
                 f"vocal_measure_number_every must be >= 0, got {vocal_measure_number_every!r}"
             )
         self.vocal_measure_number_every = vocal_measure_number_every
+        # BANA §38.1/§38.2 (S11c-17): a music-drama score with 2+
+        # characters is transcribed as a choral ensemble (§37) whose voice
+        # names are character names, plus a "List of Characters" table at
+        # the start (name + one-/two-letter identifier) -- opt-in since a
+        # plain SATB-style choral ensemble has no such table in real BANA
+        # (§37's own examples show none), and nothing in the internal
+        # Score model distinguishes "these voice names are opera
+        # characters" from "these are generic voice parts" on its own.
+        self.include_character_list = include_character_list
 
     def _detect_transcription_mode(self, score: Score) -> TranscriptionMode:
         # is_piano is computed first and independent of isinstance(score,
@@ -787,10 +850,19 @@ class BrailleRenderer:
         # word lines then music lines per parallel -- never the generic
         # §33 ENSEMBLE layout. Checked before the isinstance(OrchestraScore)
         # branch below for the same reason as SOLO_WITH_ACCOMPANIMENT above.
+        # `include_character_list` (§38.1/38.2, S11c-17) is also treated as
+        # "this is a choral ensemble" on its own: a music-drama score's
+        # staves are named after opera/musical characters (e.g. "Amelia"),
+        # which get_instrument_family() has no way to recognize as VOCAL by
+        # name the way it does "Soprano"/"Alto" -- the caller opting into
+        # the character-list table already tells us definitively.
         if (
             len(score.staves) >= 2
-            and all(get_instrument_family(s.name) == InstrumentFamily.VOCAL for s in score.staves)
             and any(s.lyrics for s in score.staves)
+            and (
+                self.include_character_list
+                or all(get_instrument_family(s.name) == InstrumentFamily.VOCAL for s in score.staves)
+            )
         ):
             return TranscriptionMode.CHORAL_ENSEMBLE
         # BANA §35.1: a lone vocal staff with lyrics is its own dedicated
@@ -1287,6 +1359,15 @@ class BrailleRenderer:
         if score.title:
             lines.append(center_line(encode_literary_braille(score.title), self.line_width))
 
+        # §38.2: "The names of the characters with their identifiers must
+        # be given in a table at the beginning of the score" -- reuses the
+        # same name+identifier table shape as §33.2's instrument list.
+        if self.include_character_list:
+            lines.extend(render_name_abbreviation_table(
+                [staff.name for staff in score.staves], self.line_width,
+                warn_disallowed_single_letters=True,
+            ))
+
         first_staff = score.staves[0]
         signature_parts = []
         if first_staff.key_signature:
@@ -1296,11 +1377,12 @@ class BrailleRenderer:
         tempo_brl = first_staff.tempo.to_braille() if first_staff.tempo else ""
         sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
         if sig_line:
-            # §37 has no §33.2 instrument-list header to align a signature
-            # line's indent against (unlike ENSEMBLE's cell-8 convention);
-            # cell 9 matches the general solo/vocal signature placement
-            # (S11c-2) absent a more specific citation for choral ensembles.
-            lines.append('⠀' * 8 + sig_line)
+            # A character-list table shifts the signature line to cell 8,
+            # matching §33's own instrument-list-header convention
+            # (_render_ensemble); with no table, §37 has nothing to align
+            # against, so cell 9 (S11c-2's general solo/vocal placement)
+            # is used instead, absent a more specific citation.
+            lines.append('⠀' * (7 if self.include_character_list else 8) + sig_line)
 
         n_measures = len(first_staff.measures)
         n_staves = len(score.staves)
@@ -1587,38 +1669,16 @@ class BrailleRenderer:
         if score.title:
             lines.append(center_line(encode_literary_braille(score.title), self.line_width))
 
-        # Instrument list. BANA 33.2: instrument names take no trailing
-        # period (unlike the title line above, which does) -- strip the
-        # one `encode_literary_braille` always appends, exactly one
-        # trailing character (not `.rstrip('⠲')`: the digit '4' encodes
-        # to that same dots-2,5,6 cell, so an instrument name that
-        # actually ends in "4" -- e.g. "Horn 4" -- would lose that digit
-        # too). The abbreviation column is "left-aligned beginning two
-        # cells beyond the last cell of the longest of the names",
-        # computed here from this score's actual instrument list, not a
-        # fixed width.
-        name_brls = [encode_literary_braille(staff.name)[:-1] for staff in score.staves]
-        max_name_len = max((len(n) for n in name_brls), default=0)
-        blank_cell = chr(0x2800)
-        for staff, name_brl in zip(score.staves, name_brls):
-            abbrev = staff_abbreviation(staff.name)
-
-            # BANA 33.2(d): "Two or more dot-5 guide dots are inserted to
-            # fill out the width of a column when an instrument name ends
-            # three or more cells before the end of the longest name. One
-            # space separates the end of the name and the beginning of
-            # the guide dots." A smaller deficit (1-2 cells) is plain
-            # blank fill instead -- not "two or more" guide dots' worth --
-            # but the abbreviation column still lands in the same place
-            # either way.
-            deficit = max_name_len - len(name_brl)
-            if deficit >= 3:
-                padding = blank_cell + '⠐' * (deficit - 1)
-            else:
-                padding = blank_cell * deficit
-
-            abbrev_brl = '⠜' + abbrev_to_brl(abbrev) + '⠄'
-            lines.append(name_brl + padding + '⠀⠀' + abbrev_brl)
+        # Instrument list (BANA 33.2) -- names take no trailing period
+        # (unlike the title line above), so encode_literary_braille()'s
+        # one always-appended trailing character is stripped inside
+        # render_name_abbreviation_table() (not .rstrip('⠲'): the digit
+        # '4' encodes to that same dots-2,5,6 cell, so an instrument name
+        # actually ending in "4" -- e.g. "Horn 4" -- would lose that digit
+        # too).
+        lines.extend(render_name_abbreviation_table(
+            [staff.name for staff in score.staves], self.line_width,
+        ))
 
         # Signature line
         first_staff = score.staves[0]
