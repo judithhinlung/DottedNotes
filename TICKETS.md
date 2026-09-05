@@ -7448,7 +7448,7 @@ to be rediscovered.
 
 ---
 
-### [ ] S11c-9: Implement BANA §35.1 solo-vocal line-by-line braille format (parser + renderer)
+### [x] S11c-9: Implement BANA §35.1 solo-vocal line-by-line braille format (parser + renderer)
 
 **Why:** `tests/fixtures/vocal_test.brf` (and any future vocal score) transcribes the Soprano part using the §33.2 ensemble-abbreviation shape (`>S'` prefix on the music line, interleaved with the piano parts every system). BANA Music Braille Code 2015 §35.1 ("Principles of Line-by-Line Format," Part III "Vocal Music") specifies a different, dedicated format for a solo vocal line: *"When lyrics and music are paired, the words begin at the margin and the corresponding music in the third cell of the following line. Either of the two lines may be carried into a run-over line ... beginning in cell 5 ... The syllables of the lyrics and the notes of the music must always be exactly paired."* Critically, §35.1 also states: *"Instrumental accompaniments are not included in the transcription and are brailled separately, as described in Par. 29.8"* — confirming the vocal line and its accompaniment are two separate transcriptions, not one parallel (see S11c-10). This exact cell-1/cell-3/cell-5 vocal indentation rule is already *documented* in S11c-2's rules compilation ("In vocal formats (line-by-line), lyrics lines start in cell 1, music lines are indented to cell 3 ... run-over lines of both are indented to cell 5") but was never actually implemented — there is no vocal-specific line-by-line code path anywhere in `renderers/braille_renderer.py` today (confirmed by inspection: no `_render_solo`/vocal-lyric function exists), and no instrument-abbreviation-free vocal parser path exists in `parser/` either.
 
@@ -7459,13 +7459,13 @@ to be rediscovered.
 4. Add unit tests for both directions using small hand-built BRF snippets (a lyric line + one measure of melody, plus a run-over case for each of lyric-only and music-only overflow).
 
 **Definition of Done:**
-- [ ] A vocal-with-lyrics BRF snippet in true §35.1 format (no instrument abbreviation, cell-3 music indent, cell-5 run-overs) parses into the same `Staff`/`lyrics` shape as today's `EnsembleParser`-based parsing.
-- [ ] `BrailleRenderer` emits this same §35.1 format when rendering a lone vocal `Staff` with lyrics back to BRF.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] A vocal-with-lyrics BRF snippet in true §35.1 format (no instrument abbreviation, cell-3 music indent, cell-5 run-overs) parses into the same `Staff`/`lyrics` shape as today's `EnsembleParser`-based parsing.
+- [x] `BrailleRenderer` emits this same §35.1 format when rendering a lone vocal `Staff` with lyrics back to BRF.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-10: Implement BANA §29.8 keyboard-accompaniment braille format (parser + renderer)
+### [x] S11c-10: Implement BANA §29.8 keyboard-accompaniment braille format (parser + renderer)
 
 **Why:** BANA §29.8 ("Keyboard Accompaniments") requires that when a vocal or instrumental solo has piano/keyboard accompaniment, *"the solo or instrumental parts are transcribed individually, and the accompaniment is transcribed separately. An outline of the solo part is included in the accompaniment ... placed above the right-hand part, marked with the solo-outline indicator [bare ⠜] treated as a hand sign, directly above the right-hand sign. The marginal measure number is placed in this line instead of in the right-hand line. The outline includes only notes, ties, rests, and other essential marks such as fermatas. It does not include nuances, slurs, word-sign expressions, or, in the case of vocal music, lyrics."* Today, `_detect_transcription_mode()` (`renderers/braille_renderer.py`) routes any 3-staff score straight to the generic `TranscriptionMode.ENSEMBLE` (`len(score.staves) > 2`), which emits full §33 parallel-abbreviation systems (`>S'`/`>PR'`/`>PL'` together every system) — this is what produced `vocal_test.brf`'s current, incorrect layout. The 2-staff `_render_piano()` path already has the right hand-sign primitives (`.>`/`_>` via `_build_piano_line_from_strings()`, `renderers/braille_renderer.py:845-862`) but never fires for this 3-staff shape and has no concept of the outline line at all. `EnsembleParser` (`parser/ensemble_parser.py`) has no support for `.>`/`_>` hand signs (those are only decoded by the unrelated single-instrument `braille_parser.py`, via `HAND_SIGN_CELLS` in `bana_symbols.py:705-707`) and no support for a bare-⠜ outline line. Note the real BANA ambiguity: bare ⠜ is *already* used elsewhere in this codebase as the generic §33 instrument-abbreviation opener (the "S" in `>S'`) — §29.8 reuses the identical cell for the outline indicator, disambiguated only by position (the outline line always sits directly above a `.>` right-hand line inside an accompaniment block, never followed by more abbreviation-label text).
 
@@ -7479,15 +7479,15 @@ to be rediscovered.
 5. Add unit tests for the outline derivation (confirm dynamics/slurs/lyrics are stripped, notes/ties/rests/fermatas survive) and for the new accompaniment-only render/parse path, including the measure-number-on-outline-not-right-hand rule.
 
 **Definition of Done:**
-- [ ] A 1-vocal-or-instrumental-solo + 1-2-piano `Score` renders to BRF as two separate blocks: solo transcription first, accompaniment (with outline line above the right hand) second, per §29.8.
-- [ ] The outline line contains only notes/ties/rests/fermatas.
-- [ ] The measure number appears on the outline line, not the right-hand line.
-- [ ] Parsing this two-block format round-trips to the same internal `Score` (staves, notes, lyrics) as today's flat `EnsembleParser` output for the same music.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] A 1-vocal-or-instrumental-solo + 1-2-piano `Score` renders to BRF as two separate blocks: solo transcription first, accompaniment (with outline line above the right hand) second, per §29.8.
+- [x] The outline line contains only notes/ties/rests/fermatas.
+- [x] The measure number appears on the outline line, not the right-hand line.
+- [x] Parsing this two-block format round-trips to the same internal `Score` (staves, notes, lyrics) as today's flat `EnsembleParser` output for the same music.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-11: Rewrite vocal_test.brf to true §35.1 + §29.8 format
+### [x] S11c-11: Rewrite vocal_test.brf to true §35.1 + §29.8 format
 
 **Why:** `tests/fixtures/vocal_test.brf` currently interleaves Soprano/Piano-Right/Piano-Left in one §33 ensemble parallel, which is the wrong BANA format for a vocal-solo-with-keyboard-accompaniment texture (see S11c-9/S11c-10). This ticket depends on both landing first, since there is currently no parser that can read the corrected format.
 
@@ -7497,13 +7497,13 @@ to be rediscovered.
 3. Re-run `test_vocal_test_fixture_compiles_cleanly` to confirm the (unchanged) `Score` model still compiles with zero LilyPond warnings.
 
 **Definition of Done:**
-- [ ] `vocal_test.brf` transcribed in true BANA §35.1 (vocal solo) + §29.8 (keyboard accompaniment) format, developer-verified cell by cell.
-- [ ] `test_vocal_test_fixture_groups_staves_and_maps_lyrics` and `test_vocal_test_fixture_matches_ground_truth` pass unchanged against the new `.brf` input.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] `vocal_test.brf` transcribed in true BANA §35.1 (vocal solo) + §29.8 (keyboard accompaniment) format, developer-verified cell by cell.
+- [x] `test_vocal_test_fixture_groups_staves_and_maps_lyrics` and `test_vocal_test_fixture_matches_ground_truth` pass unchanged against the new `.brf` input.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-12: Implement BANA §37.1 expanded bar-over-bar format for vocal ensembles
+### [x] S11c-12: Implement BANA §37.1 expanded bar-over-bar format for vocal ensembles
 
 **Why:** A vocal ensemble score (e.g. SATB choir, no accompaniment — accompanied scores are S11c-9/S11c-10's solo-plus-keyboard territory instead) is transcribed per BANA §37.1 ("Expanded Bar-over-Bar Format"): *"All lyrics of the parallel are given in successive braille lines, followed by all of the music lines."* This is a block-ordering shape (word-line block, then music-line block) that neither the existing `_render_ensemble()`/`EnsembleParser` (§33, which interleaves one line per staff, staff by staff) nor the S11c-9 solo-vocal path can produce. Several of §37.1's sub-rules already have a direct analog to reuse rather than reinvent:
 - (c) "A part that has rests throughout the music included in a parallel is omitted" is identical to §33.1's tacet-staff omission, already implemented as `active_staff_indices()`/`rest_only_grid` in `renderers/braille_renderer.py:934-957` and directly reusable.
@@ -7522,14 +7522,14 @@ New pieces §33 has no analog for: the word-lines-then-music-lines block orderin
 5. Unit tests: a parallel with one fully-tacet voice omits that voice's music line; the first note of a second, later music line (not just the first measure) correctly requires/carries an octave mark.
 
 **Definition of Done:**
-- [ ] A multi-voice vocal-ensemble parallel (word lines, then music lines, no accompaniment) renders with correct block ordering and tacet-voice omission.
-- [ ] The first note of every music line carries a correct octave mark, independent of measure position.
-- [ ] Soprano/alto vs. tenor/bass in-accord reading direction (37.1(j)) is applied correctly.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] A multi-voice vocal-ensemble parallel (word lines, then music lines, no accompaniment) renders with correct block ordering and tacet-voice omission.
+- [x] The first note of every music line carries a correct octave mark, independent of measure position.
+- [x] Soprano/alto vs. tenor/bass in-accord reading direction (37.1(j)) is applied correctly.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-13: Support BANA §37.2 shared word line for vocal ensembles
+### [x] S11c-13: Support BANA §37.2 shared word line for vocal ensembles
 
 **Why:** §37.2 ("All Parts Having the Same Words"): *"Only one word line is required when all of the voices have the same words for the music in the parallel... It is not necessary to show an identifier in the word line."* This is one of the two word-line shapes requested for DottedNotes (the other is S11c-14). **Explicitly out of scope:** §37.2.1 ("Slight Variations of Words among Parts"), which lets one voice's word insert be bracketed inline into an otherwise-shared line — this is an optional transcriber shorthand, not a required form; a score with per-voice word variations can always be transcribed with full §37.3 (separate line per voice, S11c-14) instead, which covers it correctly if less compactly.
 
@@ -7541,13 +7541,13 @@ New pieces §33 has no analog for: the word-lines-then-music-lines block orderin
 3. Unit tests: an all-voices-same-words parallel renders as one unprefixed word line; parsing that line attaches identical lyrics to every active voice's `Staff.lyrics`/syllable mapping.
 
 **Definition of Done:**
-- [ ] A parallel where all active vocal parts share identical words renders as one unprefixed word line.
-- [ ] Parsing that single shared line attaches the same lyrics to every voice active in the parallel.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] A parallel where all active vocal parts share identical words renders as one unprefixed word line.
+- [x] Parsing that single shared line attaches the same lyrics to every voice active in the parallel.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-14: Support BANA §37.3 separate word line per voice for vocal ensembles
+### [x] S11c-14: Support BANA §37.3 separate word line per voice for vocal ensembles
 
 **Why:** §37.3 ("Parts Having Different Words"): *"When the voices in a parallel have different words, the words for each part are given in a separate line, prefaced at the margin by the identifier of the name of the voice and a space. The first characters of the words of all of the lines of the parallel are vertically aligned... Run-over lines are not allowed when there are two or more lines of text."* This is the second of the two word-line shapes requested for DottedNotes, used whenever S11c-13's "all voices share the same words" detection doesn't apply. **Explicitly out of scope:** §37.3.1 ("Combining Identical Lines"), which lets adjacent voices with identical word or music content share one line under two *different* identifier-concatenation grammars (`S'A'` for combined word-line identifiers vs. `SA'` for combined music-line identifiers) that can vary per parallel, independently for words and music. This is an optional transcriber compression, not a required form — a score using it can always be transcribed instead with plain, non-consolidated §37.2/§37.3 lines, which is equally valid BANA and is what DottedNotes will always produce and expect on parsing.
 
@@ -7560,14 +7560,14 @@ New pieces §33 has no analog for: the word-lines-then-music-lines block orderin
 4. Unit tests: a parallel with differing per-voice lyrics renders/parses to N separate identified lines, correctly vertically aligned; an overlong word line in a multi-voice-lyrics parallel is flagged rather than wrapped.
 
 **Definition of Done:**
-- [ ] A parallel where vocal parts have different words renders as one identified word line per voice, vertically aligned.
-- [ ] Parsing N separate identified word lines attaches each voice's own lyrics correctly.
-- [ ] An overlong word line in a multi-voice-lyrics parallel is flagged rather than silently given a run-over line.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] A parallel where vocal parts have different words renders as one identified word line per voice, vertically aligned.
+- [x] Parsing N separate identified word lines attaches each voice's own lyrics correctly.
+- [x] An overlong word line in a multi-voice-lyrics parallel is flagged rather than silently given a run-over line.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-15: Correctly implement BANA §35.4 repeat sign for words or phrases
+### [x] S11c-15: Correctly implement BANA §35.4 repeat sign for words or phrases
 
 **Why:** BANA §35.4 ("Repeat Sign for Words or Phrases"): *"The repeat sign for a word or phrase [⠔] is placed, without intervening spaces, before and after the word or phrase to be repeated. All of the text and all of the associated music must be contained in the same parallel... Capitalization follows that of the original iteration. Opening punctuation of the original iteration is placed after the opening repeat sign, and closing punctuation of the final iteration before the terminating repeat sign."* Three encodings, all using the same sign (⠔, dots 3,5, ASCII `9`):
 - (a) repeated once: one ⠔ before the phrase, one after (Example 35.4-1: `9,BENEDICTUS49` — sign, "Benedictus", period, sign).
@@ -7587,14 +7587,14 @@ The music line is **not** compressed by this device — the repeated phrase's mu
 6. Stretch goal, deferred until S11c-9 (or S11c-12) lands a working lyric-emission renderer: detect an identical repeated phrase in `Staff.lyrics` and emit the compact §35.4 sign instead of writing the phrase out twice — optional, since writing the full repeated text is always valid BANA and the renderer never *needs* to produce the compact form (same reasoning as the S11c-13/14 exclusions).
 
 **Definition of Done:**
-- [ ] `parse_lyrics()` correctly decodes all three repeat-sign cases (once/twice/numeral-prefixed) against BANA's own worked examples (35.4-1 through 35.4-4), including multi-word phrases, not just single words.
-- [ ] Opening/closing punctuation placement and capitalization-carry are correct per the rule.
-- [ ] The old space-separated-token heuristic and its test are replaced with real BANA-encoded coverage.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] `parse_lyrics()` correctly decodes all three repeat-sign cases (once/twice/numeral-prefixed) against BANA's own worked examples (35.4-1 through 35.4-4), including multi-word phrases, not just single words.
+- [x] Opening/closing punctuation placement and capitalization-carry are correct per the rule.
+- [x] The old space-separated-token heuristic and its test are replaced with real BANA-encoded coverage.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-16: Support BANA §35.10 parts extracted from choral scores
+### [x] S11c-16: Support BANA §35.10 parts extracted from choral scores
 
 **Why:** §35.10 ("Parts Extracted from Choral Scores"): *"Individual voice parts that are extracted by the transcriber from a choral score are transcribed in the same manner as a vocal solo. The transcriber must be careful to include relevant indications of expression and execution that may be shown in print above the top staff of the score or elsewhere and not duplicated near the part being extracted... If the print score shows measure numbers in places that are related to the print layout but not to the musical structure ... those numbers are not included in the transcription. In such cases it is advisable to show the measure number in the braille at the beginning of each parallel or of every second or third parallel."* This is a prerequisite for S11c-17/S11c-18 (Music Drama, §38): §38.1 routes a single-character extracted part through this exact format, while a 2+-character score goes through the choral-ensemble format (§37, already ticketed as S11c-12/13/14) instead. Related §35.9 rule folded in here since §35.10 depends on it: *"Measure numbers are not usually included in the braille transcription of vocal music, the word text serving as the point of reference... A rehearsal marking that is either a letter or a number that is not an actual measure number must be given between word signs at the margin in a separate line above the word line."*
 
@@ -7609,14 +7609,14 @@ The music line is **not** compressed by this device — the repeated phrase's mu
 4. Document (not code) that expression/execution markings shown in print near the top staff of a full choral score must be carried into the extracted single-part transcription by whatever builds the extraction (`--part`/`--list-parts`, CLAUDE.md Key Design Decision 11) rather than silently dropped.
 
 **Definition of Done:**
-- [ ] An extracted single-character/single-voice part parses/renders using S11c-9's §35.1 solo mechanics.
-- [ ] Measure numbers, when the print source numbers by layout rather than musical structure, can be placed at a configurable parallel cadence instead of the vocal-solo default of omitting them.
-- [ ] Rehearsal references and real extracted measure numbers are distinguished and placed correctly (word-signed free line above the word line vs. unenclosed at the word line's start).
-- [ ] `pytest tests/` passes with no regressions.
+- [x] An extracted single-character/single-voice part parses/renders using S11c-9's §35.1 solo mechanics.
+- [x] Measure numbers, when the print source numbers by layout rather than musical structure, can be placed at a configurable parallel cadence instead of the vocal-solo default of omitting them.
+- [x] Rehearsal references and real extracted measure numbers are distinguished and placed correctly (word-signed free line above the word line vs. unenclosed at the word line's start).
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-17: Support BANA §38.1/38.2 music-drama character lists
+### [x] S11c-17: Support BANA §38.1/38.2 music-drama character lists
 
 **Why:** §38.1 ("Vocal Scores and Extracted Solo Parts"): *"As with other vocal and choral music, instrumental accompaniments are not included in the transcription and are brailled separately, as described in Par. 29.8. A score for one character is transcribed as a choral part would be done, as described in Par. 35.10. A score including more than one part is transcribed as a choral ensemble as described in Sec. 37."* §38.2 ("List of Characters"): *"When the score includes music for two or more characters ... a one- or two-letter unique identifier of the name of each character must be assigned. The identifiers are not capitalized, and are always terminated by dot 3. They are employed in the parallels of the score exactly as are the names of the parts in a choral ensemble. The single-letter identifiers c, d, f, and p should not be used, to avoid appearing to be dynamic markings ... The names of the characters with their identifiers must be given in a table at the beginning of the score."* This is the "character names and parts" half of the request — a music-drama score with 2+ characters is structurally just a choral ensemble (S11c-12/13/14) whose voice names happen to be character names, plus a name/identifier table and one extra validation rule.
 
@@ -7629,14 +7629,14 @@ The music line is **not** compressed by this device — the repeated phrase's mu
 4. Unit tests: a character-list table with 2-3 named characters (including one deliberately using a disallowed `c`/`d`/`f`/`p` identifier, expecting a warning) parses into the correct per-character staves; render round-trip reproduces the table.
 
 **Definition of Done:**
-- [ ] A music-drama score's character-list table (name + 1-2-letter lowercase identifier) parses into per-character staves, reusing the existing instrument-list mechanism.
-- [ ] A disallowed single-letter `c`/`d`/`f`/`p` identifier produces a clear warning.
-- [ ] Character word/music lines behave exactly like S11c-12/13/14's choral-ensemble voice lines (same block structure, tacet-omission, shared-vs-separate-lyrics detection).
-- [ ] `pytest tests/` passes with no regressions.
+- [x] A music-drama score's character-list table (name + 1-2-letter lowercase identifier) parses into per-character staves, reusing the existing instrument-list mechanism.
+- [x] A disallowed single-letter `c`/`d`/`f`/`p` identifier produces a clear warning.
+- [x] Character word/music lines behave exactly like S11c-12/13/14's choral-ensemble voice lines (same block structure, tacet-omission, shared-vs-separate-lyrics detection).
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
-### [ ] S11c-18: Support BANA §38.3 stage directions
+### [x] S11c-18: Support BANA §38.3 stage directions
 
 **Why:** §38.3 ("Stage Directions"): *"Single words or short phrases may be placed in the word lines of the characters to whom they apply. Run-overs of word lines that include such directions are permissible when there is only one word line in the parallel. Longer directions, especially if there are many, may be numbered and placed on separate pages at the ends of scenes or acts. The number is given in the music line, introduced by the appropriate italic indicator and enclosed between blank spaces. If it occurs at the beginning of a measure, the number is excluded from the alignment of parts; if it begins the parallel, the spaced number follows the identifier."* Two distinct forms: (1) short directions inline in a character's word line, and (2) longer directions replaced by a numbered reference in the music line, resolved against a footnote block at the end of the scene/act.
 
@@ -7651,9 +7651,9 @@ The music line is **not** compressed by this device — the repeated phrase's mu
 3. Unit tests: an inline short direction round-trips inside a word line; a numbered direction's reference position (mid-measure vs. parallel-opening) and its resolved footnote text round-trip correctly.
 
 **Definition of Done:**
-- [ ] Short stage directions embedded in a character's word line parse/render correctly, respecting the existing single-word-line run-over constraint.
-- [ ] Numbered stage directions are recognized in the music line (with correct position-dependent formatting) and resolved against an end-of-scene/act footnote block.
-- [ ] `pytest tests/` passes with no regressions.
+- [x] Short stage directions embedded in a character's word line parse/render correctly, respecting the existing single-word-line run-over constraint.
+- [x] Numbered stage directions are recognized in the music line (with correct position-dependent formatting) and resolved against an end-of-scene/act footnote block.
+- [x] `pytest tests/` passes with no regressions.
 
 ---
 
