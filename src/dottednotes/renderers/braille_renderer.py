@@ -683,6 +683,7 @@ class BrailleRenderer:
         full_measure_repeat: str = "single-voice",
         min_repeated_measures: int = 2,
         include_clef_sign: bool = False,
+        vocal_measure_number_every: int = 0,
     ):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
@@ -730,6 +731,21 @@ class BrailleRenderer:
         # emit a clef sign at all today regardless of this setting, an
         # existing gap this doesn't attempt to close.
         self.include_clef_sign = include_clef_sign
+        # BANA §35.9: "Measure numbers are not usually included in the
+        # braille transcription of vocal music, the word text serving as
+        # the point of reference. However, an occasional measure number...
+        # may be helpful ... when measure numbers appear in the
+        # accompaniment" -- 0 (default) matches that "not usually"
+        # baseline for _render_vocal_solo; a positive N shows a real
+        # measure number at the start of every Nth parallel's word line
+        # (S11c-16/§35.10, for a part extracted from a choral/full score
+        # whose print source numbers by page layout rather than musical
+        # structure).
+        if vocal_measure_number_every < 0:
+            raise ValueError(
+                f"vocal_measure_number_every must be >= 0, got {vocal_measure_number_every!r}"
+            )
+        self.vocal_measure_number_every = vocal_measure_number_every
 
     def _detect_transcription_mode(self, score: Score) -> TranscriptionMode:
         # is_piano is computed first and independent of isinstance(score,
@@ -1041,6 +1057,7 @@ class BrailleRenderer:
         idx = 0
         n_measures = len(staff.measures)
         prev_note = None
+        parallel_index = 0
 
         while idx < n_measures:
             # Pack as many measures as fit the music line (cell 3) into one
@@ -1085,11 +1102,24 @@ class BrailleRenderer:
             syllables_remaining = syllables_remaining[n_slots:]
             lyric_str = encode_lyric_line(phrase_syllables)
 
+            # §35.9/S11c-16: a real measure number, when shown at all,
+            # goes at the very start of the word line with no word signs
+            # (unlike a rehearsal reference, which isn't a measure number
+            # and does need them) -- bare literary digits, matching this
+            # renderer's existing no-numeral-sign margin-number convention
+            # for other bar-over-bar-shaped formats (_build_piano_line_
+            # from_strings/_build_outline_line_from_strings).
+            if self.vocal_measure_number_every and parallel_index % self.vocal_measure_number_every == 0:
+                m_num = self._display_measure_number(staff.measures, idx)
+                num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(m_num))
+                lyric_str = num_str + '⠀' + lyric_str
+
             lines.extend(wrap_run_over_line(lyric_str, self.line_width, indent_cells=4))
             lines.extend(wrap_run_over_line(music_str, self.line_width, indent_cells=4))
 
             prev_note = tmp_prev
             idx += fit_size
+            parallel_index += 1
 
         return "\n".join(lines) + "\n"
 

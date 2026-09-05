@@ -7694,6 +7694,23 @@ This is not something DottedNotes can solve generically -- doing so requires rea
 
 ---
 
+### [ ] S11c-21: Vocal-solo rehearsal references (§35.9) not yet supported
+
+**Why:** S11c-16 implemented §35.9/§35.10's *measure-number* half (a real measure number, no word signs, at a configurable parallel cadence -- `BrailleRenderer(vocal_measure_number_every=N)` / `parse_vocal_solo(text, has_measure_numbers=True)`), but not its *rehearsal-reference* half: *"A rehearsal marking that is either a letter or a number that is not an actual measure number must be given between word signs at the margin in a separate line above the word line."* This is structurally different from a measure number -- its own free line, word-sign-wrapped, positioned above (not inside) the word line -- and was out of scope for S11c-16's pass given its size.
+
+**Steps:**
+1. Add a way to attach a rehearsal-reference marking to a specific parallel (e.g. on `Measure` or threaded through the renderer call, mirroring how other per-measure/per-parallel markings already attach).
+2. Render it as a free line above the word line, the marking wrapped in word signs (⠜...⠄), distinct from the unenclosed measure-number case S11c-16 already handles.
+3. Parse it back: a free line above a word line, word-sign-wrapped, is a rehearsal reference (not a measure number, not lyric text) -- attach it back to the correct parallel.
+4. Add tests distinguishing a real measure number (no word signs, inline with the word line) from a rehearsal reference (word signs, its own line above).
+
+**Definition of Done:**
+- [ ] A rehearsal reference renders as its own word-sign-wrapped free line above the word line, distinct from a measure number.
+- [ ] Round-trips correctly through the parser.
+- [ ] `pytest tests/` passes with no regressions.
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

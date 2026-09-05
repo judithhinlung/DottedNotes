@@ -17,6 +17,7 @@ detects an ensemble score).
 
 from __future__ import annotations
 
+from ..bana_symbols import LITERARY_DIGITS
 from ..exceptions import BrailleParseError
 from ..models.score import Score
 from .braille_parser import BrailleParser
@@ -47,9 +48,34 @@ _BRAILLE_PARSER_RUNOVER_INDENT = '⠀⠀'
 _CONTINUATION_MARKER = '⠐'
 
 
-def parse_vocal_solo(text: str) -> Score:
+def _strip_leading_measure_number(line: str) -> str:
+    """Strip a real BANA §35.9/§35.10 measure number (bare literary
+    digits, no word signs, immediately followed by a blank cell) from the
+    start of a fresh word line. Only called when the caller has opted in
+    via `has_measure_numbers=True` -- otherwise a short lyric word like
+    "A" or "I" immediately followed by a space at the start of a line
+    would be ambiguous with a single-digit measure number, and this
+    module has no way to tell them apart from content alone."""
+    i = 0
+    n = len(line)
+    while i < n and line[i] in LITERARY_DIGITS:
+        i += 1
+    if i > 0 and i < n and line[i] == '⠀':
+        return line[i + 1:]
+    return line
+
+
+def parse_vocal_solo(text: str, has_measure_numbers: bool = False) -> Score:
     """Parse BANA §35.1 solo-vocal content into a `Score` with one staff,
-    `staff.lyrics` populated from the word lines."""
+    `staff.lyrics` populated from the word lines.
+
+    `has_measure_numbers` (§35.9/§35.10, S11c-16): set when the source is
+    known to place a real measure number at the start of some word lines
+    -- the caller must know this from context (e.g. it asked
+    `BrailleRenderer` to render with `vocal_measure_number_every` set),
+    since the content alone can't safely distinguish a measure number from
+    a short lyric word at the start of a line (see
+    `_strip_leading_measure_number`)."""
     lines = text.split('\n')
     while lines and lines[-1] == '':
         lines.pop()
@@ -99,7 +125,7 @@ def parse_vocal_solo(text: str) -> Score:
             music_lines.append(line[len(_MUSIC_LINE_INDENT):])
             current = 'music'
         else:
-            add_word_chunk(line)
+            add_word_chunk(_strip_leading_measure_number(line) if has_measure_numbers else line)
             current = 'word'
 
     if not music_lines:

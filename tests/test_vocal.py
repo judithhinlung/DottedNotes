@@ -549,3 +549,77 @@ def test_vocal_solo_does_not_compress_repeated_measure_into_measure_repeat_sign(
     parsed = parse_vocal_solo(output)
     assert parsed.staves[0].lyrics == ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"]
     assert len(parsed.staves[0].measures) == 2
+
+
+# ---------------------------------------------------------------------------
+# S11c-16: BANA §35.9/§35.10 -- vocal solo measure numbers are omitted by
+# default, but a part extracted from a choral/full score whose print
+# source numbers by page layout (not musical structure) may show a real
+# measure number at a configurable parallel cadence instead.
+# ---------------------------------------------------------------------------
+
+
+def _numbered_vocal_score(n_measures=4):
+    score = Score(title="")
+    staff = Staff(name="Soprano")
+    staff.time_signature = TimeSignature(
+        dots=frozenset(), category=None, raw_brl="", numerator=4, denominator=4
+    )
+    words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
+             "golf", "hotel", "india", "juliet", "kilo", "lima",
+             "mike", "november", "oscar", "papa"]
+    lyrics = []
+    for i in range(n_measures):
+        m = Measure(number=i + 1)
+        for name in ("C", "D", "E", "F"):
+            m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name=name, octave=5, duration=Duration(value=4)))
+        staff.add_measure(m)
+        lyrics.extend(words[i * 4:i * 4 + 4])
+    staff.lyrics = lyrics
+    score.add_staff(staff)
+    return score
+
+
+def test_vocal_solo_measure_numbers_off_by_default():
+    # §35.9's default ("not usually included") round-trips cleanly with no
+    # measure-number stripping requested -- confirming no number was
+    # actually inserted (a raw-cell scan can't tell this apart from a
+    # lowercase word starting with a letter that happens to share a cell
+    # with a digit, e.g. "alpha" and digit 1 both start with dot 1).
+    score = _numbered_vocal_score()
+    output = BrailleRenderer(line_width=12).render(score)
+
+    parsed = parse_vocal_solo(output)
+    assert parsed.staves[0].lyrics == score.staves[0].lyrics
+
+
+def test_vocal_solo_measure_number_cadence_round_trips():
+    score = _numbered_vocal_score()
+    renderer = BrailleRenderer(line_width=12, vocal_measure_number_every=2)
+    output = renderer.render(score)
+
+    parsed = parse_vocal_solo(output, has_measure_numbers=True)
+    assert parsed.staves[0].lyrics == score.staves[0].lyrics
+    assert len(parsed.staves[0].measures) == 4
+
+
+def test_vocal_solo_measure_number_every_1_shows_every_parallel():
+    score = _numbered_vocal_score()
+    renderer = BrailleRenderer(line_width=12, vocal_measure_number_every=1)
+    output = renderer.render(score)
+    lines = [l for l in output.split("\n") if l]
+
+    from dottednotes.bana_symbols import LITERARY_DIGITS
+    # Every parallel's word line (i.e. every line starting a new lyric
+    # phrase, not a run-over continuation at cell 5) must start with a digit.
+    word_line_starts = [l for l in lines[1:] if not l.startswith('⠀')]
+    assert word_line_starts
+    assert all(l[0] in LITERARY_DIGITS for l in word_line_starts)
+
+    parsed = parse_vocal_solo(output, has_measure_numbers=True)
+    assert parsed.staves[0].lyrics == score.staves[0].lyrics
+
+
+def test_vocal_solo_rejects_negative_measure_number_cadence():
+    with pytest.raises(ValueError):
+        BrailleRenderer(vocal_measure_number_every=-1)
