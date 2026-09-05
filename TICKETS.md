@@ -7657,6 +7657,24 @@ The music line is **not** compressed by this device — the repeated phrase's mu
 
 ---
 
+### [ ] S11c-19: Vocal-solo lyric parsing can't recover a syllable split within one continuous braille word spanning multiple note-groups
+
+**Why:** Discovered while rewriting `vocal_test.brf` to real BANA §35.1 format (S11c-11). BANA §35.1.1(a): print hyphens dividing one word's syllables "are not included in the braille" (unless nonsense syllables/unusual pronunciation) -- so a 2-syllable word like "flowers," sung with one syllable per note (a very common case, not rare), is written as a single unbroken braille word with no marker at all of where it divides. `parse_vocal_solo()` (and by extension `parse_solo_with_accompaniment()`) currently treats each space-delimited braille word as exactly one syllable slot (`map_syllables_to_groups()`, shared with `EnsembleParser`). When one braille word actually needs to fill *two or more* note-group slots, this undercounts: the word consumes only one slot, and every subsequent syllable in the phrase shifts one position out of alignment with its note-group for the rest of the piece -- not just a harmlessly dropped final syllable. The existing mismatch warning (`map_syllables_to_groups`'s "N lyric syllable(s) but M note/slur-group(s)") does fire and is non-fatal, but the resulting `Staff.lyrics` list is silently misaligned past that point, which a caller could easily miss since it's not an error.
+
+This is not something DottedNotes can solve generically -- doing so requires real English (or whatever language the lyrics are in) hyphenation, which the braille itself never encodes and which isn't reliably algorithmic without a dictionary or model. Vocal_test.brf's fixed melisma (S11c-11 merged the "flo"/"wers" notes into one held note to sidestep this for that specific fixture) is a workaround for one fixture, not a fix for the underlying gap.
+
+**Steps:**
+1. Decide a policy for the ambiguous case rather than silently truncating: options include (a) requiring an explicit BRF convention marking mid-word note-group boundaries (check whether BANA specifies one for this exact situation beyond §35.1.1(a)'s stated exception for nonsense/unusual-pronunciation words -- don't guess, look it up), (b) accepting a supplied hyphenation dictionary/library as an optional input, or (c) making the current mismatch case louder (e.g. escalate from warning to a structured `BANAValidator` finding with the exact word/position) so a human transcriber notices and corrects it, without trying to auto-split.
+2. Whatever policy is chosen, apply it consistently across `parse_vocal_solo()`, `EnsembleParser`'s existing lyric-mapping path, and the future choral-ensemble parsers (S11c-12/13/14), since all three share `map_syllables_to_groups()`.
+3. Add a regression test with a real multi-syllable word split one-syllable-per-note (no melisma, no slur) confirming the chosen policy's behavior, distinct from the already-covered melisma/slur case.
+
+**Definition of Done:**
+- [ ] A documented, deliberate policy exists for a braille word that must fill more than one note-group slot, replacing today's silent shift-by-one truncation.
+- [ ] The policy is applied consistently everywhere `map_syllables_to_groups()` is used.
+- [ ] `pytest tests/` passes with no regressions.
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

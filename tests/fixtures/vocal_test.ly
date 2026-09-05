@@ -21,7 +21,7 @@ sopranoMusic = \relative c' {
     f16 f16 g8 a4 a4 a4 |
     bes8( a8) g4 r2 |
     bes8\p( a8) g4 r2 |
-    a8\<( bes8) c4 c4 c4 |
+    a8\<( bes8) c2 c4 |
     f,8\>( g8) a4 a4 a4 |
     a8\p bes8 g4 r2 |
     g4 f4~ f2 |
@@ -30,14 +30,14 @@ sopranoMusic = \relative c' {
 pianoRightHandMusic = \relative c' {
     \key f \major
     \time 4/4
-    r4 r8 <f a c>8\f r8 <f a c>8 r8 <f a c>8 |
-    r4 r8 <f a c>8\f r8 <f a c>8 r8 <f a c>8 |
-    r2 r4 <c e g c>4 |
-    r2 r4 <c' e g c>4\p |
-    r4 r8 <f, a c>8\< r8 <f a c>8 r8 <f a c>8 |
-    r4 r8 <f a c>8\> r8 <f a c>8 r8 <f a c>8 |
-    r2 r4 <e g c>4\p |
-    <e g c>4 <f a c>2. |
+    r4 r8 <c' a f>8\f r8 <c a f>8 r8 <c a f>8 |
+    r4 r8 <c a f>8\f r8 <c a f>8 r8 <c a f>8 |
+    r2 r4 <c g e c>4 |
+    r2 r4 <c' g e c>4\p |
+    r4 r8 <c, a f>8\< r8 <c a f>8 r8 <c a f>8 |
+    r4 r8 <c a f>8\> r8 <c a f>8 r8 <c a f>8 |
+    r2 r4 <c g e>4\p |
+    <c g e>4 <c a f>2. |
 }
 
 pianoLefthandMusic = \relative c {
@@ -64,7 +64,7 @@ pianoLefthandMusic = \relative c {
       \set Staff.instrumentName = "Soprano"
       \sopranoMusic
     }
-    \new Lyrics \lyricsto "vocals_soprano" { Let me run, run, run, After the sun, sun, sun, Let me, Find hope, Where the flo -- wers bloom, And the leaves are green, Where I will, Find hope. }
+    \new Lyrics \lyricsto "vocals_soprano" { Let me run, run, run, After the sun, sun, sun, Let me, Find hope, Where the flowers bloom, And the leaves are green, Where I will, Find hope. }
   >>
 \new PianoStaff <<
     \new Staff \with {

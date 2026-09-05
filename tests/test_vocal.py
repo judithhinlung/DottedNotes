@@ -8,6 +8,7 @@ from dottednotes.models import Score, Staff, Note, Duration, Measure, TimeSignat
 from dottednotes.parser.ensemble_parser import EnsembleParser, parse_lyrics
 from dottednotes.parser.input_pipeline import BRLInputPipeline, ascii_braille_char_to_unicode
 from dottednotes.parser.vocal_solo_parser import parse_vocal_solo
+from dottednotes.parser.solo_with_accompaniment_parser import parse_solo_with_accompaniment
 from dottednotes.renderers.braille_renderer import BrailleRenderer, encode_lyric_line
 from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
 
@@ -167,28 +168,38 @@ def test_vocal_lyrics_mapping_integration():
 
 
 # ---------------------------------------------------------------------------
-# S7b-9: real-fixture integration test -- vocal_test.brf (Soprano + Piano
-# Right Hand + Piano Left-Hand, an art-song-shaped score with lyrics, a
-# crescendo/decrescendo pair, and a whole-measure repeat sign that carries
-# its own new dynamic marking) parses end to end, groups its staves into
-# the right InstrumentFamily, associates lyrics with the soprano line, and
-# -- per CLAUDE.md's "check the compile log for warnings, not just the exit
-# code" testing philosophy -- transcribes to LilyPond that compiles with the
-# real lilypond binary with zero warnings. Mirrors the tmp_path/skip-if
-# pattern already established in test_lilypond_formatter.py's
-# _compile_and_check_no_warnings for the other three formatting categories.
+# S7b-9/S11c-11: real-fixture integration test -- vocal_test.brf (Soprano +
+# Piano Right Hand + Piano Left-Hand, an art-song-shaped score with lyrics,
+# a crescendo/decrescendo pair, and a whole-measure repeat sign that
+# carries its own new dynamic marking) parses end to end, associates
+# lyrics with the soprano line, and -- per CLAUDE.md's "check the compile
+# log for warnings, not just the exit code" testing philosophy --
+# transcribes to LilyPond that compiles with the real lilypond binary with
+# zero warnings. Mirrors the tmp_path/skip-if pattern already established
+# in test_lilypond_formatter.py's _compile_and_check_no_warnings for the
+# other three formatting categories.
+#
+# S11c-11 rewrote this fixture from the (incorrect) §33 ensemble-parallel
+# format into true BANA §35.1 (vocal solo) + §29.8 (keyboard accompaniment)
+# format, parsed here via `parse_solo_with_accompaniment` instead of
+# `EnsembleParser`. One consequence of the real format: unlike §33's
+# instrument-list header, neither §35.1 nor §29.8 puts instrument *names*
+# anywhere in the content itself (§35.1.2: "No part identifier is
+# necessary... the voice category... will have been given in the
+# preliminary material") -- so `staff.name` comes back as whatever generic
+# default `BrailleParser` uses for an unnamed staff, not "Soprano"/"Piano
+# Right Hand"/"Piano Left-Hand". A real CLI/UI workflow would need to
+# supply those names from external context (the same way S10d-12's part
+# extraction already needs outside metadata); this test checks structure
+# and lyrics instead of recovered names.
 # ---------------------------------------------------------------------------
 
 
 def test_vocal_test_fixture_groups_staves_and_maps_lyrics():
     text = BRLInputPipeline().load(FIXTURES / "vocal_test.brf")
-    score = EnsembleParser().parse(text)
+    score = parse_solo_with_accompaniment(text)
 
-    assert [s.name for s in score.staves] == [
-        "Soprano",
-        "Piano Right Hand",
-        "Piano Left-Hand",
-    ]
+    assert len(score.staves) == 3
     assert get_instrument_family("Soprano") == InstrumentFamily.VOCAL
     assert get_instrument_family("Piano Right Hand") == InstrumentFamily.KEYBOARD_HARP
     assert get_instrument_family("Piano Left-Hand") == InstrumentFamily.KEYBOARD_HARP
@@ -196,9 +207,13 @@ def test_vocal_test_fixture_groups_staves_and_maps_lyrics():
     soprano_staff, piano_right_staff, piano_left_staff = score.staves
     assert soprano_staff.lyrics[:2] == ["Let", "me"]
     assert soprano_staff.lyrics[-1] == "hope."
-    # "flo-wers" carries a BANA syllabic slur -- rendered as a lyric
-    # continuation ("flo --") so LilyPond draws the syllable-joining line.
-    assert "flo --" in soprano_staff.lyrics
+    # "flowers" (2 syllables, both on their own note, no braille hyphen per
+    # §35.1.1(a)) is written as one continuous word -- unlike the old
+    # ensemble-format fixture, which baked a "flo --"/"wers" LilyPond-style
+    # split into the content itself (not real BANA braille; see S11c-9's
+    # test_vocal_solo_renderer_omits_print_hyphen_between_syllables for why
+    # that split can't be recovered from braille alone).
+    assert "flowers" in soprano_staff.lyrics
     assert piano_right_staff.lyrics == []
     assert piano_left_staff.lyrics == []
 
@@ -230,9 +245,28 @@ def _compile_and_check_no_warnings(ly_output: str, tmp_path: Path, basename: str
     return pdf_path
 
 
-def test_vocal_test_fixture_matches_ground_truth():
+def _load_vocal_test_score() -> Score:
+    """Parse vocal_test.brf and assign the instrument names its LilyPond
+    ground truth expects -- not recoverable from §35.1/§29.8 content
+    itself (see the module note above `test_vocal_test_fixture_groups_
+    staves_and_maps_lyrics`), so a real workflow would supply them from
+    external context the same way this test does explicitly."""
+    from dottednotes.models.orchestra_score import OrchestraScore
+
     text = BRLInputPipeline().load(FIXTURES / "vocal_test.brf")
-    score = EnsembleParser().parse(text)
+    score = parse_solo_with_accompaniment(text)
+    score.staves[0].name = "Soprano"
+    score.staves[1].name = "Piano Right Hand"
+    score.staves[2].name = "Piano Left-Hand"
+
+    combined = OrchestraScore(title=score.title)
+    for staff in score.staves:
+        combined.add_staff(staff)
+    return combined
+
+
+def test_vocal_test_fixture_matches_ground_truth():
+    score = _load_vocal_test_score()
 
     ly_output = score.to_lilypond()
     ground_truth = (FIXTURES / "vocal_test.ly").read_text(encoding="utf-8")
@@ -243,8 +277,7 @@ def test_vocal_test_fixture_compiles_cleanly(tmp_path: Path):
     if not shutil.which("lilypond"):
         pytest.skip("lilypond binary not found; skipping compile test")
 
-    text = BRLInputPipeline().load(FIXTURES / "vocal_test.brf")
-    score = EnsembleParser().parse(text)
+    score = _load_vocal_test_score()
 
     ly_output = score.to_lilypond()
     assert '\\new Voice = "vocals_soprano"' in ly_output
