@@ -689,6 +689,106 @@ def map_syllables_to_groups(
     return mapped_lyrics
 
 
+_REPEAT_SIGN = '9'  # dots 3,5 -- BANA §35.4 repeat sign for words or phrases
+
+
+def _split_repeat_phrase_punctuation(phrase: str) -> tuple[str, str, str]:
+    """Split the ASCII-cell content bracketed by a §35.4 repeat-sign pair
+    into (opening_punct, core, closing_punct): §35.4: "Opening punctuation
+    of the original iteration is placed after the opening repeat sign, and
+    closing punctuation of the final iteration before the terminating
+    repeat sign" -- i.e. only the *first* expanded iteration keeps a
+    leading punctuation mark, and only the *last* keeps a trailing one.
+    Recognizes the single-cell UEB 7.1/7.6.6 marks already in
+    `_LYRIC_PUNCTUATION`; other opening marks (e.g. quotation) are left
+    attached to `core` (repeated on every iteration) rather than guessed
+    at, since the manual's own worked examples (35.4-1 through 35.4-4)
+    only exercise trailing punctuation."""
+    start, end = 0, len(phrase)
+    while end > start and phrase[end - 1] in _LYRIC_PUNCTUATION:
+        end -= 1
+    while start < end and phrase[start] in _LYRIC_PUNCTUATION:
+        start += 1
+    return phrase[:start], phrase[start:end], phrase[end:]
+
+
+def _expand_repeat_phrase(phrase: str, repeat_count: int) -> str:
+    """Expand one §35.4 bracketed phrase into `repeat_count + 1`
+    space-separated iterations (repeated `repeat_count` times beyond the
+    original). Capitalization is preserved automatically since each
+    iteration is a verbatim copy of the same encoded `core` text."""
+    opening_punct, core, closing_punct = _split_repeat_phrase_punctuation(phrase)
+    iterations = [core] * (repeat_count + 1)
+    iterations[0] = opening_punct + iterations[0]
+    iterations[-1] = iterations[-1] + closing_punct
+    return ' '.join(iterations)
+
+
+def _expand_repeat_signs(ascii_str: str) -> str:
+    """Pre-processing pass over `parse_lyrics()`'s ASCII-cell string: expand
+    every BANA §35.4 word/phrase repeat-sign construct into the repeated
+    text it stands for, leaving everything else (including ordinary UEB
+    Section 6 numbers, which also use `#` + digit cells but are never
+    immediately followed by a repeat sign) untouched for the caller's own
+    decoding pass. Three encodings, all using the bare repeat sign (⠔,
+    ASCII '9'):
+
+    (a) repeated once: one sign before the phrase, one after.
+    (b) repeated twice: two consecutive signs before, one after.
+    (c) repeated more than twice: a numeral-sign-prefixed count before a
+        single sign, one sign after.
+    """
+    result = []
+    i = 0
+    n = len(ascii_str)
+    while i < n:
+        if ascii_str[i] == '#':
+            j = i + 1
+            digits = []
+            while j < n and ascii_str[j] in _DIGIT_CELLS:
+                digits.append(_DIGIT_CELLS[ascii_str[j]])
+                j += 1
+            if digits and j < n and ascii_str[j] == _REPEAT_SIGN:
+                repeat_count = int("".join(digits))
+                open_end = j + 1
+                close_pos = ascii_str.find(_REPEAT_SIGN, open_end)
+                if close_pos == -1:
+                    raise BrailleParseError(
+                        "BANA §35.4 numeral-prefixed repeat sign has no "
+                        "terminating sign"
+                    )
+                result.append(_expand_repeat_phrase(ascii_str[open_end:close_pos], repeat_count))
+                i = close_pos + 1
+                continue
+            # Not a repeat-sign construct (no sign follows the digits) --
+            # leave the '#' for the caller's own numeral-sign handling;
+            # the digit cells that follow are copied through unchanged by
+            # the loop's default branch below on subsequent iterations.
+        if ascii_str[i] == _REPEAT_SIGN:
+            j = i
+            while j < n and ascii_str[j] == _REPEAT_SIGN:
+                j += 1
+            open_count = j - i
+            if open_count > 2:
+                raise BrailleParseError(
+                    "BANA §35.4 repeat sign: more than two consecutive "
+                    "opening signs is not a valid encoding -- three or "
+                    "more repetitions use a numeral-sign-prefixed count "
+                    "before a single sign instead"
+                )
+            close_pos = ascii_str.find(_REPEAT_SIGN, j)
+            if close_pos == -1:
+                raise BrailleParseError(
+                    "BANA §35.4 repeat sign has no terminating sign"
+                )
+            result.append(_expand_repeat_phrase(ascii_str[j:close_pos], open_count))
+            i = close_pos + 1
+            continue
+        result.append(ascii_str[i])
+        i += 1
+    return "".join(result)
+
+
 def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
     """Decode a sequence of BANA Unicode braille cells as uncontracted (UEB
     Grade 1) literary lyrics per BANA §35.1.1: the full alphabet,
@@ -708,7 +808,7 @@ def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
         else:
             ascii_chars.append(' ')
 
-    ascii_str = "".join(ascii_chars)
+    ascii_str = _expand_repeat_signs("".join(ascii_chars))
 
     # Process capital indicators and reconstruct words
     words = []
@@ -830,41 +930,23 @@ def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
             i += 1
             continue
 
-        if char == '9':  # dots 3,5 -- word/phrase repetition marker
-            # (BANA §35.4), expanded in the pass below
-            current_word.append('9')
-            i += 1
-            continue
-
         raise BrailleParseError(
             f"Unrecognized braille cell in lyric text: ASCII braille {char!r}"
         )
 
     if current_word:
         words.append("".join(current_word))
-        
-    # Expand repetitions (dots 3-5 / ASCII '9')
-    expanded_words = []
-    for word in words:
-        if word and all(c == '9' for c in word):
-            rep_count = len(word)
-            if expanded_words:
-                prev_word = expanded_words[-1]
-                for _ in range(rep_count):
-                    expanded_words.append(prev_word)
-        else:
-            expanded_words.append(word)
-            
+
     # Split words into syllables (text, has_hyphen)
     syllables = []
-    for word in expanded_words:
+    for word in words:
         parts = word.split('-')
         for idx, part in enumerate(parts):
             if not part:
                 continue
             is_last = (idx == len(parts) - 1)
             syllables.append((part, not is_last))
-            
+
     return syllables
 
 

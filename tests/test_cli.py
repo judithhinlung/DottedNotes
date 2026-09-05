@@ -349,7 +349,7 @@ def test_cli_convert_category_override_affects_lyrics_parsing(monkeypatch, tmp_p
         "⠠⠏⠊⠁⠝⠕⠀⠀⠀⠜⠏⠄\n"
         "\n"
         "⠼⠁\n"
-        "⠠⠓⠕⠤⠇⠽⠀⠔\n"
+        "⠠⠓⠕⠤⠇⠽\n"
         "⠜⠎⠄⠀⠐⠽⠉⠐⠵⠐⠯\n"
         "⠜⠏⠄⠀⠐⠽⠐⠵⠐⠯\n"
     )

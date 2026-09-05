@@ -32,19 +32,67 @@ def test_vocal_instrument_family():
 
 
 def test_parse_lyrics_simple():
-    # "ho-ly" in braille is ⠓⠕⠤⠇⠽ (h-o-hyphen-l-y)
-    # capital indicator is ⠠ (dot 6)
-    # "9" is ⠔ (dots 3-5)
-    # let's test: "⠠⠓⠕⠤⠇⠽⠀⠔" -> "Ho-ly", "Ho-ly"
-    cells = "⠠⠓⠕⠤⠇⠽⠀⠔"
+    # "ho-ly" in braille is ⠓⠕⠤⠇⠽ (h-o-hyphen-l-y); capital indicator is
+    # ⠠ (dot 6). Plain (non-repeated) lyric text has no repeat sign at all.
+    cells = "⠠⠓⠕⠤⠇⠽"
     syllables = parse_lyrics(cells)
-    
+
     assert syllables == [
         ("Ho", True),
         ("ly", False),
-        ("Ho", True),
-        ("ly", False),
     ]
+
+
+# ---------------------------------------------------------------------------
+# S11c-15: BANA §35.4 repeat sign for words/phrases (⠔, dots 3,5, ASCII
+# '9'). The sign sits immediately adjacent to the bracketed word/phrase --
+# no intervening space -- and has three distinct encodings depending on
+# repeat count. The old parser (pre-S11c-15) treated a *space-separated*
+# run of '9' cells as its own token and duplicated only the preceding
+# single word, which isn't this rule at all.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_lyrics_repeat_sign_once_bana_example_35_4_1():
+    # Manual Example 35.4-1: "9,BENEDICTUS49" -- one sign before and after
+    # -> repeated once (said twice total). The closing punctuation (period,
+    # ASCII '4') belongs only to the final iteration.
+    syllables = parse_lyrics(_cells("9,BENEDICTUS49"))
+    assert syllables == [("Benedictus", False), ("Benedictus.", False)]
+
+
+def test_parse_lyrics_repeat_sign_twice_bana_example_35_4_2():
+    # Manual Example 35.4-2: "99,ICH LIEBE DICH9 IN ..." -- two consecutive
+    # signs before, one after -> repeated twice (said three times total),
+    # bracketing a multi-word phrase. Text after the closing sign is not
+    # repeated.
+    syllables = parse_lyrics(_cells("99,ICH LIEBE DICH9 IN ,ZEIT"))
+    assert [s for s, _ in syllables] == [
+        "Ich", "liebe", "dich", "Ich", "liebe", "dich", "Ich", "liebe", "dich", "in", "Zeit",
+    ]
+
+
+def test_parse_lyrics_repeat_sign_numeral_prefixed_bana_example_35_4_3():
+    # Manual Example 35.4-3: "#C9,HALLELUJAH69" -- numeral sign + digit "C"
+    # (3) + one sign before, one sign after -> repeated 3 times (said 4
+    # times total). The exclamation mark (ASCII '6') belongs only to the
+    # final iteration.
+    syllables = parse_lyrics(_cells("#C9,HALLELUJAH69"))
+    assert [s for s, _ in syllables] == ["Hallelujah", "Hallelujah", "Hallelujah", "Hallelujah!"]
+    assert syllables[0] == ("Hallelujah", False)
+    assert syllables[-1] == ("Hallelujah!", False)
+
+
+def test_parse_lyrics_repeat_sign_more_than_two_consecutive_signs_rejected():
+    # Three or more consecutive opening signs isn't a valid encoding --
+    # 3+ repetitions must use a numeral-sign-prefixed count instead.
+    with pytest.raises(BrailleParseError):
+        parse_lyrics(_cells("999,HI9"))
+
+
+def test_parse_lyrics_repeat_sign_unterminated_raises():
+    with pytest.raises(BrailleParseError):
+        parse_lyrics(_cells("9,HI"))
 
 
 def test_parse_lyrics_capitals_and_spaces():
@@ -137,7 +185,7 @@ def test_vocal_lyrics_mapping_integration():
         "⠠⠏⠊⠁⠝⠕⠀⠀⠀⠜⠏⠄\n"
         "\n"
         "⠼⠁\n"
-        "⠠⠓⠕⠤⠇⠽⠀⠔\n"
+        "⠠⠓⠕⠤⠇⠽\n"
         "⠜⠎⠄⠀⠐⠽⠉⠐⠵⠐⠯\n"
         "⠜⠏⠄⠀⠐⠽⠐⠵⠐⠯\n"
     )
