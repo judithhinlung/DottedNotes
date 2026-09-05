@@ -12,6 +12,9 @@ from dottednotes.models.tuplet import Tuplet
 from dottednotes.models.in_accord import InAccord
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
 from dottednotes.bana_symbols import TABLE_29_ENGLISH
+from dottednotes.exceptions import BrailleParseError
+from dottednotes.parser.ensemble_parser import group_pitched_elements_by_slur, _LYRIC_PUNCTUATION
+from dottednotes.parser.input_pipeline import ASCII_TO_DOTS
 
 _HAIRPIN_END_LEVELS = (DynamicLevel.CRESCENDO_END, DynamicLevel.DECRESCENDO_END)
 
@@ -139,6 +142,65 @@ def encode_literary_braille(text: str) -> str:
     blank_cell = chr(0x2800)
     encoded = blank_cell.join(encode_word(w) for w in text_to_encode.split(' '))
     return encoded + '⠲'
+
+
+def _encode_lyric_word(word: str) -> str:
+    """Encode one lyric word to BANA §35.1.1 braille cells: capital
+    indicator(s), letters, hyphens, and the UEB 7.1/7.6.6 punctuation
+    `_LYRIC_PUNCTUATION` (in `ensemble_parser.py`) already decodes. This is
+    that decoder's inverse, so it only covers what it covers -- accented
+    letters, quotation marks, and numerals (which `parse_lyrics()` also
+    decodes) are not emitted here, since lyrics DottedNotes itself renders
+    (from MusicXML/LilyPond import) are plain ASCII text in practice;
+    extend this if that changes."""
+    reverse_punctuation = {v: k for k, v in _LYRIC_PUNCTUATION.items()}
+    letters_only = [c for c in word if c.isalpha()]
+    all_caps = len(letters_only) >= 2 and all(c.isupper() for c in letters_only)
+
+    result = []
+    if all_caps:
+        result.append('⠠⠠')
+    for char in word:
+        if char.isalpha():
+            if not all_caps and char.isupper():
+                result.append('⠠')
+            result.append(chr(0x2800 + ASCII_TO_DOTS[char.upper()]))
+        elif char == '-':
+            result.append(chr(0x2800 + ASCII_TO_DOTS['-']))
+        elif char in reverse_punctuation:
+            result.append(chr(0x2800 + ASCII_TO_DOTS[reverse_punctuation[char]]))
+        else:
+            raise BrailleParseError(
+                f"Cannot encode lyric character {char!r} to braille -- only "
+                "letters, hyphens, and basic UEB 7.1/7.6.6 punctuation "
+                "(,.;:!') are supported."
+            )
+    return ''.join(result)
+
+
+def encode_lyric_line(lyrics: list[str]) -> str:
+    """Encode a staff's `lyrics` into one line of BANA §35.1.1 lyric
+    braille: words separated by a blank cell.
+
+    `lyrics` entries follow the convention `map_syllables_to_groups()` (and
+    `Score.to_lilypond()`) already use: a trailing `" --"` marks a syllable
+    that continues directly into the next entry (both are syllables of one
+    word divided across notes by a syllabic slur, BANA §35.2). Per
+    §35.1.1(a), a print hyphen dividing one word's syllables is *not*
+    written in braille at all, so continuations are joined with no space
+    and no braille hyphen -- only genuine word boundaries get the blank
+    cell."""
+    blank_cell = chr(0x2800)
+    parts: list[str] = []
+    pending_continuation = False
+    for entry in lyrics:
+        continues = entry.endswith(' --')
+        text = entry[:-3] if continues else entry
+        if parts and not pending_continuation:
+            parts.append(blank_cell)
+        parts.append(_encode_lyric_word(text))
+        pending_continuation = continues
+    return ''.join(parts)
 
 
 def center_line(text: str, width: int) -> str:
@@ -290,24 +352,33 @@ def abbrev_to_brl(abbrev: str) -> str:
     return ''.join(chr(0x2800 + ASCII_TO_DOTS.get(c.upper(), 0)) for c in abbrev)
 
 
-def wrap_run_over_line(line: str, width: int) -> list[str]:
+# BANA §35.1: a vocal solo's music line begins in cell 3 (2 blank cells) --
+# distinct from an instrumental solo's cell-1 start.
+_MUSIC_LINE_MARGIN = '⠀⠀'
+
+
+def wrap_run_over_line(line: str, width: int, indent_cells: int = 2) -> list[str]:
     """Split one staff's parallel line into BANA 28.1.2/33.4.7 run-over
     lines when it's too long to fit alone: the music hyphen (dot 5, BANA
     1.11) is appended directly to the last cell that fits (no space
     before it) to mark the interruption, and the remainder continues on
-    a new line indented two cells beyond the parallel's margin -- with
-    no re-stated abbreviation, since it's a continuation of the same
+    a new line indented `indent_cells` cells beyond the parallel's margin
+    (2, BANA 28.1.2/33.4.7's default, unless a caller's format uses a
+    different run-over cell -- e.g. BANA §35.1's vocal line-by-line format
+    indents both word-line and music-line run-overs to cell 5, 4 cells) --
+    with no re-stated abbreviation, since it's a continuation of the same
     line, not a new instrument line."""
     if len(line) <= width:
         return [line]
     result = []
     remaining = line
     indent = ""
+    run_over_indent = '⠀' * indent_cells
     while len(indent) + len(remaining) > width:
         content_width = width - len(indent) - 1  # reserve 1 cell for ⠐
         result.append(indent + remaining[:content_width] + '⠐')
         remaining = remaining[content_width:]
-        indent = '⠀⠀'
+        indent = run_over_indent
     result.append(indent + remaining)
     return result
 
@@ -447,6 +518,7 @@ class TranscriptionMode(Enum):
     SINGLE_LINE = auto()
     PIANO = auto()
     ENSEMBLE = auto()
+    VOCAL_SOLO = auto()
 
 
 def _item_has_ensemble_resolved_chord(item: Any) -> bool:
@@ -574,6 +646,16 @@ class BrailleRenderer:
         )
         if is_piano:
             return TranscriptionMode.PIANO
+        # BANA §35.1: a lone vocal staff with lyrics is its own dedicated
+        # line-by-line format (words at cell 1, music at cell 3), never the
+        # generic instrumental SINGLE_LINE layout -- checked before the
+        # ENSEMBLE/staff-count branch below since it's a 1-staff case.
+        if (
+            len(score.staves) == 1
+            and get_instrument_family(score.staves[0].name) == InstrumentFamily.VOCAL
+            and score.staves[0].lyrics
+        ):
+            return TranscriptionMode.VOCAL_SOLO
         if isinstance(score, OrchestraScore) or len(score.staves) > 2:
             return TranscriptionMode.ENSEMBLE
         # S10d-13: a single staff can still need ENSEMBLE transcription --
@@ -674,16 +756,29 @@ class BrailleRenderer:
             for staff in score.staves
         ]
 
+        mode = self._detect_transcription_mode(score)
+
         measure_repeat_originals: dict[tuple[int, int], list] = {}
-        if self.compression_level != "none" and self.full_measure_repeat != "off":
+        # Never compress a vocal solo's measures into a measure-repeat sign:
+        # the sign has no discrete notes for §35.1's "syllables and notes
+        # must always be exactly paired" rule to align lyrics against, and
+        # a musically-identical measure sung to different words (a very
+        # common case -- e.g. a repeated melodic phrase with new lyrics)
+        # would be actively wrong to collapse.
+        if (
+            self.compression_level != "none"
+            and self.full_measure_repeat != "off"
+            and mode != TranscriptionMode.VOCAL_SOLO
+        ):
             # Pass 2: Measure repeat compression pass
             measure_repeat_originals = self._compress_measure_repeats(score)
 
-        mode = self._detect_transcription_mode(score)
         if mode == TranscriptionMode.ENSEMBLE:
             return self._render_ensemble(score, rest_only_grid, measure_repeat_originals)
         elif mode == TranscriptionMode.PIANO:
             return self._render_piano(score)
+        elif mode == TranscriptionMode.VOCAL_SOLO:
+            return self._render_vocal_solo(score)
         else:
             return self._render_single_line(score)
 
@@ -763,6 +858,91 @@ class BrailleRenderer:
 
         if current_line:
             lines.append(current_line)
+
+        return "\n".join(lines) + "\n"
+
+    def _render_vocal_solo(self, score: Score) -> str:
+        """BANA §35.1 solo-vocal line-by-line format: a lyric line at cell
+        1 paired with its music line at cell 3, one parallel at a time, no
+        instrument-abbreviation prefix (§35.1.2: "No part identifier is
+        necessary")."""
+        staff = score.staves[0]
+        lines = []
+        if score.title:
+            lines.append(center_line(encode_literary_braille(score.title), self.line_width))
+
+        signature_parts = []
+        if staff.key_signature:
+            signature_parts.append(staff.key_signature.to_braille())
+        if staff.time_signature:
+            signature_parts.append(staff.time_signature.to_braille())
+        tempo_brl = staff.tempo.to_braille() if staff.tempo else ""
+        sig_line = join_tempo_and_signature(tempo_brl, *signature_parts)
+        if sig_line:
+            # BANA §31.5/S11c-2: solo-format signature line starts in cell 9
+            # (8 blank cells) -- same convention as _render_single_line's
+            # header, and no blank line is needed before the first parallel
+            # (§35.1: "A music heading is centered above the first line of
+            # lyrics; no blank line is needed between the two").
+            lines.append('⠀' * 8 + sig_line)
+
+        key_changes = key_signature_changes_by_index(
+            staff.measures, staff.key_signature.sharps_or_flats if staff.key_signature else 0
+        )
+
+        syllables_remaining = list(staff.lyrics)
+        idx = 0
+        n_measures = len(staff.measures)
+        prev_note = None
+
+        while idx < n_measures:
+            # Pack as many measures as fit the music line (cell 3) into one
+            # parallel, mirroring _render_single_line's own line-packing --
+            # §35.1.3 would prefer breaking at phrase boundaries instead,
+            # but the internal model has no phrase-boundary concept to
+            # break on (only a flat syllable list and a flat measure list),
+            # so packing by available width is the tractable simplification
+            # here; a genuine phrase-aware line-breaker is future work.
+            group_size = 1
+            best = None
+            while idx + group_size <= n_measures:
+                slice_strs, tmp_prev = render_measure_slice(
+                    staff.measures, idx, group_size, prev_note, staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=key_changes,
+                )
+                music_str = _MUSIC_LINE_MARGIN + "".join(slice_strs)
+                if len(music_str) > self.line_width:
+                    break
+                best = (group_size, slice_strs, tmp_prev, music_str)
+                group_size += 1
+
+            if best is None:
+                slice_strs, tmp_prev = render_measure_slice(
+                    staff.measures, idx, 1, prev_note, staff.time_signature,
+                    self.compression_level, force_all_starts=self.octave_mark_every_measure,
+                    key_changes=key_changes,
+                )
+                music_str = _MUSIC_LINE_MARGIN + "".join(slice_strs)
+                best = (1, slice_strs, tmp_prev, music_str)
+
+            fit_size, slice_strs, tmp_prev, music_str = best
+
+            # §35.1: "The syllables of the lyrics and the notes of the
+            # music must always be exactly paired" -- a syllabic slur
+            # (§35.2) groups several notes under one syllable, so the
+            # number of syllables this parallel consumes is the number of
+            # slur groups in its measures, not its raw note count.
+            n_slots = len(group_pitched_elements_by_slur(staff.measures[idx:idx + fit_size]))
+            phrase_syllables = syllables_remaining[:n_slots]
+            syllables_remaining = syllables_remaining[n_slots:]
+            lyric_str = encode_lyric_line(phrase_syllables)
+
+            lines.extend(wrap_run_over_line(lyric_str, self.line_width, indent_cells=4))
+            lines.extend(wrap_run_over_line(music_str, self.line_width, indent_cells=4))
+
+            prev_note = tmp_prev
+            idx += fit_size
 
         return "\n".join(lines) + "\n"
 

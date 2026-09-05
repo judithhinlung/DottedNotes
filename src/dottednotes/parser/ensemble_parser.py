@@ -612,6 +612,83 @@ def _decode_accented_letter(ascii_str: str, i: int, n: int) -> tuple[str, int]:
     return composed, i + 3
 
 
+def group_pitched_elements_by_slur(measures: list[Measure]) -> list[list]:
+    """Group a staff's pitched elements (Note/Chord, recursing through
+    Tuplet/InAccord) into BANA §35.2 syllable slots: a run of notes joined
+    by a syllabic slur is one slot (one syllable is sung across all of
+    them), everything else is its own slot. Rests are excluded -- a rest
+    never carries a syllable."""
+    pitched_elements = []
+
+    def collect_pitched(item):
+        if isinstance(item, (Note, Chord)):
+            pitched_elements.append(item)
+        elif isinstance(item, Tuplet):
+            for sub in item.items:
+                collect_pitched(sub)
+        elif isinstance(item, InAccord):
+            if item.parts:
+                for sub in item.parts[0]:
+                    collect_pitched(sub)
+
+    for measure in measures:
+        for note_item in measure.notes:
+            collect_pitched(note_item)
+
+    groups = []
+    current_group = []
+    in_slur = False
+    for elem in pitched_elements:
+        if elem.slur_start:
+            if current_group:
+                groups.append(current_group)
+            current_group = [elem]
+            in_slur = True
+        elif in_slur:
+            current_group.append(elem)
+            if elem.slur_end:
+                groups.append(current_group)
+                current_group = []
+                in_slur = False
+        else:
+            groups.append([elem])
+    if current_group:
+        groups.append(current_group)
+    return groups
+
+
+def map_syllables_to_groups(
+    syllables: list[tuple[str, bool]],
+    groups: list[list],
+    owner_name: str,
+    verse_label: str = "Verse 1",
+) -> list[str]:
+    """Zip `syllables` (from `parse_lyrics()`) 1:1 onto `groups` (from
+    `group_pitched_elements_by_slur()`), appending the lyric-continuation
+    marker (" --") for a hyphenated syllable. Warns (rather than raising)
+    on a count mismatch, truncating to the shorter of the two -- a
+    transcription error shouldn't be fatal, but should not be silent
+    either."""
+    mapped_lyrics = []
+    num_mappings = min(len(syllables), len(groups))
+    if len(syllables) != len(groups):
+        warnings.warn(
+            f"{owner_name} ({verse_label}): {len(syllables)} lyric syllable(s) "
+            f"but {len(groups)} note/slur-group(s) -- lyrics "
+            "will be misaligned past the shorter of the two. "
+            "Check for a missing syllable or an extra/missing "
+            "syllabic slur.",
+            stacklevel=2,
+        )
+    for idx in range(num_mappings):
+        syllable, has_hyphen = syllables[idx]
+        ly_syllable = syllable
+        if has_hyphen:
+            ly_syllable += " --"
+        mapped_lyrics.append(ly_syllable)
+    return mapped_lyrics
+
+
 def parse_lyrics(lyric_cells: str) -> list[tuple[str, bool]]:
     """Decode a sequence of BANA Unicode braille cells as uncontracted (UEB
     Grade 1) literary lyrics per BANA §35.1.1: the full alphabet,
@@ -1369,74 +1446,14 @@ class EnsembleParser:
                                 break
 
                 if has_any_lyrics:
-                    # Flatten pitched elements of the staff
-                    pitched_elements = []
-                    
-                    def collect_pitched(item):
-                        from dottednotes.models.note import Note
-                        from dottednotes.models.chord import Chord
-                        from dottednotes.models.tuplet import Tuplet
-                        from dottednotes.models.in_accord import InAccord
-                        if isinstance(item, (Note, Chord)):
-                            pitched_elements.append(item)
-                        elif isinstance(item, Tuplet):
-                            for sub in item.items:
-                                collect_pitched(sub)
-                        elif isinstance(item, InAccord):
-                            if item.parts:
-                                for sub in item.parts[0]:
-                                    collect_pitched(sub)
-                                    
-                    for measure in staff.measures:
-                        for note_item in measure.notes:
-                            collect_pitched(note_item)
-                            
-                    # Group pitched elements by BANA slur flags
-                    groups = []
-                    current_group = []
-                    in_slur = False
-                    
-                    for elem in pitched_elements:
-                        if elem.slur_start:
-                            if current_group:
-                                groups.append(current_group)
-                            current_group = [elem]
-                            in_slur = True
-                        elif in_slur:
-                            current_group.append(elem)
-                            if elem.slur_end:
-                                groups.append(current_group)
-                                current_group = []
-                                in_slur = False
-                        else:
-                            groups.append([elem])
-                    if current_group:
-                        groups.append(current_group)
+                    groups = group_pitched_elements_by_slur(staff.measures)
 
                     mapped_verses = []
                     for v_idx in range(max_verses):
-                        syllables = verse_syllables_list[v_idx]
-                        
-                        mapped_lyrics = []
-                        num_mappings = min(len(syllables), len(groups))
-                        if len(syllables) != len(groups):
-                            warnings.warn(
-                                f"{inst.name} (Verse {v_idx+1}): {len(syllables)} lyric syllable(s) "
-                                f"but {len(groups)} note/slur-group(s) -- lyrics "
-                                "will be misaligned past the shorter of the two. "
-                                "Check for a missing syllable or an extra/missing "
-                                "syllabic slur.",
-                                stacklevel=2,
-                            )
-                        for idx in range(num_mappings):
-                            syllable, has_hyphen = syllables[idx]
-                            ly_syllable = syllable
-                            if has_hyphen:
-                                ly_syllable += " --"
-                            mapped_lyrics.append(ly_syllable)
-                            
-                        mapped_verses.append(mapped_lyrics)
-                        
+                        mapped_verses.append(map_syllables_to_groups(
+                            verse_syllables_list[v_idx], groups, inst.name, f"Verse {v_idx+1}",
+                        ))
+
                     if mapped_verses:
                         staff.lyrics = mapped_verses[0]
                         staff.verses = mapped_verses

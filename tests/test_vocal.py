@@ -4,9 +4,11 @@ from pathlib import Path
 
 import pytest
 from dottednotes.exceptions import BrailleParseError
-from dottednotes.models import Score, Staff, Note, Duration
+from dottednotes.models import Score, Staff, Note, Duration, Measure, TimeSignature
 from dottednotes.parser.ensemble_parser import EnsembleParser, parse_lyrics
 from dottednotes.parser.input_pipeline import BRLInputPipeline, ascii_braille_char_to_unicode
+from dottednotes.parser.vocal_solo_parser import parse_vocal_solo
+from dottednotes.renderers.braille_renderer import BrailleRenderer, encode_lyric_line
 from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
 
 
@@ -335,3 +337,113 @@ def test_parse_strophic_with_word_number_verse_prefixes():
     assert '\\set stanza = "2. " Glo -- ry' in ly_output
     assert ly_output.count('\\set stanza = "1. "') == 1
     assert ly_output.count('\\set stanza = "2. "') == 1
+
+
+# ---------------------------------------------------------------------------
+# S11c-9: BANA §35.1 solo-vocal line-by-line braille format (words at cell
+# 1, paired music at cell 3, no instrument-abbreviation prefix) -- distinct
+# from both the plain instrumental SINGLE_LINE format and the §33
+# ensemble-abbreviation format `EnsembleParser` already covers.
+# ---------------------------------------------------------------------------
+
+
+def _vocal_solo_score(lyrics=("Sing", "high")) -> Score:
+    score = Score(title="")
+    staff = Staff(name="Soprano")
+    staff.time_signature = TimeSignature(
+        dots=frozenset(), category=None, raw_brl="", numerator=4, denominator=4
+    )
+    m = Measure(number=1)
+    c = Note(dots=frozenset(), category=None, raw_brl="", note_name="C", octave=4, duration=Duration(value=4))
+    c.slur_start = True
+    d = Note(dots=frozenset(), category=None, raw_brl="", note_name="D", octave=4, duration=Duration(value=4))
+    d.slur_end = True
+    e = Note(dots=frozenset(), category=None, raw_brl="", note_name="E", octave=4, duration=Duration(value=4))
+    for note in (c, d, e):
+        m.add_note(note)
+    staff.add_measure(m)
+    # A melisma ("Sing" spans the slurred C/D pair -- one word, one
+    # syllable, sung across two notes) followed by a separate word ("high")
+    # on the plain E -- two distinct, space-separated braille words, so the
+    # round trip below doesn't run into §35.1.1(a)'s hyphen-omission rule
+    # (see test_vocal_solo_renderer_omits_print_hyphen_between_syllables
+    # for that case, which is legitimately lossy on the way back in).
+    staff.lyrics = list(lyrics)
+    score.add_staff(staff)
+    return score
+
+
+def test_vocal_solo_renderer_uses_cell1_cell3_no_abbreviation():
+    score = _vocal_solo_score()
+    output = BrailleRenderer(line_width=40).render(score)
+    lines = [line for line in output.split("\n") if line]
+
+    # lines[0] is the cell-9 signature header; the parallel starts at [1].
+    # Lyric line at cell 1 (no leading blank cells).
+    assert not lines[1].startswith('⠀')
+    # Music line at cell 3 (exactly 2 leading blank cells).
+    assert lines[2].startswith('⠀⠀') and not lines[2].startswith('⠀⠀⠀')
+    # §35.1.2: "No part identifier is necessary" -- no abbreviation sign.
+    assert '⠜' not in lines[2]
+
+
+def test_vocal_solo_renderer_omits_print_hyphen_between_syllables():
+    # §35.1.1(a): a print hyphen dividing one word's syllables is not
+    # written in braille -- "Ho --"/"ly" (the LilyPond-flavored syllable
+    # continuation convention `Staff.lyrics` uses) must render as the
+    # single concatenated word "Holy", with no hyphen and no space. This
+    # is inherently lossy on the way back in (nothing in the braille marks
+    # where "Holy" divides into syllables -- see the module docstring), so
+    # it's covered here as a one-way render check, not a round trip.
+    score = _vocal_solo_score(lyrics=["Ho --", "ly"])
+    output = BrailleRenderer(line_width=40).render(score)
+    lines = [line for line in output.split("\n") if line]
+    assert lines[1] == encode_lyric_line(["Holy"])
+
+
+def test_vocal_solo_round_trips_through_parser():
+    score = _vocal_solo_score()
+    output = BrailleRenderer(line_width=40).render(score)
+
+    parsed = parse_vocal_solo(output)
+
+    assert len(parsed.staves) == 1
+    staff = parsed.staves[0]
+    assert staff.lyrics == ["Sing", "high"]
+    assert len(staff.measures) == 1
+    notes = staff.measures[0].notes
+    assert [(n.note_name, n.octave) for n in notes] == [("C", 4), ("D", 4), ("E", 4)]
+    assert notes[0].slur_start and notes[1].slur_end
+
+
+def test_vocal_solo_parser_rejects_input_with_no_music_line():
+    with pytest.raises(BrailleParseError):
+        parse_vocal_solo("⠠⠓⠕⠤⠇⠽")
+
+
+def test_vocal_solo_does_not_compress_repeated_measure_into_measure_repeat_sign():
+    # Two musically-identical measures with *different* lyrics -- BANA's
+    # measure-repeat sign (used elsewhere for instrumental parts) has no
+    # discrete notes for a reader to align new words against, so it must
+    # never be used here even though the melody repeats verbatim.
+    score = Score(title="")
+    staff = Staff(name="Soprano")
+    staff.time_signature = TimeSignature(
+        dots=frozenset(), category=None, raw_brl="", numerator=4, denominator=4
+    )
+    for i in range(2):
+        m = Measure(number=i + 1)
+        for name in ("C", "D", "E", "F"):
+            m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name=name, octave=4, duration=Duration(value=4)))
+        staff.add_measure(m)
+    staff.lyrics = ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"]
+    score.add_staff(staff)
+
+    output = BrailleRenderer(line_width=20).render(score)
+    # BANA's measure-repeat cell (⠶) must not appear -- the second measure
+    # is written out in full, with its own distinct lyrics.
+    assert '⠶' not in output
+
+    parsed = parse_vocal_solo(output)
+    assert parsed.staves[0].lyrics == ["One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight"]
+    assert len(parsed.staves[0].measures) == 2
