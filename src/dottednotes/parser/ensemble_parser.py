@@ -535,7 +535,7 @@ class ParallelSystem:
 # confirmed against the actual Unicode braille glyphs in the official
 # rulebook (iceb.org), converted through this module's own ASCII_TO_DOTS --
 # not guessed. Comma and period were already confirmed against a real
-# fixture (vocal_test.brf); the rest follow the identical digit-cell reuse
+# fixture (vocal_test.brl); the rest follow the identical digit-cell reuse
 # pattern documented in UEB 7.1's own examples.
 _LYRIC_PUNCTUATION = {
     '1': ',',   # dot 2       -- comma (UEB 7.1)

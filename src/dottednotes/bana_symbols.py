@@ -700,6 +700,14 @@ IN_ACCORD_CELLS: dict[str, str] = {
 # 2, or 3 — verified with zero exceptions across the fixture. The tokenizer
 # does not predict this; it simply consumes a trailing END_WORD_SIGN after a
 # hand sign if present, emitting no token for it.
+#
+# BANA §29.8's solo-outline line (placed above the right hand in a keyboard-
+# accompaniment block) uses the same 2-cell shape with dot 5 alone as its
+# first cell: ⠐⠜ — dots 5 + dots 3,4,5, per Music Braille Code 2015 Example
+# 29.8-2 (developer-confirmed). Not part of this dict since it's only ever
+# parsed/rendered by keyboard_accompaniment_parser.py and
+# braille_renderer.py's accompaniment-with-outline code path, not the
+# generic tokenizer HAND_SIGN_CELLS lookup below.
 # ---------------------------------------------------------------------------
 
 HAND_SIGN_CELLS: dict[str, str] = {

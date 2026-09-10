@@ -216,7 +216,7 @@ def test_vocal_lyrics_mapping_integration():
 
 
 # ---------------------------------------------------------------------------
-# S7b-9/S11c-11: real-fixture integration test -- vocal_test.brf (Soprano +
+# S7b-9/S11c-11: real-fixture integration test -- vocal_test.brl (Soprano +
 # Piano Right Hand + Piano Left-Hand, an art-song-shaped score with lyrics,
 # a crescendo/decrescendo pair, and a whole-measure repeat sign that
 # carries its own new dynamic marking) parses end to end, associates
@@ -244,7 +244,7 @@ def test_vocal_lyrics_mapping_integration():
 
 
 def test_vocal_test_fixture_groups_staves_and_maps_lyrics():
-    text = BRLInputPipeline().load(FIXTURES / "vocal_test.brf")
+    text = BRLInputPipeline().load(FIXTURES / "vocal_test.brl")
     score = parse_solo_with_accompaniment(text)
 
     assert len(score.staves) == 3
@@ -294,14 +294,14 @@ def _compile_and_check_no_warnings(ly_output: str, tmp_path: Path, basename: str
 
 
 def _load_vocal_test_score() -> Score:
-    """Parse vocal_test.brf and assign the instrument names its LilyPond
+    """Parse vocal_test.brl and assign the instrument names its LilyPond
     ground truth expects -- not recoverable from §35.1/§29.8 content
     itself (see the module note above `test_vocal_test_fixture_groups_
     staves_and_maps_lyrics`), so a real workflow would supply them from
     external context the same way this test does explicitly."""
     from dottednotes.models.orchestra_score import OrchestraScore
 
-    text = BRLInputPipeline().load(FIXTURES / "vocal_test.brf")
+    text = BRLInputPipeline().load(FIXTURES / "vocal_test.brl")
     score = parse_solo_with_accompaniment(text)
     score.staves[0].name = "Soprano"
     score.staves[1].name = "Piano Right Hand"

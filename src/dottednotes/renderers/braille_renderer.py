@@ -1307,7 +1307,7 @@ class BrailleRenderer:
         self, rh_staff: Staff, lh_staff: Optional[Staff], outline_measures: list[Measure],
     ) -> str:
         """BANA §29.8's keyboard-accompaniment block: a solo-outline line
-        (bare ⠜, carrying the measure number) above the right hand (⠨⠜),
+        (⠐⠜, carrying the measure number) above the right hand (⠨⠜),
         with the left hand (⠸⠜, if present) below."""
         lines = []
         signature_parts = []
@@ -1722,8 +1722,9 @@ class BrailleRenderer:
 
     def _build_outline_line_from_strings(self, measure_num: int, measure_strs: list[str]) -> str:
         """BANA §29.8: the solo-outline line above the right hand, marked
-        with the bare solo-outline indicator (⠜, "treated as a hand sign")
-        and carrying the measure number that would otherwise sit on the
+        with the solo-outline indicator (⠐⠜ -- dots 5, 3-4-5, "treated as a
+        hand sign", per Music Braille Code 2015 Example 29.8-2) and
+        carrying the measure number that would otherwise sit on the
         right-hand line."""
         if self.show_measure_numbers:
             num_str = "".join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(measure_num))
@@ -1731,7 +1732,7 @@ class BrailleRenderer:
         else:
             prefix = ""
 
-        hand_sign = '⠜'
+        hand_sign = '⠐⠜'
         music_str = "".join(measure_strs)
         if music_str:
             first_cell = music_str[0]

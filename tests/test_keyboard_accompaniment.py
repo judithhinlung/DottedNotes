@@ -113,12 +113,12 @@ def test_render_solo_with_accompaniment_layout():
     assert solo_body[-1].startswith('⠀⠀')      # music line at cell 3
     assert '⠨⠜' not in solo_body[-1] and '⠸⠜' not in solo_body[-1]
 
-    # Accompaniment block: outline (bare ⠜, carries the measure number),
-    # then right hand (⠨⠜), then left hand (⠸⠜) -- neither hand line
-    # carries the measure number (§29.8: it's on the outline line instead).
+    # Accompaniment block: outline (⠐⠜, carries the measure number), then
+    # right hand (⠨⠜), then left hand (⠸⠜) -- neither hand line carries
+    # the measure number (§29.8: it's on the outline line instead).
     accompaniment_body = [l for l in accompaniment_block if l]
     outline_line, rh_line, lh_line = accompaniment_body[-3:]
-    assert outline_line.startswith('⠁⠀⠜')
+    assert outline_line.startswith('⠁⠀⠐⠜')
     assert rh_line.lstrip('⠀').startswith('⠨⠜')
     assert lh_line.lstrip('⠀').startswith('⠸⠜')
     assert not rh_line.startswith('⠁')

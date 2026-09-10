@@ -1,10 +1,11 @@
 """Parses the BANA §29.8 keyboard-accompaniment block of a solo-with-
 accompaniment score: right-hand (⠨⠜) and optional left-hand (⠸⠜) lines,
-each measure group preceded by a solo-outline line (bare ⠜, "treated as a
-hand sign") that this module discards -- the solo block, parsed
-separately (see `vocal_solo_parser.py`), already carries the authoritative
-pitch data the outline echoes in stripped-down form (no dynamics, slurs,
-word-sign expressions, or lyrics -- see `braille_renderer.build_solo_
+each measure group preceded by a solo-outline line (⠐⠜ -- dots 5, 3-4-5,
+"treated as a hand sign", per Music Braille Code 2015 Example 29.8-2) that
+this module discards -- the solo block, parsed separately (see
+`vocal_solo_parser.py`), already carries the authoritative pitch data the
+outline echoes in stripped-down form (no dynamics, slurs, word-sign
+expressions, or lyrics -- see `braille_renderer.build_solo_
 outline_measures()`), so nothing is lost by not re-parsing it here.
 
 Once the outline lines are removed, what remains is exactly BANA's plain
@@ -27,7 +28,7 @@ from .tokenizer import BrailleTokenizer
 
 _RIGHT_HAND_SIGN = '⠨⠜'
 _LEFT_HAND_SIGN = '⠸⠜'
-_OUTLINE_SIGN = '⠜'
+_OUTLINE_SIGN = '⠐⠜'
 
 
 def _strip_margin_prefix(line: str) -> str:
@@ -69,7 +70,7 @@ def parse_keyboard_accompaniment(text: str) -> Score:
         else:
             raise BrailleParseError(
                 "Keyboard accompaniment line does not start with a "
-                "right-hand (⠨⠜), left-hand (⠸⠜), or solo-outline (⠜) sign "
+                "right-hand (⠨⠜), left-hand (⠸⠜), or solo-outline (⠐⠜) sign "
                 "after its margin: " + repr(line)
             )
 
