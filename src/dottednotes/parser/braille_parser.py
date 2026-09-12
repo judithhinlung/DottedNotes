@@ -582,6 +582,7 @@ class BrailleParser:
                     m = Measure(
                         number=m_num,
                         key_signature=self._key_signature.sharps_or_flats,
+                        time_signature=(self._time_signature.numerator, self._time_signature.denominator),
                     )
                     m.add_note(rest_obj)
                     active.add_measure(m)
@@ -2001,6 +2002,7 @@ class BrailleParser:
             text_markings=text_markings,
             line=line,
             key_signature=self._key_signature.sharps_or_flats,
+            time_signature=(self._time_signature.numerator, self._time_signature.denominator),
         )
 
         if self._pending_repeat_count > 0:

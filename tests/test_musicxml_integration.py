@@ -245,3 +245,35 @@ def test_bach_cello_suite_mxl_lilypond_key_signature_spelling():
     assert "d,16 b'16 g'16 fis16 g16 b,16 g'16 b,16 d,16 b'16 g'16 fis16 g16 b,16 g'16 b,16" in ly
 
 
+def test_bear_under_the_floorboard_brf_to_musicxml_keeps_3_4_time():
+    # Regression: BrailleParser._finalize_measure and its multi-measure-rest
+    # sibling threaded the parser's current key signature onto each Measure
+    # it created (key_signature=self._key_signature.sharps_or_flats) but
+    # never the current time signature, so every Measure kept the dataclass
+    # default of (4, 4) no matter what BANA time signature the BRF actually
+    # declared. Staff.time_signature was set correctly, which is why
+    # to_lilypond() (Staff._to_lilypond_header, header-only) rendered the
+    # correct \time 3/4 -- but MusicXMLRenderer.render_staff reads the
+    # per-measure Measure.time_signature tuple, so exported MusicXML always
+    # claimed 4/4 for this fixture regardless of its real 3/4.
+    from dottednotes.parser.ensemble_parser import EnsembleParser
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load("tests/fixtures/The_Bear_Under_the_Floorboard_Week_3.brf")
+    score = EnsembleParser().parse(text)
+
+    for staff in score.staves:
+        assert all(m.time_signature == (3, 4) for m in staff.measures), (
+            f"{staff.name} has measure(s) not in 3/4: "
+            f"{[(m.number, m.time_signature) for m in staff.measures if m.time_signature != (3, 4)]}"
+        )
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_path = pathlib.Path(tmp_dir) / "bear.musicxml"
+        export_musicxml(score, str(out_path))
+        content = out_path.read_text(encoding="utf-8")
+        assert "<beats>3</beats>" in content
+        assert "<beat-type>4</beat-type>" in content
+        assert "<beats>4</beats>" not in content
+
+
