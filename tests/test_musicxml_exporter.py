@@ -212,3 +212,69 @@ def test_musicxml_export_forward_repeat_on_next_measure_leftbarline():
     assert measures[0].leftBarline is None
     assert isinstance(measures[1].leftBarline, music21.bar.Repeat)
     assert measures[1].leftBarline.direction == 'start'
+
+def test_musicxml_export_sets_midi_instrument_from_staff_name():
+    # S12-4: a recognized instrument name must produce a music21 Instrument
+    # with a GM midiProgram, so exported MusicXML carries <score-instrument>/
+    # <midi-instrument> instead of being silent in a DAW.
+    score = Score()
+    staff = Staff(name="Violin I")
+    m = Measure(number=1)
+    m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=Duration(value=4)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    instruments = list(m21_part.getElementsByClass(music21.instrument.Instrument))
+    assert len(instruments) == 1
+    assert instruments[0].instrumentName == "Violin I"
+    assert instruments[0].midiProgram == 40  # GM program 41 ("violin"), 0-indexed
+
+def test_musicxml_export_prefers_explicit_midi_instrument_override():
+    # A CLI/web --instrument selection stores its choice on
+    # Staff.midi_instrument directly, which may not match what the (possibly
+    # placeholder "right hand"/"left hand") staff name alone would resolve
+    # to -- the explicit choice must win.
+    score = Score()
+    staff = Staff(name="right hand")
+    staff.midi_instrument = "violin"
+    m = Measure(number=1)
+    m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=Duration(value=4)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    instruments = list(m21_part.getElementsByClass(music21.instrument.Instrument))
+    assert len(instruments) == 1
+    assert instruments[0].midiProgram == 40
+
+def test_musicxml_export_omits_instrument_for_unrecognized_staff_name():
+    # No GM match should mean no Instrument at all, rather than a wrong
+    # guess -- consistent with the LilyPond exporter's _midi_instrument_line,
+    # which likewise emits nothing when get_midi_instrument_name() fails.
+    score = Score()
+    staff = Staff(name="Kazoo Ensemble")
+    m = Measure(number=1)
+    m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=Duration(value=4)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    instruments = list(m21_part.getElementsByClass(music21.instrument.Instrument))
+    assert len(instruments) == 0
+
+def test_musicxml_export_writes_midi_instrument_xml():
+    score = Score()
+    staff = Staff(name="Flute")
+    m = Measure(number=1)
+    m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=4, duration=Duration(value=4)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_path = pathlib.Path(tmp_dir) / "test.musicxml"
+        export_musicxml(score, str(out_path))
+        content = out_path.read_text(encoding="utf-8")
+        assert "<score-instrument" in content
+        assert "<midi-instrument" in content
+        assert "<midi-program>74</midi-program>" in content  # GM program 74 ("flute")

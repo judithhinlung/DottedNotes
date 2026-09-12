@@ -13,6 +13,7 @@ from dottednotes.models import (
 )
 from dottednotes.models.duration import TICKS_PER_QUARTER
 from dottednotes.models.fingering import Fingering
+from dottednotes.models.instrument import get_midi_instrument_name, get_midi_program_number
 
 
 def _item_quarter_length(item) -> float:
@@ -89,7 +90,25 @@ class MusicXMLRenderer:
         m21_part = music21.stream.Part()
         m21_part.id = staff.name
         m21_part.partName = staff.name
-        
+
+        # S12-4: give the exported MusicXML a <score-instrument>/
+        # <midi-instrument> so DAWs (e.g. Logic) have a program to play the
+        # part with, instead of it being silent -- mirrors the LilyPond
+        # exporter's \set Staff.midiInstrument (staff.py/score.py/
+        # orchestra_score.py). staff.midi_instrument is preferred when set
+        # (an explicit --instrument choice for a BANA Sec. 24 solo piece,
+        # which may not match a placeholder "right hand"/"left hand" name);
+        # otherwise it's resolved fresh from the staff name, same as the
+        # LilyPond path.
+        midi_name = staff.midi_instrument or get_midi_instrument_name(staff.name)
+        if midi_name is not None:
+            midi_program = get_midi_program_number(midi_name)
+            if midi_program is not None:
+                m21_instrument = music21.instrument.Instrument()
+                m21_instrument.instrumentName = staff.name
+                m21_instrument.midiProgram = midi_program
+                m21_part.insert(0, m21_instrument)
+
         # Tracking variables
         active_clef_name = None
         active_key_val = None

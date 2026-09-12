@@ -338,6 +338,28 @@ GENERAL_MIDI_INSTRUMENTS: tuple[str, ...] = (
 )
 
 
+_MIDI_INSTRUMENT_TO_PROGRAM: dict[str, int] = {
+    gm_name: index for index, gm_name in enumerate(GENERAL_MIDI_INSTRUMENTS)
+}
+
+
+def get_midi_program_number(midi_instrument_name: str) -> int | None:
+    """Resolve a General MIDI instrument name -- as returned by
+    get_midi_instrument_name(), or read directly off Staff.midi_instrument --
+    to its 0-indexed GM program number, or None if the name isn't one of
+    GENERAL_MIDI_INSTRUMENTS' 128 GM patch names.
+
+    0-indexed matches both the raw MIDI protocol and music21's
+    Instrument.midiProgram convention (music21's MusicXML writer adds 1
+    when it emits <midi-program>, per the MusicXML spec's 1-128 numbering).
+    Used by the MusicXML exporter (renderers/musicxml_renderer.py) to set
+    <score-instrument>/<midi-instrument> so MusicXML output isn't silent in
+    DAWs -- the same GM instrument this module's get_midi_instrument_name()
+    already picks for LilyPond's \\set Staff.midiInstrument.
+    """
+    return _MIDI_INSTRUMENT_TO_PROGRAM.get(midi_instrument_name)
+
+
 # ---------------------------------------------------------------------------
 # S12-3: a single-line-format (BANA Sec. 24) piece's braille never states
 # its own instrument (Secs. 24.1-24.5 cover only segment/measure-number
