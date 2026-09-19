@@ -1327,3 +1327,120 @@ def test_musicxml_128th_note_does_not_crash():
     eighth_c = DNNote(dots=frozenset(), category=None, raw_brl='', note_name='C', octave=4,
                        duration=DNDuration(value=8))
     assert note.to_braille() == eighth_c.to_braille()
+
+
+def _build_percussion_part(part_name: str, instrument, display_names: list[str],
+                            durations: list[str]) -> music21.stream.Part:
+    """Build an in-memory single-instrument percussion part (BANA Ch. 34,
+    S10d-11) -- one music21.note.Unpitched per (display_name, duration)
+    pair, mirroring how the pitched-note tests above build a Part by hand
+    rather than round-tripping through an XML string."""
+    part = music21.stream.Part()
+    part.id = part_name
+    part.partName = part_name
+    part.insert(0, instrument)
+    measure = music21.stream.Measure(number=1)
+    measure.insert(0, music21.clef.PercussionClef())
+    measure.insert(0, music21.meter.TimeSignature('4/4'))
+    for display_name, dur_type in zip(display_names, durations):
+        u = music21.note.Unpitched(displayName=display_name)
+        u.duration.type = dur_type
+        u.storedInstrument = instrument
+        measure.append(u)
+    part.append(measure)
+    return part
+
+
+def test_musicxml_unpitched_percussion_note_imports_with_displaystep_octave():
+    # S10d-11: a <part-name> exactly matching this project's canonical
+    # Table-29-style capitalization ("Snare drum") imports its <unpitched>
+    # notes as ordinary Note objects, with note_name/octave taken from
+    # displayStep/displayOctave -- BANA Par. 34.2.1/34.2.2's own note-naming
+    # convention (an ordinary letter+octave cell), not a new model.
+    part = _build_percussion_part(
+        'Snare drum', music21.instrument.SnareDrum(),
+        ['B4', 'B4', 'B4', 'B4'], ['quarter'] * 4,
+    )
+    m21_score = music21.stream.Score()
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    staff = score.staves[0]
+    assert staff.name == 'Snare drum'
+    notes = staff.measures[0].notes
+    assert len(notes) == 4
+    for note in notes:
+        assert note.note_name == 'B'
+        assert note.octave == 4
+        assert note.accidental is None
+        assert note.duration.value == 4
+
+
+def test_musicxml_unpitched_percussion_name_canonicalized_case_insensitively():
+    # A real MusicXML file's <part-name> capitalization ("Snare Drum") need
+    # not exactly match this project's own canonical form ("Snare drum") --
+    # canonical_percussion_name() resolves it case-insensitively so
+    # is_unpitched_percussion()/get_drum_note_name() (staff.py/
+    # orchestra_score.py's LilyPond \drummode routing) still recognize it.
+    part = _build_percussion_part(
+        'Snare Drum', music21.instrument.SnareDrum(), ['B4'], ['quarter'],
+    )
+    m21_score = music21.stream.Score()
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    assert score.staves[0].name == 'Snare drum'
+
+
+def test_musicxml_unpitched_percussion_falls_back_to_score_instrument_name():
+    # A generically-named part ("Percussion 1") whose real instrument
+    # identity lives on <score-instrument>/<instrument-name> instead (a
+    # common real-world MusicXML shape) still resolves correctly via
+    # part.getInstrument().instrumentName, rather than raising just because
+    # the <part-name> itself doesn't match.
+    instrument = music21.instrument.BassDrum()
+    instrument.instrumentName = 'Bass drum'
+    part = _build_percussion_part('Percussion 1', instrument, ['B4'], ['quarter'])
+    m21_score = music21.stream.Score()
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    assert score.staves[0].name == 'Bass drum'
+
+
+def test_musicxml_unrecognized_percussion_instrument_raises_clear_error():
+    # BANA Chapter 34 transcription is only implemented for the curated
+    # instrument set in instrument.py's UNPITCHED_PERCUSSION_NAMES -- an
+    # unpitched part naming something outside that set (e.g. Castanets)
+    # must fail loudly and name the instrument, rather than silently
+    # mis-mapping it to the wrong drum sound or dropping its identity.
+    from dottednotes.exceptions import DottedNotesError
+
+    part = _build_percussion_part(
+        'Castanets', music21.instrument.Castanets(), ['B4'], ['quarter'],
+    )
+    m21_score = music21.stream.Score()
+    m21_score.append(part)
+
+    with pytest.raises(DottedNotesError, match="Unrecognized unpitched percussion instrument 'Castanets'"):
+        MusicXMLTranslator().translate(m21_score)
+
+
+def test_musicxml_unpitched_percussion_articulation_and_tie_import():
+    # Unpitched notes share NotRest's articulation/tie/expression handling
+    # with pitched Note (translate_note_obj's _apply_common_note_markings
+    # tail, S10d-11) -- confirm an accent and a tie both survive import.
+    instrument = music21.instrument.SnareDrum()
+    part = _build_percussion_part('Snare drum', instrument, ['B4', 'B4'], ['quarter', 'quarter'])
+    measure = list(part.getElementsByClass(music21.stream.Measure))[0]
+    notes = list(measure.getElementsByClass(music21.note.Unpitched))
+    notes[0].articulations.append(music21.articulations.Accent())
+    notes[1].tie = music21.tie.Tie('start')
+
+    m21_score = music21.stream.Score()
+    m21_score.append(part)
+
+    score = MusicXMLTranslator().translate(m21_score)
+    dn_notes = score.staves[0].measures[0].notes
+    assert dn_notes[0].articulations[0].type == ArticulationType.ACCENT
+    assert dn_notes[1].tie is True

@@ -34,6 +34,9 @@ _NAME_TO_FAMILY: dict[str, InstrumentFamily] = {
     'Triangle': InstrumentFamily.PERCUSSION,
     'Snare drum': InstrumentFamily.PERCUSSION,
     'Bass drum': InstrumentFamily.PERCUSSION,
+    'Ride cymbal': InstrumentFamily.PERCUSSION,
+    'Mounted tom': InstrumentFamily.PERCUSSION,
+    'Hi-hat': InstrumentFamily.PERCUSSION,
     'Harp right hand': InstrumentFamily.KEYBOARD_HARP,
     'Harp left hand': InstrumentFamily.KEYBOARD_HARP,
     'Piano right hand': InstrumentFamily.KEYBOARD_HARP,
@@ -65,8 +68,17 @@ def get_instrument_family(name: str) -> InstrumentFamily | None:
         if known_name.lower() == normalized_name.lower():
             return family
 
+    # The full curated unpitched-percussion set (below) is checked before
+    # the keyword fallback chain, not folded into it: several entries
+    # (e.g. 'Hand clap') would otherwise be misclassified by an earlier,
+    # unrelated keyword match ('hand' -> KEYBOARD_HARP, for a piano/harp
+    # staff-hand name) before ever reaching the percussion keywords further
+    # down.
+    if canonical_percussion_name(normalized_name) is not None:
+        return InstrumentFamily.PERCUSSION
+
     lower_name = normalized_name.lower()
-    
+
     # Keyboard & Harp
     if any(k in lower_name for k in ['piano', 'harp', 'organ', 'harpsichord', 'keyboard', 'clav', 'right hand', 'left hand', 'rh', 'lh', 'hand']):
         return InstrumentFamily.KEYBOARD_HARP
@@ -188,6 +200,146 @@ class InstrumentInfo:
     def family(self) -> InstrumentFamily | None:
         """The InstrumentFamily for this instrument, inferred from name."""
         return get_instrument_family(self.name)
+
+
+# ---------------------------------------------------------------------------
+# Unpitched percussion -> LilyPond \drummode note name (BANA Ch. 34).
+#
+# Not every InstrumentFamily.PERCUSSION member is unpitched (Kettledrums are
+# real pitched timpani per BANA Sec. 34.1(a) and are deliberately excluded
+# here). This is now the full set of drum note names LilyPond's \drummode
+# supports -- every row of the Notation Reference's percussion note name
+# table (Documentation/notation/percussion-notes), not assumed from memory:
+# fetched and cross-checked against that page directly (three separate
+# fetches, consistent every time) rather than guessed. The first 7 entries
+# (through 'Mounted tom') are this project's original curated subset, kept
+# exactly as they were; 'Cymbals' -> crash cymbal and 'Mounted tom' -> high
+# tom are judgment calls confirmed with the developer (no single-instrument
+# correspondence exists for either generic name) -- 'Crash cymbal' and
+# 'High tom' below are added as their own, more specific, additional names
+# for the same two LilyPond drum sounds, not a replacement for the judgment
+# calls. Every other entry is a direct name match to its table row (e.g.
+# 'hibongo'/'boh' -> 'High bongo'), Title Cased for readability the same
+# way the rest of this file's instrument names are.
+# ---------------------------------------------------------------------------
+
+_UNPITCHED_PERCUSSION_TO_DRUM_NAME: dict[str, str] = {
+    'Snare drum': 'sn',
+    'Bass drum': 'bd',
+    'Triangle': 'tri',
+    'Ride cymbal': 'cymr',
+    'Hi-hat': 'hh',
+    'Cymbals': 'cymc',      # crash cymbal -- standard default for a generic cymbals part
+    'Mounted tom': 'tomh',  # high tom -- a mounted/rack tom is conventionally higher-pitched
+
+    # Bass/snare drum variants
+    'Acoustic bass drum': 'bda',
+    'Acoustic snare drum': 'sna',
+    'Electric snare drum': 'sne',
+
+    # Toms
+    'Low floor tom': 'tomfl',
+    'High floor tom': 'tomfh',
+    'Low tom': 'toml',
+    'High tom': 'tomh',        # same LilyPond sound as 'Mounted tom' above
+    'Low-mid tom': 'tomml',
+    'High-mid tom': 'tommh',
+
+    # Hi-hat variants
+    'Closed hi-hat': 'hhc',
+    'Open hi-hat': 'hho',
+    'Half-open hi-hat': 'hhho',
+    'Pedal hi-hat': 'hhp',
+
+    # Cymbals
+    'Crash cymbal': 'cymc',    # same LilyPond sound as 'Cymbals' above
+    'Crash cymbal 1': 'cymca',
+    'Crash cymbal 2': 'cymcb',
+    'Ride cymbal 1': 'cymra',
+    'Ride cymbal 2': 'cymrb',
+    'Chinese cymbal': 'cymch',
+    'Splash cymbal': 'cyms',
+    'Ride bell': 'rb',
+
+    # Latin/hand percussion
+    'Cowbell': 'cb',
+    'High bongo': 'boh',
+    'Open high bongo': 'boho',
+    'Muted high bongo': 'bohm',
+    'Low bongo': 'bol',
+    'Open low bongo': 'bolo',
+    'Muted low bongo': 'bolm',
+    'High conga': 'cgh',
+    'Open high conga': 'cgho',
+    'Muted high conga': 'cghm',
+    'Low conga': 'cgl',
+    'Open low conga': 'cglo',
+    'Muted low conga': 'cglm',
+    'High timbale': 'timh',
+    'Low timbale': 'timl',
+    'High agogo': 'agh',
+    'Low agogo': 'agl',
+    'Guiro': 'gui',
+    'Short guiro': 'guis',
+    'Long guiro': 'guil',
+    'Cabasa': 'cab',
+    'Maracas': 'mar',
+    'Claves': 'cl',
+    'Open cuica': 'cuio',
+    'Muted cuica': 'cuim',
+
+    # Side stick / rim
+    'Side stick': 'ss',
+    'High side stick': 'ssh',
+    'Low side stick': 'ssl',
+
+    # Miscellaneous
+    'Short whistle': 'whs',
+    'Long whistle': 'whl',
+    'Hand clap': 'hc',
+    'Tambourine': 'tamb',
+    'Vibraslap': 'vibs',
+    'Tam-tam': 'tt',
+    'High wood block': 'wbh',
+    'Low wood block': 'wbl',
+
+    # Triangle variants
+    'Open triangle': 'trio',
+    'Muted triangle': 'trim',
+}
+
+# Public view of the curated set above, for callers (e.g. the MusicXML
+# importer's "unrecognized instrument" error message) that need to list the
+# supported instruments without reaching into a private module dict.
+UNPITCHED_PERCUSSION_NAMES: frozenset[str] = frozenset(_UNPITCHED_PERCUSSION_TO_DRUM_NAME)
+
+
+def canonical_percussion_name(name: str) -> str | None:
+    """Resolve `name` to its canonical Table-29-style capitalization in
+    _UNPITCHED_PERCUSSION_TO_DRUM_NAME (e.g. a MusicXML <part-name> of
+    "Snare Drum" -> "Snare drum"), matched case-insensitively like this
+    module's other name lookups (get_instrument_family/get_default_clef/
+    get_midi_instrument_name), or None if `name` isn't in the curated set.
+    """
+    normalized_name = name.strip().lower()
+    for known_name in _UNPITCHED_PERCUSSION_TO_DRUM_NAME:
+        if known_name.lower() == normalized_name:
+            return known_name
+    return None
+
+
+def is_unpitched_percussion(name: str) -> bool:
+    """True if `name` is one of the unpitched percussion instruments this
+    project renders via LilyPond's \\drummode/DrumStaff (BANA Ch. 34), as
+    opposed to real pitched percussion like Kettledrums."""
+    return canonical_percussion_name(name) is not None
+
+
+def get_drum_note_name(name: str) -> str | None:
+    """Resolve an unpitched percussion instrument name to its LilyPond
+    \\drummode note name, or None if `name` isn't in the curated set above."""
+    canonical = canonical_percussion_name(name)
+    return _UNPITCHED_PERCUSSION_TO_DRUM_NAME.get(canonical) if canonical else None
 
 
 # ---------------------------------------------------------------------------

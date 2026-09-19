@@ -1617,6 +1617,162 @@ def test_instrument_family_resolution():
     assert info_gtr.family == InstrumentFamily.PLUCKED_STRING
 
 
+def test_unpitched_percussion_drum_name_mapping():
+    from dottednotes.models.instrument import get_drum_note_name, is_unpitched_percussion
+
+    assert get_drum_note_name('Snare drum') == 'sn'
+    assert get_drum_note_name('Bass drum') == 'bd'
+    assert get_drum_note_name('Triangle') == 'tri'
+    assert get_drum_note_name('Cymbals') == 'cymc'
+    assert get_drum_note_name('Ride cymbal') == 'cymr'
+    assert get_drum_note_name('Hi-hat') == 'hh'
+    assert get_drum_note_name('Mounted tom') == 'tomh'
+
+    assert all(is_unpitched_percussion(n) for n in (
+        'Snare drum', 'Bass drum', 'Triangle', 'Cymbals',
+        'Ride cymbal', 'Hi-hat', 'Mounted tom',
+    ))
+
+    # Kettledrums are real pitched timpani (BANA Sec. 34.1(a)) -- must stay
+    # out of the unpitched set even though they share InstrumentFamily.PERCUSSION.
+    assert get_drum_note_name('Kettledrums') is None
+    assert is_unpitched_percussion('Kettledrums') is False
+
+    # Unknown instrument
+    assert get_drum_note_name('Xylophone') is None
+    assert is_unpitched_percussion('Xylophone') is False
+
+
+def test_unpitched_percussion_drum_name_mapping_covers_full_lilypond_table():
+    # S10d-11 follow-up: instrument.py's set was expanded from the original
+    # 7-instrument curated subset to every drum note name LilyPond's
+    # \drummode supports (Notation Reference, Documentation/notation/
+    # percussion-notes) -- spot-check a representative sample spanning
+    # every section of that table, plus case-insensitive matching (a real
+    # MusicXML <part-name> capitalization, S10d-11's canonical_percussion_name).
+    from dottednotes.models.instrument import (
+        get_drum_note_name, is_unpitched_percussion, canonical_percussion_name,
+        UNPITCHED_PERCUSSION_NAMES, get_instrument_family, InstrumentFamily,
+    )
+
+    assert get_drum_note_name('Acoustic bass drum') == 'bda'
+    assert get_drum_note_name('Electric snare drum') == 'sne'
+    assert get_drum_note_name('Low-mid tom') == 'tomml'
+    assert get_drum_note_name('Closed hi-hat') == 'hhc'
+    assert get_drum_note_name('Chinese cymbal') == 'cymch'
+    assert get_drum_note_name('Ride cymbal 2') == 'cymrb'
+    assert get_drum_note_name('Cowbell') == 'cb'
+    assert get_drum_note_name('Open high conga') == 'cgho'
+    assert get_drum_note_name('Short guiro') == 'guis'
+    assert get_drum_note_name('Claves') == 'cl'
+    assert get_drum_note_name('Side stick') == 'ss'
+    assert get_drum_note_name('Hand clap') == 'hc'
+    assert get_drum_note_name('Tam-tam') == 'tt'
+    assert get_drum_note_name('High wood block') == 'wbh'
+    assert get_drum_note_name('Muted triangle') == 'trim'
+
+    # At least 60 total instruments now (7 original + the rest of the table).
+    assert len(UNPITCHED_PERCUSSION_NAMES) >= 60
+
+    # Case-insensitive matching, e.g. a MusicXML <part-name> spelled how a
+    # notation program would actually write it.
+    assert is_unpitched_percussion('COWBELL')
+    assert canonical_percussion_name('tam-tam') == 'Tam-tam'
+    assert get_drum_note_name('Hand Clap') == 'hc'
+
+    # Every entry must classify as PERCUSSION (S10d-11: added as an early
+    # check in get_instrument_family precisely because some of these names,
+    # e.g. 'Hand clap', would otherwise be misclassified by an unrelated
+    # keyword match earlier in that function's fallback chain).
+    assert all(get_instrument_family(n) == InstrumentFamily.PERCUSSION for n in UNPITCHED_PERCUSSION_NAMES)
+
+
+def test_staff_to_lilypond_drummode_renders_drum_names_not_pitch():
+    staff = Staff(name="Snare drum", time_signature=TimeSignature(
+        dots=frozenset(), category=None, raw_brl='', numerator=4, denominator=4,
+    ))
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    m.add_note(_make_note('C', 4, 4))
+    m.add_note(Rest(
+        dots=frozenset(), category=SymbolCategory.REST, raw_brl='⠀', duration=Duration(value=2),
+    ))
+    staff.add_measure(m)
+
+    ly = staff.to_lilypond_drummode()
+    assert '\\time 4/4' in ly
+    assert 'sn4 sn4 r2 |' in ly
+    # No pitch/relative artifacts -- a drummode line never contains a
+    # pitch letter glued onto duration the way to_lilypond() would (c'4).
+    assert "c'4" not in ly
+    assert '\\relative' not in ly
+    assert '\\clef' not in ly
+    assert '\\key' not in ly
+
+
+def test_staff_to_lilypond_drummode_measure_numbers_on():
+    staff = Staff(name="Bass drum", time_signature=TimeSignature(
+        dots=frozenset(), category=None, raw_brl='', numerator=4, denominator=4,
+    ))
+    for n in (1, 2):
+        m = Measure(number=n)
+        m.add_note(_make_note('F', 3, 1))
+        staff.add_measure(m)
+    ly = staff.to_lilypond_drummode(measure_numbers=True)
+    lines = ly.splitlines()
+    assert '    % 1' in lines
+    assert '    % 2' in lines
+
+
+def test_staff_to_lilypond_drummode_rejects_unknown_instrument():
+    staff = Staff(name="Xylophone")
+    staff.add_measure(Measure(number=1))
+    with pytest.raises(Exception):
+        staff.to_lilypond_drummode()
+
+
+def test_staff_to_lilypond_drummode_rejects_chord():
+    from dottednotes.models.chord import Chord
+
+    staff = Staff(name="Snare drum")
+    m = Measure(number=1)
+    m.add_note(Chord(notes=[_make_note('C', 4, 4)]))
+    staff.add_measure(m)
+    with pytest.raises(Exception):
+        staff.to_lilypond_drummode()
+
+
+def test_orchestra_score_uses_drumstaff_for_unpitched_percussion():
+    from dottednotes.models.orchestra_score import OrchestraScore
+
+    ts = TimeSignature(dots=frozenset(), category=None, raw_brl='', numerator=4, denominator=4)
+
+    sn = Staff(name="Snare drum", time_signature=ts)
+    m1 = Measure(number=1)
+    m1.add_note(_make_note('C', 4, 4))
+    m1.add_note(_make_note('C', 4, 4))
+    m1.add_note(Rest(dots=frozenset(), category=SymbolCategory.REST, raw_brl='⠀', duration=Duration(value=2)))
+    sn.add_measure(m1)
+
+    bd = Staff(name="Bass drum", time_signature=ts)
+    m2 = Measure(number=1)
+    m2.add_note(_make_note('F', 3, 2))
+    m2.add_note(Rest(dots=frozenset(), category=SymbolCategory.REST, raw_brl='⠀', duration=Duration(value=2)))
+    bd.add_measure(m2)
+
+    score = OrchestraScore(staves=[sn, bd])
+    ly = score.to_lilypond()
+
+    assert '\\new DrumStaff' in ly
+    assert '\\new Staff \\with' not in ly
+    assert 'sn4 sn4 r2 |' in ly
+    assert 'bd2 r2 |' in ly
+    # Percussion staves must not get a \relative pitch block or a \clef
+    # line (DrumStaff supplies its own percussion clef automatically).
+    assert '\\relative' not in ly
+    assert '\\clef' not in ly
+
+
 def test_default_clef_resolution():
     # S10d-12 fix: conventional clefs are looked up by instrument name, not
     # inferred from register -- a second violin should be treble even if

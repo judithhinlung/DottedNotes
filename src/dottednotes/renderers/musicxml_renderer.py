@@ -13,7 +13,10 @@ from dottednotes.models import (
 )
 from dottednotes.models.duration import TICKS_PER_QUARTER
 from dottednotes.models.fingering import Fingering
-from dottednotes.models.instrument import get_midi_instrument_name, get_midi_program_number
+from dottednotes.models.instrument import (
+    get_midi_instrument_name, get_midi_program_number, is_unpitched_percussion,
+    canonical_percussion_name,
+)
 
 
 def _item_quarter_length(item) -> float:
@@ -69,6 +72,181 @@ FERMATA_SHAPE_TO_M21 = {
     FermataShape.TENT: 'angled',
 }
 
+# Unpitched percussion (BANA Ch. 34, S10d-11): staff.name -> a music21
+# percussion instrument class, mirroring instrument.py's full
+# _UNPITCHED_PERCUSSION_TO_DRUM_NAME table (every LilyPond \drummode note
+# name) with the closest matching music21 class. Sourced from
+# music21.midi.percussion.PercussionMapper.reverseInstrumentMapping (its
+# own General MIDI Level 1 Percussion Key Map, note numbers 35-81) rather
+# than guessed -- most LilyPond drum names have a 1:1 GM note; a handful
+# have none (e.g. GM has no dedicated "Half-open Hi-Hat" or generic
+# unqualified "Guiro"/"High conga" note), or several LilyPond names share
+# one GM note (e.g. "Open low conga"/"Muted low conga" both -> GM's single
+# undifferentiated "Low Conga"). music21 also has no dedicated class at all
+# for a few GM sounds (Hand Clap, Chinese/Splash Cymbal, Ride Bell, Cabasa,
+# Guiro, Claves, Cuica) -- those fall back to the generic
+# UnpitchedPercussion base class with an explicit instrumentName.
+_PERCUSSION_NAME_TO_M21_CLASS: dict[str, type] = {
+    'Snare drum': music21.instrument.SnareDrum,
+    'Bass drum': music21.instrument.BassDrum,
+    'Triangle': music21.instrument.Triangle,
+    'Ride cymbal': music21.instrument.RideCymbals,
+    'Hi-hat': music21.instrument.HiHatCymbal,
+    'Cymbals': music21.instrument.CrashCymbals,
+    'Mounted tom': music21.instrument.TomTom,
+
+    'Acoustic bass drum': music21.instrument.BassDrum,
+    'Acoustic snare drum': music21.instrument.SnareDrum,
+    'Electric snare drum': music21.instrument.SnareDrum,
+
+    'Low floor tom': music21.instrument.TomTom,
+    'High floor tom': music21.instrument.TomTom,
+    'Low tom': music21.instrument.TomTom,
+    'High tom': music21.instrument.TomTom,
+    'Low-mid tom': music21.instrument.TomTom,
+    'High-mid tom': music21.instrument.TomTom,
+
+    'Closed hi-hat': music21.instrument.HiHatCymbal,
+    'Open hi-hat': music21.instrument.HiHatCymbal,
+    'Half-open hi-hat': music21.instrument.HiHatCymbal,
+    'Pedal hi-hat': music21.instrument.HiHatCymbal,
+
+    'Crash cymbal': music21.instrument.CrashCymbals,
+    'Crash cymbal 1': music21.instrument.CrashCymbals,
+    'Crash cymbal 2': music21.instrument.CrashCymbals,
+    'Ride cymbal 1': music21.instrument.RideCymbals,
+    'Ride cymbal 2': music21.instrument.RideCymbals,
+    'Chinese cymbal': music21.instrument.UnpitchedPercussion,
+    'Splash cymbal': music21.instrument.UnpitchedPercussion,
+    'Ride bell': music21.instrument.UnpitchedPercussion,
+
+    'Cowbell': music21.instrument.Cowbell,
+    'High bongo': music21.instrument.BongoDrums,
+    'Open high bongo': music21.instrument.BongoDrums,
+    'Muted high bongo': music21.instrument.BongoDrums,
+    'Low bongo': music21.instrument.BongoDrums,
+    'Open low bongo': music21.instrument.BongoDrums,
+    'Muted low bongo': music21.instrument.BongoDrums,
+    'High conga': music21.instrument.CongaDrum,
+    'Open high conga': music21.instrument.CongaDrum,
+    'Muted high conga': music21.instrument.CongaDrum,
+    'Low conga': music21.instrument.CongaDrum,
+    'Open low conga': music21.instrument.CongaDrum,
+    'Muted low conga': music21.instrument.CongaDrum,
+    'High timbale': music21.instrument.Timbales,
+    'Low timbale': music21.instrument.Timbales,
+    'High agogo': music21.instrument.Agogo,
+    'Low agogo': music21.instrument.Agogo,
+    'Guiro': music21.instrument.UnpitchedPercussion,
+    'Short guiro': music21.instrument.UnpitchedPercussion,
+    'Long guiro': music21.instrument.UnpitchedPercussion,
+    'Cabasa': music21.instrument.UnpitchedPercussion,
+    'Maracas': music21.instrument.Maracas,
+    'Claves': music21.instrument.UnpitchedPercussion,
+    'Open cuica': music21.instrument.UnpitchedPercussion,
+    'Muted cuica': music21.instrument.UnpitchedPercussion,
+
+    'Side stick': music21.instrument.SnareDrum,
+    'High side stick': music21.instrument.SnareDrum,
+    'Low side stick': music21.instrument.SnareDrum,
+
+    'Short whistle': music21.instrument.Whistle,
+    'Long whistle': music21.instrument.Whistle,
+    'Hand clap': music21.instrument.UnpitchedPercussion,
+    'Tambourine': music21.instrument.Tambourine,
+    'Vibraslap': music21.instrument.Vibraslap,
+    'Tam-tam': music21.instrument.TamTam,
+    'High wood block': music21.instrument.Woodblock,
+    'Low wood block': music21.instrument.Woodblock,
+
+    'Open triangle': music21.instrument.Triangle,
+    'Muted triangle': music21.instrument.Triangle,
+}
+
+# General MIDI Percussion Key Map (channel 10) note numbers, from
+# music21.midi.percussion.PercussionMapper's own source (see the big
+# comment above) -- applied whenever the chosen class's own constructor
+# default (see the printed values checked against music21 10.5.0 while
+# building this table) doesn't already match this specific instrument, or
+# would be actively wrong for it (e.g. CongaDrum's own default, 64, is GM's
+# "Low Conga" -- correct for 'Low conga' but wrong, not just imprecise, for
+# 'High conga'). An explicit `None` means GM genuinely has no note for that
+# specific LilyPond name (verified against the same source, not omitted by
+# oversight) -- e.g. GM's hi-hat only has closed/pedal/open, no "half-open".
+# Applied unconditionally by name (including a present `None`) rather than
+# left to fall through to the class default, so an unrelated default can
+# never leak into a name it doesn't belong to.
+_PERC_MAP_PITCH_OVERRIDES: dict[str, int | None] = {
+    'Ride cymbal': 51,   # Ride Cymbal 1
+    'Mounted tom': 50,   # High Tom
+
+    'Acoustic bass drum': 35,
+    'Acoustic snare drum': 38,
+    'Electric snare drum': 40,
+
+    'Low floor tom': 41,
+    'High floor tom': 43,
+    'Low tom': 45,
+    'High tom': 50,
+    'Low-mid tom': 47,
+    'High-mid tom': 48,
+
+    'Closed hi-hat': 42,
+    'Open hi-hat': 46,
+    'Half-open hi-hat': None,  # no GM equivalent (only closed/pedal/open)
+    'Pedal hi-hat': 44,
+
+    'Crash cymbal': 49,
+    'Crash cymbal 1': 49,
+    'Crash cymbal 2': 57,
+    'Ride cymbal 1': 51,
+    'Ride cymbal 2': 59,
+    'Chinese cymbal': 52,
+    'Splash cymbal': 55,
+    'Ride bell': 53,
+
+    'Cowbell': 56,
+    'High bongo': 60,
+    'Open high bongo': 60,    # GM has one undifferentiated Hi Bongo note
+    'Muted high bongo': 60,
+    'Low bongo': 61,
+    'Open low bongo': 61,     # GM has one undifferentiated Low Bongo note
+    'Muted low bongo': 61,
+    'High conga': None,       # ambiguous: GM splits high conga mute(62)/open(63)
+    'Open high conga': 63,
+    'Muted high conga': 62,
+    'Low conga': 64,
+    'Open low conga': 64,     # GM has one undifferentiated Low Conga note
+    'Muted low conga': 64,
+    'High timbale': 65,
+    'Low timbale': 66,
+    'High agogo': 67,
+    'Low agogo': 68,
+    'Guiro': None,            # ambiguous: GM splits short(73)/long(74) guiro
+    'Short guiro': 73,
+    'Long guiro': 74,
+    'Cabasa': 69,
+    'Maracas': 70,
+    'Claves': 75,
+    'Open cuica': 79,
+    'Muted cuica': 78,
+
+    'Side stick': 37,
+    'High side stick': 37,    # GM has one undifferentiated Side Stick note
+    'Low side stick': 37,
+
+    'Short whistle': 71,
+    'Long whistle': 72,
+    'Hand clap': 39,
+    'Tambourine': 54,
+    'Vibraslap': 58,
+    'High wood block': 76,
+    'Low wood block': 77,
+
+    'Open triangle': 81,
+    'Muted triangle': 80,
+}
+
 
 class MusicXMLRenderer:
     def render(self, score: Score) -> music21.stream.Score:
@@ -91,23 +269,55 @@ class MusicXMLRenderer:
         m21_part.id = staff.name
         m21_part.partName = staff.name
 
-        # S12-4: give the exported MusicXML a <score-instrument>/
-        # <midi-instrument> so DAWs (e.g. Logic) have a program to play the
-        # part with, instead of it being silent -- mirrors the LilyPond
-        # exporter's \set Staff.midiInstrument (staff.py/score.py/
-        # orchestra_score.py). staff.midi_instrument is preferred when set
-        # (an explicit --instrument choice for a BANA Sec. 24 solo piece,
-        # which may not match a placeholder "right hand"/"left hand" name);
-        # otherwise it's resolved fresh from the staff name, same as the
-        # LilyPond path.
-        midi_name = staff.midi_instrument or get_midi_instrument_name(staff.name)
-        if midi_name is not None:
-            midi_program = get_midi_program_number(midi_name)
-            if midi_program is not None:
-                m21_instrument = music21.instrument.Instrument()
-                m21_instrument.instrumentName = staff.name
-                m21_instrument.midiProgram = midi_program
-                m21_part.insert(0, m21_instrument)
+        # Unpitched percussion (BANA Ch. 34, S10d-11): notes on this staff
+        # render as music21.note.Unpitched (displayStep/displayOctave, no
+        # <pitch>) rather than music21.note.Note, mirroring the LilyPond
+        # exporter's own \drummode/DrumStaff branch (orchestra_score.py) --
+        # self._current_percussion_instrument is read by render_note() below
+        # to decide which of the two to build, and is reset per staff since
+        # one MusicXMLRenderer instance renders every staff in the score.
+        is_percussion = is_unpitched_percussion(staff.name)
+        self._current_percussion_instrument = None
+
+        if is_percussion:
+            # music21 writes <midi-channel>10</midi-channel> and derives
+            # <midi-unpitched> from .percMapPitch automatically once this
+            # instrument is inserted into the part and referenced by each
+            # note's .storedInstrument (confirmed by round-tripping this
+            # exact construction through music21's own MusicXML writer) --
+            # no manual <score-instrument>/<midi-instrument> assembly needed,
+            # unlike the generic pitched-instrument branch below.
+            canonical_name = canonical_percussion_name(staff.name)
+            m21_instrument = _PERCUSSION_NAME_TO_M21_CLASS[canonical_name]()
+            m21_instrument.instrumentName = staff.name
+            # A *present* entry -- including an explicit None, meaning "GM
+            # genuinely has no note for this instrument" -- always wins over
+            # the class's own constructor default; `.get()` can't tell
+            # "explicitly None" apart from "key absent" the way `in` can, and
+            # that distinction matters here (e.g. 'High conga' must clear
+            # CongaDrum's default of 64, which is actually GM's "Low Conga").
+            if canonical_name in _PERC_MAP_PITCH_OVERRIDES:
+                m21_instrument.percMapPitch = _PERC_MAP_PITCH_OVERRIDES[canonical_name]
+            m21_part.insert(0, m21_instrument)
+            self._current_percussion_instrument = m21_instrument
+        else:
+            # S12-4: give the exported MusicXML a <score-instrument>/
+            # <midi-instrument> so DAWs (e.g. Logic) have a program to play
+            # the part with, instead of it being silent -- mirrors the
+            # LilyPond exporter's \set Staff.midiInstrument (staff.py/
+            # score.py/orchestra_score.py). staff.midi_instrument is
+            # preferred when set (an explicit --instrument choice for a
+            # BANA Sec. 24 solo piece, which may not match a placeholder
+            # "right hand"/"left hand" name); otherwise it's resolved fresh
+            # from the staff name, same as the LilyPond path.
+            midi_name = staff.midi_instrument or get_midi_instrument_name(staff.name)
+            if midi_name is not None:
+                midi_program = get_midi_program_number(midi_name)
+                if midi_program is not None:
+                    m21_instrument = music21.instrument.Instrument()
+                    m21_instrument.instrumentName = staff.name
+                    m21_instrument.midiProgram = midi_program
+                    m21_part.insert(0, m21_instrument)
 
         # Tracking variables
         active_clef_name = None
@@ -165,8 +375,18 @@ class MusicXMLRenderer:
                 m21_measure.insert(0, m21_ts)
                 active_time_val = measure_model.time_signature
                 
-            # Clef
-            if measure_model.clef != active_clef_name:
+            # Clef. Unpitched percussion (BANA Ch. 34, S10d-11) always gets a
+            # single percussion clef at the start of the part -- Measure's
+            # own .clef field carries no real percussion-clef value (there's
+            # no ClefType.PERCUSSION; see clef.py), and BANA percussion
+            # writing has no mid-piece clef changes to track anyway, so this
+            # is emitted once and the per-measure clef model is otherwise
+            # ignored for these staves.
+            if is_percussion:
+                if active_clef_name is None:
+                    m21_measure.insert(0, music21.clef.PercussionClef())
+                    active_clef_name = "percussion"
+            elif measure_model.clef != active_clef_name:
                 if measure_model.clef == "treble":
                     m21_measure.insert(0, music21.clef.TrebleClef())
                 elif measure_model.clef == "bass":
@@ -341,19 +561,28 @@ class MusicXMLRenderer:
             
         return None
 
-    def render_note(self, note: Note, active_ties: set[tuple[str, int]]) -> music21.note.Note:
-        # Construct pitch string
-        acc_str = ""
-        if note.accidental is not None:
-            acc_type = note.accidental.type
-            if acc_type == AccidentalType.SHARP: acc_str = "#"
-            elif acc_type == AccidentalType.FLAT: acc_str = "-"
-            elif acc_type == AccidentalType.DOUBLE_SHARP: acc_str = "##"
-            elif acc_type == AccidentalType.DOUBLE_FLAT: acc_str = "--"
-            
-        pitch_str = f"{note.note_name}{acc_str}{note.octave}"
-        m21_note = music21.note.Note(pitch_str)
-        
+    def render_note(self, note: Note, active_ties: set[tuple[str, int]]):
+        if self._current_percussion_instrument is not None:
+            # Unpitched percussion (BANA Ch. 34, S10d-11): note.note_name/
+            # octave carry the note's written BANA letter+octave cell (Par.
+            # 34.2.1/34.2.2), the same displayStep/displayOctave a MusicXML
+            # <unpitched> element expects -- no accidental applies to a
+            # percussion note, so that resolution above is skipped entirely.
+            m21_note = music21.note.Unpitched(displayName=f"{note.note_name}{note.octave}")
+            m21_note.storedInstrument = self._current_percussion_instrument
+        else:
+            # Construct pitch string
+            acc_str = ""
+            if note.accidental is not None:
+                acc_type = note.accidental.type
+                if acc_type == AccidentalType.SHARP: acc_str = "#"
+                elif acc_type == AccidentalType.FLAT: acc_str = "-"
+                elif acc_type == AccidentalType.DOUBLE_SHARP: acc_str = "##"
+                elif acc_type == AccidentalType.DOUBLE_FLAT: acc_str = "--"
+
+            pitch_str = f"{note.note_name}{acc_str}{note.octave}"
+            m21_note = music21.note.Note(pitch_str)
+
         # Set duration
         m21_note.duration.type = DURATION_VAL_MAP.get(note.duration.value, 'quarter')
         m21_note.duration.dots = note.duration.dots

@@ -53,35 +53,18 @@ def test_bartok_smoke_parses_without_crashing():
         assert staff.name.split()[0] == expected_first_word
         assert len(staff.measures) == 247
 
-def test_tchaikovsky_quartet_header_is_found_and_parsing_reaches_real_music():
-    """Tchaikovsky_String_Quartet_No_1_with_header.brf originally had no
-    genuine BANA Sec. 33.2 instrument-list header at all -- it went
-    straight from the title into per-line abbreviation-prefixed music
-    (v1'/v2'/vl'/vc'). Before the bounded instrument-list scan
-    (EnsembleParser.parse()), the old unbounded loop wandered deep into
-    the piece and silently produced a single fake staff with a collapsed
-    whole-piece rest, dropping 3 of the 4 real parts with no error at all.
-
-    The fixture now has a real Sec. 33.2 header added (Violin I/II, Viola,
-    Violoncello, using Table 29's verified abbreviations), so parsing
-    correctly finds it and proceeds into real per-instrument content --
-    this test locks that in. Full parsing still doesn't succeed, but for
-    an entirely separate, pre-existing reason unrelated to this fixture's
-    header: the cello part's pizzicato ostinato uses a genuine BANA Sec.
-    19 numeral-repeat sign (`>vc'_:99e.c7.ce_8e9c7 7`, the trailing "7"),
-    a real BANA feature this codebase doesn't implement yet
-    (`NumeralRepeatError`'s own docstring: "layout-specific, involve
-    parsing complexity this parser does not implement" -- a documented
-    scope boundary, not a bug). Asserting that specific, later error
-    (rather than the old "no instrument list header found" one) proves
-    the header bug is fixed without claiming full parsing works.
-    """
-    from dottednotes.parser.braille_parser import NumeralRepeatError
-
-    pipeline = BRLInputPipeline()
-    text = pipeline.load(FIXTURES / "Tchaikovsky_String_Quartet_No_1_with_header.brf")
-    with pytest.raises(NumeralRepeatError, match="numeral repeats"):
-        EnsembleParser().parse(text)
+# Tchaikovsky_String_Quartet_No_1_with_header.brf and its test
+# (test_tchaikovsky_quartet_header_is_found_and_parsing_reaches_real_music)
+# have been removed from tests/fixtures/ entirely, for the same reason as
+# the Beethoven/Faure removal noted below: the new Sec. 33.4.6/22.3
+# end-word-sign validation (EnsembleParser._line_missing_end_word_sign)
+# found 5 separate lines (indented continuation lines opening with an
+# unterminated ">c"/">d" word-sign, very plausibly truncated "cresc."/
+# "dim." markings) with no closing end-word-sign anywhere in the line --
+# a systematic transcription gap in this externally-sourced fixture, not
+# an isolated typo. Per the developer, don't guess at what the missing
+# text/boundary should have been; drop the fixture instead. Do not
+# re-introduce tests against it without the developer's go-ahead.
 
 
 def test_bear_under_the_floorboard_no_empty_measures_or_spurious_key_changes():
@@ -130,3 +113,60 @@ def test_bear_under_the_floorboard_no_empty_measures_or_spurious_key_changes():
 # entirely: per the developer, these two fixtures don't adhere to BANA
 # conventions, so they aren't reliable smoke-test material. Do not
 # re-introduce tests against them without the developer's go-ahead.
+
+
+def test_percussion_ensemble_parses_and_renders_drummode():
+    """End-to-end unpitched-percussion pipeline test (BANA Ch. 34): a
+    Sec. 33.2 instrument-list header naming "Snare drum"/"Bass drum"
+    (Table 29 abbreviations sdr/bdr), followed by per-line content in the
+    same ensemble format every other instrument already uses. No parser
+    changes were needed for this to work -- BANA writes percussion notes
+    with ordinary letter+octave+duration cells (Sec. 34.2.1/34.2.2), so
+    EnsembleParser/BrailleParser already produced valid Note/Rest objects
+    for these lines; the only new code is at the classification/rendering
+    layer (instrument.is_unpitched_percussion/get_drum_note_name,
+    Staff.to_lilypond_drummode(), OrchestraScore's DrumStaff branch).
+
+    See tests/fixtures/README.md for how this fixture was generated
+    (BrailleRenderer -> unicode_to_ascii_braille, round-trip verified, not
+    hand-transcribed).
+    """
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / "percussion_ensemble_snare_bass_drum.brf")
+    score = EnsembleParser().parse(text)
+
+    assert [s.name for s in score.staves] == ["Snare drum", "Bass drum"]
+    assert len(score.staves[0].measures) == 2
+    assert len(score.staves[1].measures) == 2
+
+    ly = score.to_lilypond()
+    assert "\\new DrumStaff" in ly
+    assert "\\new Staff \\with" not in ly
+    assert "sn4 sn4 sn4 sn4 |" in ly
+    assert "bd2 r2 |" in ly
+    assert "\\relative" not in ly
+    assert "\\clef" not in ly
+
+
+def test_percussion_ensemble_lilypond_output_compiles_cleanly(tmp_path):
+    import shutil
+    import subprocess
+
+    if not shutil.which("lilypond"):
+        pytest.skip("lilypond binary not installed")
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load(FIXTURES / "percussion_ensemble_snare_bass_drum.brf")
+    score = EnsembleParser().parse(text)
+    ly_output = score.to_lilypond()
+
+    ly_file = tmp_path / "percussion_ensemble.ly"
+    ly_file.write_text(ly_output, encoding="utf-8")
+    result = subprocess.run(
+        ["lilypond", "-o", str(tmp_path / "percussion_ensemble"), str(ly_file)],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, f"lilypond compile failed:\n{result.stdout}\n{result.stderr}"
+    assert "warning" not in (result.stdout + result.stderr).lower()
+    pdf_path = tmp_path / "percussion_ensemble.pdf"
+    assert pdf_path.exists() and pdf_path.stat().st_size > 0

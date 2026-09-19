@@ -17,6 +17,7 @@ from dottednotes.models import (
 from dottednotes.models.fingering import Fingering
 from dottednotes.models.duration import TICKS_PER_QUARTER, VALID_DURATIONS
 from dottednotes.models.transposition import transposition_from_interval
+from dottednotes.models.instrument import canonical_percussion_name, UNPITCHED_PERCUSSION_NAMES
 
 def load_musicxml(source: str) -> Score:
     """Parse a MusicXML file path or string using music21 and return a DottedNotes Score."""
@@ -155,6 +156,33 @@ class MusicXMLTranslator:
                 name = f"{base} right hand"
             elif "staff2" in lower_id or "staff 2" in lower_id:
                 name = f"{base} left hand"
+
+        # Unpitched percussion (BANA Ch. 34, S10d-11): a part carrying any
+        # <unpitched> note is transcribed one-instrument-per-staff, the same
+        # convention the BRF ensemble side already uses (staff.py's
+        # to_lilypond_drummode / instrument.py's is_unpitched_percussion),
+        # so its name must resolve to that curated set's canonical
+        # capitalization. MusicXML <part-name> capitalization varies
+        # ("Snare Drum" vs. this project's "Snare drum"), and some files
+        # leave the part itself generically named ("Percussion 1") while
+        # the real instrument identity lives on <score-instrument>/
+        # <instrument-name> instead -- both are tried, matched case-
+        # insensitively, before falling back to a clear, specific error
+        # rather than silently mis-mapping to the wrong drum sound.
+        if part.recurse().getElementsByClass(music21.note.Unpitched):
+            canonical = canonical_percussion_name(name)
+            if canonical is None:
+                part_instrument = part.getInstrument(returnDefault=False)
+                if part_instrument is not None and part_instrument.instrumentName:
+                    canonical = canonical_percussion_name(part_instrument.instrumentName)
+            if canonical is None:
+                supported = ", ".join(sorted(UNPITCHED_PERCUSSION_NAMES))
+                raise DottedNotesError(
+                    f"Unrecognized unpitched percussion instrument '{name}' -- "
+                    "not one of the instruments DottedNotes currently supports "
+                    f"for BANA Chapter 34 transcription ({supported})."
+                )
+            name = canonical
 
         staff = Staff(name=name)
 
@@ -827,7 +855,11 @@ class MusicXMLTranslator:
             duration = self.map_duration(el.duration, measure_number=el.measureNumber)
             ottava_shift = self._ottava_octave_shift(el)
 
-            if isinstance(el, music21.note.Note):
+            if isinstance(el, (music21.note.Note, music21.note.Unpitched)):
+                # Unpitched percussion (BANA Ch. 34, S10d-11) shares this
+                # whole grace-note/tuplet wrapping path with pitched notes --
+                # translate_note_obj() itself dispatches on the element type
+                # for the pitch-vs-displayStep/Octave difference.
                 note_obj = self.translate_note_obj(el, duration, ottava_shift, active_accidentals)
                 if el.duration.isGrace:
                     current_grace_notes.append(note_obj)
@@ -1039,6 +1071,27 @@ class MusicXMLTranslator:
         ottava_shift: int = 0,
         active_accidentals: "dict[tuple[str, int], AccidentalType] | None" = None,
     ) -> Note:
+        # Unpitched percussion (BANA Ch. 34, S10d-11): a music21.note.Unpitched
+        # has displayStep/displayOctave instead of a real .pitch -- this is
+        # its written staff position (as if on a 5-line staff in treble
+        # clef), the direct MusicXML analogue of the letter+octave a BANA
+        # percussion cell writes (Par. 34.2.1/34.2.2), so it maps straight
+        # onto Note.note_name/octave the same way a pitched note's step/
+        # octave does. No accidental resolution applies -- percussion notes
+        # carry no real pitch alteration -- so that whole block below is
+        # skipped entirely for this case.
+        if isinstance(m21_note, music21.note.Unpitched):
+            note = Note(
+                dots=frozenset(),
+                category=None,
+                raw_brl="",
+                note_name=m21_note.displayStep,
+                octave=m21_note.displayOctave,
+                duration=duration,
+                accidental=None,
+            )
+            return self._apply_common_note_markings(note, m21_note)
+
         pitch = m21_note.pitch
         note_name = pitch.step
         octave = pitch.octave
@@ -1134,7 +1187,18 @@ class MusicXMLTranslator:
             duration=duration,
             accidental=acc
         )
-        
+
+        return self._apply_common_note_markings(note, m21_note)
+
+    def _apply_common_note_markings(self, note: Note, m21_note) -> Note:
+        """Apply articulations/breath marks/ornaments/fermata/fingerings/
+        tie/slurs from `m21_note` onto `note` -- shared tail of
+        translate_note_obj(), factored out (S10d-11) so the unpitched-
+        percussion path above can reuse it unchanged. music21.note.Unpitched
+        and music21.note.Note are both NotRest subclasses and expose all of
+        these the same way; only pitch/accidental resolution (handled by
+        the caller before this) differs between them.
+        """
         for art in m21_note.articulations:
             art_type = M21_ARTICULATION_MAP.get(type(art))
             if art_type is not None:
@@ -1197,11 +1261,11 @@ class MusicXMLTranslator:
                     note.fingerings.append(Fingering(dots=frozenset(), category=None, raw_brl="", finger=finger))
                 except ValueError:
                     pass
-                    
+
         if m21_note.tie is not None:
             if m21_note.tie.type in ('start', 'continue'):
                 note.tie = True
-                
+
         # A slur's plain-vs-bracket role (BANA 13.3: the first of two+
         # simultaneously overlapping slurs stays a plain slur, any
         # additional one(s) get bracket treatment) must be decided ONCE per

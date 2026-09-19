@@ -278,3 +278,115 @@ def test_musicxml_export_writes_midi_instrument_xml():
         assert "<score-instrument" in content
         assert "<midi-instrument" in content
         assert "<midi-program>74</midi-program>" in content  # GM program 74 ("flute")
+
+
+def _build_percussion_staff(name: str, count: int = 4) -> Staff:
+    staff = Staff(name=name)
+    m = Measure(number=1, clef="treble", key_signature=0, time_signature=(4, 4))
+    for _ in range(count):
+        m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='B', octave=4,
+                         duration=Duration(value=4)))
+    staff.add_measure(m)
+    return staff
+
+
+def test_musicxml_export_unpitched_percussion_note():
+    # S10d-11: a staff whose name is one of instrument.py's curated
+    # unpitched-percussion instruments (BANA Ch. 34) renders each note as
+    # music21.note.Unpitched (displayStep/displayOctave from note_name/
+    # octave, no <pitch>), not music21.note.Note -- the MusicXML analogue
+    # of the LilyPond exporter's \drummode branch (orchestra_score.py).
+    score = Score()
+    score.add_staff(_build_percussion_staff('Snare drum'))
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    m21_measure = m21_part.getElementsByClass(music21.stream.Measure)[0]
+    notes = list(m21_measure.getElementsByClass(music21.note.Unpitched))
+    assert len(notes) == 4
+    for n in notes:
+        assert n.displayStep == 'B'
+        assert n.displayOctave == 4
+    assert not list(m21_measure.getElementsByClass(music21.note.Note))
+
+
+def test_musicxml_export_unpitched_percussion_gets_percussion_clef_and_instrument():
+    score = Score()
+    score.add_staff(_build_percussion_staff('Snare drum'))
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    m21_measure = m21_part.getElementsByClass(music21.stream.Measure)[0]
+    clefs = list(m21_measure.getElementsByClass(music21.clef.Clef))
+    assert len(clefs) == 1
+    assert isinstance(clefs[0], music21.clef.PercussionClef)
+
+    instruments = list(m21_part.getElementsByClass(music21.instrument.Instrument))
+    assert len(instruments) == 1
+    assert isinstance(instruments[0], music21.instrument.SnareDrum)
+
+
+def test_musicxml_export_unpitched_percussion_writes_midi_channel_10_xml():
+    # General MIDI dedicates channel 10 to percussion (S10d-11) -- confirm
+    # music21's writer actually emits it for a percussion instrument
+    # inserted this way, not just that the Python object looks right.
+    score = Score()
+    score.add_staff(_build_percussion_staff('Bass drum', count=1))
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_path = pathlib.Path(tmp_dir) / "bass_drum.musicxml"
+        export_musicxml(score, str(out_path))
+        content = out_path.read_text(encoding="utf-8")
+        assert "<unpitched>" in content
+        assert "<display-step>B</display-step>" in content
+        assert "<clef>" in content and "<sign>percussion</sign>" in content
+        assert "<midi-channel>10</midi-channel>" in content
+        assert "<midi-unpitched>36</midi-unpitched>" in content  # BassDrum.percMapPitch (35) + 1
+
+
+def test_musicxml_export_expanded_percussion_instrument_generic_fallback():
+    # S10d-11 follow-up: instruments with no dedicated music21 class
+    # (Claves, Guiro, Cabasa, Cuica, Hand clap, Chinese/Splash cymbal, Ride
+    # bell) fall back to music21.instrument.UnpitchedPercussion with an
+    # explicit instrumentName -- confirm that path doesn't crash and still
+    # produces valid <unpitched>/percussion-clef output.
+    score = Score()
+    score.add_staff(_build_percussion_staff('Claves', count=2))
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    m21_measure = m21_part.getElementsByClass(music21.stream.Measure)[0]
+    notes = list(m21_measure.getElementsByClass(music21.note.Unpitched))
+    assert len(notes) == 2
+    instruments = list(m21_part.getElementsByClass(music21.instrument.Instrument))
+    assert len(instruments) == 1
+    assert instruments[0].instrumentName == 'Claves'
+    assert instruments[0].percMapPitch == 75  # GM Level 1 Percussion Key Map
+
+
+def test_musicxml_export_ambiguous_percussion_gm_note_stays_unset():
+    # 'High conga' has no single correct GM percussion note (GM only
+    # defines mute-high/open-high separately) -- confirm the exporter
+    # leaves percMapPitch unset rather than silently inheriting
+    # CongaDrum's own class default (64, which is actually "Low Conga" --
+    # would be actively wrong here, not just imprecise).
+    score = Score()
+    score.add_staff(_build_percussion_staff('High conga', count=1))
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    instruments = list(m21_part.getElementsByClass(music21.instrument.Instrument))
+    assert instruments[0].percMapPitch is None
+
+
+def test_musicxml_export_pitched_staff_unaffected_by_percussion_branch():
+    # Regression guard: a normal pitched staff must still export as
+    # music21.note.Note with a real <pitch>, not accidentally routed
+    # through the new Unpitched branch.
+    score = Score()
+    staff = Staff(name="Flute")
+    m = Measure(number=1)
+    m.add_note(Note(dots=frozenset(), category=None, raw_brl="", note_name='C', octave=5, duration=Duration(value=4)))
+    staff.add_measure(m)
+    score.add_staff(staff)
+
+    m21_part = MusicXMLRenderer().render(score).parts[0]
+    m21_measure = m21_part.getElementsByClass(music21.stream.Measure)[0]
+    assert len(list(m21_measure.getElementsByClass(music21.note.Note))) == 1
+    assert not list(m21_measure.getElementsByClass(music21.note.Unpitched))

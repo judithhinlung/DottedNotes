@@ -5,7 +5,7 @@ from typing import Optional
 
 from dottednotes.bana_symbols import TABLE_29_ENGLISH
 
-from .instrument import InstrumentFamily, get_midi_instrument_name
+from .instrument import InstrumentFamily, get_midi_instrument_name, is_unpitched_percussion
 from .score import Score, _LILYPOND_VERSION
 from .staff import Staff
 
@@ -122,12 +122,22 @@ class OrchestraScore(Score):
 
             # \clef is emitted separately in the \score block's \with body
             # (see _staff_with_block), not inside the music variable.
-            anchor, start_midi = staff.relative_anchor()
-            staff_content = staff.to_lilypond(
-                start_midi=start_midi, include_clef=False, measure_numbers=measure_numbers
-            )
-            relative_block = [f"\\relative {anchor} {{", staff_content, '}']
-            wrapped = self._wrap_transpose(staff, relative_block, '', concert_pitch)
+            if is_unpitched_percussion(staff.name):
+                # BANA Ch. 34 unpitched percussion (Sec. 34.2.1) has no real
+                # pitch to chain a \relative anchor against and no key
+                # signature -- \drummode content instead. _wrap_transpose
+                # is still safe to call: it's a no-op passthrough for any
+                # staff name outside _TRANSPOSITIONS (percussion instruments
+                # always are), so no special-casing is needed there.
+                drum_content = staff.to_lilypond_drummode(measure_numbers=measure_numbers)
+                music_block = [r"\drummode {", drum_content, '}']
+            else:
+                anchor, start_midi = staff.relative_anchor()
+                staff_content = staff.to_lilypond(
+                    start_midi=start_midi, include_clef=False, measure_numbers=measure_numbers
+                )
+                music_block = [f"\\relative {anchor} {{", staff_content, '}']
+            wrapped = self._wrap_transpose(staff, music_block, '', concert_pitch)
             variable_defs.append(f'{var_name} = ' + wrapped[0])
             variable_defs.extend(wrapped[1:])
             variable_defs.append('')
@@ -166,8 +176,9 @@ class OrchestraScore(Score):
         """Return the \\new Staff \\with {...} { ... } block for one staff,
         referencing its already-defined music variable by name."""
         abbrev = TABLE_29_ENGLISH.get(staff.name) if short_names else None
+        is_drum = is_unpitched_percussion(staff.name)
 
-        lines = [f'{indent}\\new Staff \\with {{']
+        lines = [f'{indent}\\new {"DrumStaff" if is_drum else "Staff"} \\with {{']
         lines.append(f'{indent}  instrumentName = "{staff.name}"')
         if abbrev is not None:
             lines.append(f'{indent}  shortInstrumentName = "{abbrev}"')
@@ -195,9 +206,15 @@ class OrchestraScore(Score):
             lines.append(f'{indent}>>')
         else:
             lines.append(f'{indent}}} {{')
-            clef = staff.resolve_clef()
-            if clef is not None:
-                lines.append(f'{indent}  {clef}')
+            if not is_drum:
+                # DrumStaff supplies its own percussion clef automatically
+                # (LilyPond Notation Reference, "Common notation for
+                # percussion") -- an explicit \clef line here would be
+                # redundant, and staff.resolve_clef()'s register-based
+                # heuristic isn't meaningful for unpitched notes anyway.
+                clef = staff.resolve_clef()
+                if clef is not None:
+                    lines.append(f'{indent}  {clef}')
             lines.append(f'{indent}  \\set Staff.instrumentName = "{staff.name}"')
             midi_name = get_midi_instrument_name(staff.name)
             if midi_name is not None:

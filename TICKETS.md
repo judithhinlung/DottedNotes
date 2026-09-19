@@ -8658,12 +8658,79 @@ accord conventions all differ from pitched instruments). No code changes
 made for this ticket. Revisit if a percussion piece becomes a near-term
 target.
 
+**Scope decision (2026-09-19): revisited and greenlit.** The premise for
+deferring changed -- unpitched percussion is no longer solo-instrumental-only
+scope; the BRF/LilyPond side already gained full ensemble percussion support
+(`is_unpitched_percussion`/`get_drum_note_name` in `instrument.py`,
+`Staff.to_lilypond_drummode()`, `OrchestraScore`'s `DrumStaff` branch, and the
+`percussion_ensemble_snare_bass_drum.brf` fixture). Developer asked to build
+the matching MusicXML parsing/rendering side on top of that existing model
+rather than re-deriving a new one, so step 2 below (deciding a model
+representation) was already answered: reuse `Note` directly with
+`note_name`/`octave` set from MusicXML's `<unpitched>`
+`<display-step>`/`<display-octave>` (BANA's own letter+octave cell, Par.
+34.2.1/34.2.2), exactly like a pitched note -- no new field or model needed.
+
+**Update:** Implemented for both directions:
+- Import (`musicxml_parser.py`): `translate_part` detects any
+  `music21.note.Unpitched` in a part and resolves the staff's name to
+  `instrument.py`'s curated set (`canonical_percussion_name`, matched
+  case-insensitively against `<part-name>` first, then the resolved
+  `<score-instrument>`'s `instrumentName`), raising a clear
+  `DottedNotesError` naming the instrument if neither matches. `_translate_note_stream`
+  dispatches `Unpitched` through the same `translate_note_obj` path as
+  `Note`; that method now branches at the top for `Unpitched`
+  (`displayStep`/`displayOctave` -> `note_name`/`octave`, no accidental
+  resolution) and shares its articulation/ornament/fermata/fingering/tie/
+  slur tail with pitched notes via a new `_apply_common_note_markings`
+  helper (both are `NotRest` subclasses with the same attributes).
+- Export (`musicxml_renderer.py`): `render_staff` checks
+  `is_unpitched_percussion(staff.name)` and, if true, inserts a matching
+  `music21.instrument.*` percussion class (`SnareDrum`/`BassDrum`/
+  `Triangle`/`RideCymbals`/`HiHatCymbal`/`CrashCymbals`/`TomTom`, mirroring
+  the LilyPond `\drummode` name choices, including the same 'Cymbals'/
+  'Mounted tom' judgment calls) and a single `PercussionClef` instead of
+  the normal pitched clef/`<score-instrument>` logic; `render_note` builds
+  a `music21.note.Unpitched(displayName=...)` instead of `music21.note.Note`
+  when the staff is percussion. Verified against music21's own MusicXML
+  writer output (round-tripped a hand-built percussion part through it) that
+  `<unpitched>`/`<clef><sign>percussion</sign></clef>`/
+  `<midi-channel>10</midi-channel>`/`<midi-unpitched>` all come out
+  spec-correct with no manual XML assembly needed.
+- `instrument.py`'s `is_unpitched_percussion`/`get_drum_note_name` were
+  made case-insensitive (via a new `canonical_percussion_name` helper,
+  also used by the two files above), matching this module's other name
+  lookups (`get_instrument_family`/`get_default_clef`/
+  `get_midi_instrument_name`) -- needed because MusicXML `<part-name>`
+  capitalization varies ("Snare Drum") from this project's own canonical
+  form ("Snare drum").
+- Tests: `test_musicxml_parser.py` (import: displayStep/octave mapping,
+  case-insensitive/instrumentName-fallback name resolution, unrecognized-
+  instrument error, articulation/tie), `test_musicxml_exporter.py` (export:
+  `Unpitched` construction, percussion clef/instrument, GM channel-10 XML,
+  pitched-staff regression guard), `test_musicxml_integration.py` (full
+  round trip: the existing `percussion_ensemble_snare_bass_drum.brf`
+  fixture parsed to `OrchestraScore` -> exported to MusicXML -> reimported
+  -> note content and `\drummode` LilyPond output both survive unchanged).
+  `73a-Percussion.xml` from step 5 above isn't present in this repo or the
+  installed music21 package, so these tests build MusicXML in-memory via
+  music21 objects instead, matching this test file's existing convention.
+- Not built: `Score.to_lilypond()` (the non-ensemble/non-`OrchestraScore`
+  path) still has no `DrumStaff` branch -- a MusicXML import of a single
+  percussion part would import correctly into the model but render as a
+  (musically wrong) pitched `\relative` staff if converted straight to
+  LilyPond via that path. Out of scope here: the request was MusicXML
+  parsing/rendering specifically, and every existing percussion fixture/
+  test already goes through `EnsembleParser`/`OrchestraScore`, which does
+  have the `DrumStaff` branch.
+
 **Definition of Done:**
 - [ ] Explicit scope decision recorded (build now vs. defer) before any
-  code changes. (Recorded above: defer.)
+  code changes. (Recorded above: defer, then revisited and greenlit.)
 - [ ] If built: unpitched percussion notes import and transcribe per BANA
   Chapter 34, verified tests pass, existing test suite has no
-  regressions. (N/A -- deferred.)
+  regressions. (Implemented -- see Update above -- awaiting developer
+  sign-off.)
 
 ---
 

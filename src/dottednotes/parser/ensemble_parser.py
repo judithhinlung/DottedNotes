@@ -27,7 +27,7 @@ from ..models.note import Note, Rest
 from ..models.chord import Chord
 from ..models.in_accord import InAccord
 from ..models.tuplet import Tuplet
-from .input_pipeline import BRLInputPipeline, decode_literary_braille
+from .input_pipeline import BRLInputPipeline, decode_literary_braille, ASCII_TO_DOTS
 from .tokenizer import BrailleTokenizer, BrailleToken
 from .braille_parser import BrailleParser
 from .instrument_list import parse_instrument_list, _parse_line as _parse_instrument_line
@@ -173,6 +173,57 @@ def extract_line_abbreviation(line_str: str) -> tuple[str | None, str]:
         return abbrev_cells, music_cells
 
     return None, line_str
+
+
+def _line_missing_end_word_sign(line_str: str) -> bool:
+    """True if `line_str` (after stripping leading blank cells) opens with
+    the word-sign prefix (⠜, ASCII '>') -- used both for a per-line
+    instrument abbreviation (BANA Sec. 33.4.6, e.g. "vc'") and for an
+    inline dynamics/technique word-sign marking (e.g. "pizz'") -- but has
+    no end-word-sign (⠄, ASCII "'") anywhere in the rest of the line.
+
+    A well-formed line always closes that prefix before any content
+    follows it on the same line, so reaching end-of-line without one means
+    the source is missing the closing sign. Left undetected, this makes
+    extract_line_abbreviation() unable to tell where the abbreviation ends
+    and the music begins, so the entire line's content is either silently
+    dropped (no instrument yet established for this system) or spliced
+    onto whatever instrument's part happened to be open beforehand.
+    """
+    stripped = line_str.lstrip('⠀ ')
+    return stripped.startswith('⠜') and '⠄' not in stripped
+
+
+_DOTS_TO_ASCII_BRAILLE = {v: k for k, v in ASCII_TO_DOTS.items()}
+_DOTS_TO_ASCII_BRAILLE[0] = ' '
+
+
+def _to_ascii_braille(text: str) -> str:
+    """Convert Unicode braille cells back to ASCII braille for an error
+    message. This codebase's own developer composes and reads BRF as
+    ASCII braille (what her BrailleNotetaker exports) via a screen reader
+    -- quoting raw Unicode braille glyphs in an error string would not be
+    meaningful to her, but ASCII braille round-trips back to exactly what
+    she'd see in the source file.
+    """
+    result = []
+    for char in text:
+        offset = ord(char) - 0x2800
+        result.append(_DOTS_TO_ASCII_BRAILLE.get(offset, char) if 0 <= offset <= 63 else char)
+    return "".join(result)
+
+
+def _raise_missing_end_word_sign(line_str: str, line_number: int | None) -> None:
+    location = f" (line {line_number})" if line_number is not None else ""
+    raw = _to_ascii_braille(line_str.strip('⠀ '))
+    raise BrailleParseError(
+        f"Ensemble score line{location} looks like it's missing the "
+        "closing end-word-sign (') after an instrument abbreviation or "
+        "word-sign marking (BANA Sec. 33.4.6) -- for example \">vc\" "
+        "written instead of \">vc'\". Without the closing sign, this "
+        "line's content can't be matched to any instrument and would "
+        f"otherwise be silently dropped or attached to the wrong part: {raw!r}"
+    )
 
 
 def _line_has_word_sign(line: str) -> bool:
@@ -490,6 +541,7 @@ class ParallelSystem:
         line_str: str,
         instruments: list[InstrumentInfo] | None = None,
         category_override: str | None = None,
+        line_number: int | None = None,
     ) -> bool:
         """Process a line within the system. Returns True if successfully handled.
 
@@ -515,6 +567,8 @@ class ParallelSystem:
             self.parts[abbrev_cells] = music_cells
             self.last_abbrev = abbrev_cells
             return True
+        elif _line_missing_end_word_sign(line_str):
+            _raise_missing_end_word_sign(line_str, line_number)
         elif self.last_abbrev is not None:
             self.parts[self.last_abbrev] += " " + music_cells.lstrip('⠀ ')
             return True
@@ -1149,9 +1203,10 @@ class EnsembleParser:
         # stays None for files that never emit a multi-marker header line.
         group_boundaries: list[tuple[int, int]] | None = None
         group_systems: list[ParallelSystem] = []
-        for line in parallel_lines:
+        for line_offset, line in enumerate(parallel_lines):
             if not line.strip():
                 continue
+            line_number = i + line_offset + 1
 
             markers = extract_all_measure_numbers(line)
             if markers is not None:
@@ -1172,9 +1227,11 @@ class EnsembleParser:
                 group_systems = []
                 current_system = ParallelSystem(m_num)
                 systems.append(current_system)
-                current_system.add_line(remaining, instruments, self.category_override)
+                current_system.add_line(remaining, instruments, self.category_override, line_number)
             elif group_boundaries is not None:
                 abbrev_cells, _ = extract_line_abbreviation(line)
+                if abbrev_cells is None and _line_missing_end_word_sign(line):
+                    _raise_missing_end_word_sign(line, line_number)
                 # BANA Sec. 33.4.6 says a measure-number indication is
                 # "indented one cell beyond the first music signs of the
                 # parallel" -- but that rule describes BANA's own one-
@@ -1257,9 +1314,9 @@ class EnsembleParser:
                 next_num = (systems[-1].measure_number + 1) if systems else 1
                 current_system = ParallelSystem(next_num)
                 systems.append(current_system)
-                current_system.add_line(line, instruments, self.category_override)
+                current_system.add_line(line, instruments, self.category_override, line_number)
             elif current_system is not None:
-                current_system.add_line(line, instruments, self.category_override)
+                current_system.add_line(line, instruments, self.category_override, line_number)
 
         if not systems:
             raise BrailleParseError("No parallel systems found in ensemble score.")

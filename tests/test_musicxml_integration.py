@@ -277,3 +277,42 @@ def test_bear_under_the_floorboard_brf_to_musicxml_keeps_3_4_time():
         assert "<beats>4</beats>" not in content
 
 
+def test_percussion_ensemble_brf_round_trips_through_musicxml(tmp_path):
+    # S10d-11 end-to-end: the existing BANA Ch. 34 BRF fixture
+    # (percussion_ensemble_snare_bass_drum.brf, see test_ensemble_integration.py)
+    # parses into an OrchestraScore with two unpitched-percussion staves --
+    # export that through MusicXMLRenderer, then reimport the file through
+    # MusicXMLTranslator, and confirm both staves' note content and
+    # \drummode LilyPond output survive the round trip unchanged.
+    from dottednotes.parser.ensemble_parser import EnsembleParser
+
+    pipeline = BRLInputPipeline()
+    text = pipeline.load("tests/fixtures/percussion_ensemble_snare_bass_drum.brf")
+    original = EnsembleParser().parse(text)
+
+    out_path = tmp_path / "percussion_ensemble.musicxml"
+    export_musicxml(original, str(out_path))
+    content = out_path.read_text(encoding="utf-8")
+    assert content.count("<unpitched>") == sum(
+        1 for staff in original.staves for m in staff.measures for item in m.notes
+        if isinstance(item, Note)
+    )
+
+    reloaded = load_musicxml(str(out_path))
+    assert [s.name for s in reloaded.staves] == ["Snare drum", "Bass drum"]
+    assert len(reloaded.staves[0].measures) == len(original.staves[0].measures)
+    assert len(reloaded.staves[1].measures) == len(original.staves[1].measures)
+
+    for orig_staff, new_staff in zip(original.staves, reloaded.staves):
+        for orig_measure, new_measure in zip(orig_staff.measures, new_staff.measures):
+            assert len(orig_measure.notes) == len(new_measure.notes)
+            for orig_item, new_item in zip(orig_measure.notes, new_measure.notes):
+                if isinstance(orig_item, Note):
+                    assert new_item.note_name == orig_item.note_name
+                    assert new_item.octave == orig_item.octave
+                    assert new_item.duration.value == orig_item.duration.value
+
+    assert reloaded.staves[0].to_lilypond_drummode() == original.staves[0].to_lilypond_drummode()
+    assert reloaded.staves[1].to_lilypond_drummode() == original.staves[1].to_lilypond_drummode()
+
+

@@ -14,6 +14,41 @@ if TYPE_CHECKING:
     from .time_signature import TimeSignature
 
 
+def _item_to_drummode(item, drum_name: str) -> str:
+    """Render one measure item as \\drummode content for `to_lilypond_drummode()`
+    below. Note/Rest/Tuplet only -- BANA Chapter 34's supported instruments
+    (Sec. 34.2(b)/34.7, one instrument per braille line) never need a
+    Chord/InAccord/MeasureRepeat/AlternatingTremolo on a percussion line
+    (that's Sec. 34.2.3's same-line interval/in-accord case for a single
+    performer's family of like-sized instruments, deliberately out of scope
+    here), so those raise rather than silently mis-render.
+    """
+    from .note import Note, Rest
+    from .tuplet import Tuplet
+    from ..exceptions import DottedNotesError
+
+    if isinstance(item, Rest):
+        # Rest.to_lilypond() has no pitch involvement at all -- safe to
+        # reuse directly.
+        return item.to_lilypond()
+    if isinstance(item, Note):
+        duration_str = item.duration.to_lilypond()
+        articulation_str = ''.join(a.to_lilypond() for a in item.articulations)
+        tie_str = '~' if item.tie else ''
+        dynamic_str = ''.join(d.to_lilypond() for d in item.dynamics)
+        return f"{drum_name}{duration_str}{articulation_str}{tie_str}{dynamic_str}"
+    if isinstance(item, Tuplet):
+        inner = ' '.join(_item_to_drummode(sub, drum_name) for sub in item.items)
+        num, den = item.ratio
+        return f'\\tuplet {num}/{den} {{ {inner} }}'
+    raise DottedNotesError(
+        f"{type(item).__name__} items on an unpitched percussion staff are "
+        "not yet supported -- this project's \\drummode rendering only "
+        "covers Note/Rest/Tuplet content per BANA Chapter 34's one-"
+        "instrument-per-line transcription format."
+    )
+
+
 @dataclass
 class Staff:
     name: str
@@ -321,6 +356,55 @@ class Staff:
                     measure_lines.append(f'    % {m.number}')
                 measure_lines.append('    ' + ly_str)
                 i += 1
+
+        return '\n'.join(header + measure_lines)
+
+    def to_lilypond_drummode(self, measure_numbers: bool = False) -> str:
+        """Render this staff's measures as \\drummode content for an
+        unpitched percussion instrument (BANA Chapter 34), in place of the
+        pitched \\relative rendering to_lilypond() produces.
+
+        No `\\relative` anchor (percussion notes carry no real pitch to
+        chain against) and no `\\key` (percussion has no key signature).
+        `\\time` is still emitted from this staff's time_signature when
+        set. No `\\clef` line is emitted either -- DrumStaff supplies its
+        own percussion clef automatically (LilyPond Notation Reference,
+        "Common notation for percussion": "Percussion clefs are added
+        automatically to a DrumStaff context").
+
+        The instrument identity (which drum name every note on this line
+        renders as) comes from `self.name` via
+        `instrument.get_drum_note_name()` -- BANA writes percussion notes
+        with ordinary letter+octave cells (Sec. 34.2.1/34.2.2), but per
+        Sec. 34.2.3 each instrument always gets its own braille line, so
+        the specific letter/octave a note happens to be written with
+        carries no real musical meaning here and is intentionally ignored.
+        """
+        from .instrument import get_drum_note_name
+        from ..exceptions import DottedNotesError
+
+        drum_name = get_drum_note_name(self.name)
+        if drum_name is None:
+            raise DottedNotesError(
+                f"'{self.name}' is not a recognized unpitched percussion "
+                "instrument -- see instrument.py's "
+                "_UNPITCHED_PERCUSSION_TO_DRUM_NAME for the supported set."
+            )
+
+        header: list[str] = []
+        if self.time_signature is not None:
+            header.append('    ' + self.time_signature.to_lilypond())
+
+        from .measure import _BAR_LINE_TO_LY
+
+        measure_lines: list[str] = []
+        for m in self.measures:
+            item_strs = [_item_to_drummode(item, drum_name) for item in m.notes]
+            bar_ly = _BAR_LINE_TO_LY.get(m.bar_line_type, '|')
+            ly_str = ' '.join(item_strs) + ' ' + bar_ly
+            if measure_numbers:
+                measure_lines.append(f'    % {m.number}')
+            measure_lines.append('    ' + ly_str)
 
         return '\n'.join(header + measure_lines)
 

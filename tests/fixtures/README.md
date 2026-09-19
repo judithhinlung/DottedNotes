@@ -12,6 +12,7 @@ This directory holds `.brf` braille music files used as test inputs.
 | strophic_song_test.brf | (untitled exercise) | Judith Lung | Solo voice with chords and refrain (BANA Secs. 35/36) | Developer-authored |
 | dichterliebe01.musicxml | Dichterliebe, Op. 48, No. 1 (Im wunderschönen Monat Mai) | Robert Schumann | Voice and piano | [MusicXML Example Set](https://www.musicxml.com/music-in-musicxml/example-set/) |
 | key_change_test.brf / .ly | (untitled exercise) | Judith Lung | Solo melody, 2 measures | Developer-authored, Sprint 11 |
+| percussion_ensemble_snare_bass_drum.brf | (untitled exercise) | Judith Lung | Snare drum + Bass drum (BANA Ch. 34 unpitched percussion ensemble) | Generated, not hand-transcribed |
 
 ## Notes
 
@@ -66,3 +67,18 @@ This directory holds `.brf` braille music files used as test inputs.
   (not hand-transcribed) and saving the verified output, avoiding
   transcription-error risk in a new ASCII fixture. Paired tests in
   `tests/test_key_signature_changes.py`.
+- `percussion_ensemble_snare_bass_drum.brf` is the unpitched-percussion
+  ensemble fixture (BANA Ch. 34, Sec. 34.2(b) one-instrument-per-line
+  format -- the same Snare drum/Bass drum pairing as Example 34.2.3-2,
+  though with simple developer-composed rhythm rather than a hand-copy of
+  that book example's own content, to avoid PDF-transcription risk on its
+  fill-signs/carry marks). Like `key_change_test.brf`, this was generated
+  (not hand-transcribed): built as `Staff`/`Measure`/`Note` objects,
+  rendered via `BrailleRenderer` + `unicode_to_ascii_braille`, and the
+  round-trip back through `EnsembleParser` was verified to reproduce the
+  exact original note/duration data before saving. Exercises the full
+  unpitched-percussion pipeline end to end: ensemble parsing recognizes
+  "Snare drum"/"Bass drum" from the Sec. 33.2 instrument-list header with
+  no parser changes needed, and `OrchestraScore.to_lilypond()` routes both
+  staves through `\drummode`/`DrumStaff` instead of pitched `\relative`
+  output. Paired tests in `tests/test_ensemble_integration.py`.

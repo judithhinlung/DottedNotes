@@ -10,7 +10,13 @@ from .duration import Duration
 from .dynamic import Dynamic, DynamicLevel
 from .fermata import Fermata, FermataShape
 from .in_accord import InAccord
-from .instrument import InstrumentInfo, InstrumentFamily, get_instrument_family
+from .instrument import (
+    InstrumentInfo,
+    InstrumentFamily,
+    get_instrument_family,
+    get_drum_note_name,
+    is_unpitched_percussion,
+)
 from .key_signature import KeySignature, KEY_TO_LILYPOND
 from .measure import Measure
 from .measure_repeat import MeasureRepeat
@@ -49,6 +55,8 @@ __all__ = [
     "InstrumentInfo",
     "InstrumentFamily",
     "get_instrument_family",
+    "get_drum_note_name",
+    "is_unpitched_percussion",
     "KEY_TO_LILYPOND",
     "KeySignature",
     "Measure",
