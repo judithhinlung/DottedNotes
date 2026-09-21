@@ -117,18 +117,21 @@ def test_ordinary_instrument_list_does_not_warn_about_single_letters():
 
 
 def test_render_name_abbreviation_table_disambiguates_colliding_fallback_abbreviations():
-    # Table 29 has no entry for "Tubular Bells"; its fallback ("tu")
-    # collides with "Tuba"'s real Table-29 entry ('Tuba': 'tu'). Two
-    # different instruments must never end up with the identical
-    # identifier -- the second is numbered instead, and a warning fires.
+    # Table 29 has no entry for "Tambourine" or "Tam-Tam"; both are
+    # single-word (no internal space -- the hyphen in "Tam-Tam" doesn't
+    # split it) fallbacks, so both reduce to the same first-two-letters
+    # abbreviation ("ta"). Two different instruments must never end up
+    # with the identical identifier -- every occurrence in the colliding
+    # group is numbered by order of appearance, including the first, and
+    # a warning fires.
     from dottednotes.renderers.braille_renderer import render_name_abbreviation_table, abbrev_to_brl
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        lines = render_name_abbreviation_table(["Tuba", "Tubular Bells"], 40)
-    assert abbrev_to_brl("tu") in lines[0]
-    assert abbrev_to_brl("tu2") in lines[1]
+        lines = render_name_abbreviation_table(["Tambourine", "Tam-Tam"], 40)
+    assert abbrev_to_brl("ta1") in lines[0]
+    assert abbrev_to_brl("ta2") in lines[1]
     assert lines[0] != lines[1]
-    assert any("tu" in str(w.message) for w in caught)
+    assert any("ta" in str(w.message) for w in caught)
 
 
 def test_render_name_abbreviation_table_leaves_true_duplicate_names_alone():

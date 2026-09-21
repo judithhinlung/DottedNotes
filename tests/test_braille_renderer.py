@@ -7,7 +7,7 @@ from dottednotes.models.note import Note, Rest
 from dottednotes.models.duration import Duration
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
 from dottednotes.models.fingering import Fingering
-from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefixes, encode_literary_braille, abbrev_to_brl, wrap_run_over_line, pad_to_boundary, staff_abbreviation, hairpin_terminator_decisions
+from dottednotes.renderers.braille_renderer import BrailleRenderer, render_measure_slice, ensemble_abbrev_prefixes, encode_literary_braille, abbrev_to_brl, wrap_run_over_line, pad_to_boundary, staff_abbreviation, resolve_staff_abbreviations, hairpin_terminator_decisions
 
 
 def _hairpin_note(name, octave, dynamics=None, **kwargs):
@@ -239,12 +239,16 @@ def test_staff_abbreviation_resolves_plural_section_names_to_table_29():
     # Combined-instrument staff names (one staff notating two doubled
     # parts) are an explicit scope boundary -- BANA 33.2.2's combined-
     # numbering convention for these is out of scope here, so they must
-    # keep falling through to the existing first-two-letters heuristic
-    # unchanged, not accidentally match a singularization candidate.
-    assert staff_abbreviation("Piccolo, Flutes I/II") == "pi"
-    assert staff_abbreviation("Clarinets I/II in B-flat") == "cl"
-    assert staff_abbreviation("Bassoons I/II") == "ba"
-    assert staff_abbreviation("Horns in F I/II") == "ho"
+    # keep falling through to the generic fallback, not accidentally
+    # match a singularization candidate. That generic fallback takes
+    # initials for a multi-word name (after stripping a trailing key
+    # qualifier, e.g. "Clarinets I/II in B-flat" -> "Clarinets I/II" ->
+    # "ci"), so a combined name is unaffected by *which* instruments it
+    # names -- it's still just word-initials of whatever's left.
+    assert staff_abbreviation("Piccolo, Flutes I/II") == "pfi"
+    assert staff_abbreviation("Clarinets I/II in B-flat") == "ci"
+    assert staff_abbreviation("Bassoons I/II") == "bi"
+    assert staff_abbreviation("Horns in F I/II") == "hifi"
 
 
 def test_staff_abbreviation_strips_trailing_key_qualifier_before_numeral_match():
@@ -264,8 +268,86 @@ def test_staff_abbreviation_strips_trailing_key_qualifier_before_numeral_match()
     # A combined-section name has no isolatable single part number at
     # the very end ("Horns in F I/II" ends in "I/II", not a bare key) --
     # this is the pre-existing, deliberately out-of-scope ambiguous case
-    # and must keep falling back to "ho" unchanged.
-    assert staff_abbreviation("Horns in F I/II") == "ho"
+    # and falls back to word-initials of the whole name unchanged.
+    assert staff_abbreviation("Horns in F I/II") == "hifi"
+
+
+def test_staff_abbreviation_handles_unicode_flat_and_sharp_key_qualifiers():
+    # Real MusicXML exports (e.g. music21's <part-name>) often spell the
+    # transposition qualifier with the actual Unicode flat/sharp glyph
+    # ("Clarinet 1 in B♭", not "Clarinet 1 in Bb"/"B-flat"). The ASCII-only
+    # key regex silently failed to strip it, so the whole numeral-match
+    # path never fired and the name fell through to the fallback --
+    # dropping its part number entirely.
+    assert staff_abbreviation("Clarinet 1 in B♭") == "cl1"
+    assert staff_abbreviation("Clarinet 2 in B♭") == "cl2"
+    assert staff_abbreviation("Horn 1 in F♯") == "hn1"
+
+
+def test_resolve_staff_abbreviations_renumbers_doubling_family_across_transpositions():
+    # Real orchestral MusicXML numbers a doubling instrument *within each
+    # transposition it switches to*: three B-flat clarinets and three A
+    # clarinets from Holst's "Mars" are "Clarinet 1/2/3 in B♭" and
+    # "Clarinet 1/2/3 in A" in the source, not a single 1-6 run. BANA's
+    # instrument list counts every desk of the instrument once regardless
+    # of which crook it plays that movement, so the six parts need six
+    # distinct identifiers ("cl1".."cl6"), numbered by the order the parts
+    # appear in the score -- not two collisions each on "cl1"/"cl2"/"cl3".
+    staff_names = [
+        "Clarinet 1 in B♭", "Clarinet 1 in A",
+        "Clarinet 2 in B♭", "Clarinet 2 in A",
+        "Clarinet 3 in B♭", "Clarinet 3 in A",
+    ]
+    abbrev_map = resolve_staff_abbreviations(staff_names)
+    assert [abbrev_map[name] for name in staff_names] == [
+        "cl1", "cl2", "cl3", "cl4", "cl5", "cl6",
+    ]
+
+    # A doubling instrument that only ever appears in one transposition
+    # (no "in <other key>" sibling anywhere in the list) keeps its own
+    # embedded number unchanged -- there's no cross-key ambiguity to
+    # resolve.
+    solo_case = resolve_staff_abbreviations(["Horn 1 in F", "Horn 2 in F"])
+    assert solo_case == {"Horn 1 in F": "hn1", "Horn 2 in F": "hn2"}
+
+
+def test_staff_abbreviation_fallback_uses_initials_for_multiword_names():
+    # Table 29 has no entry for these -- the fallback must take initials
+    # of each word for a multi-word name ("Bass Oboe" -> "bo"), not the
+    # first word's first two letters ("ba"), which collided different
+    # instruments that happen to share a first word ("Bass Oboe" and
+    # "Bass Trombone" would otherwise both become "ba").
+    assert staff_abbreviation("Bass Oboe") == "bo"
+    assert staff_abbreviation("Bass Trombone") == "bt"
+    assert staff_abbreviation("Tenor Trombone 1") == "tt1"
+    assert staff_abbreviation("Tenor Trombone 2") == "tt2"
+
+    # A single-word name (Table 29 miss) still falls back to its own
+    # first two letters, unchanged.
+    assert staff_abbreviation("Contrabassoon") == "co"
+
+    # A trailing key/transposition qualifier is stripped before the
+    # fallback counts words, so it doesn't pollute the initials.
+    assert staff_abbreviation("Tenor Tuba in B♭") == "tt"
+
+
+def test_ensemble_abbrev_prefixes_reuses_shared_abbrev_map_for_partial_staff_list():
+    # ensemble_abbrev_prefixes() is called per-system with only that
+    # system's *active* staves (BANA 33.1 omits tacet parts) -- too
+    # partial a view to correctly renumber a cross-transposition family
+    # on its own. Passing the map already resolved from the full staff
+    # list keeps a system's prefixes in sync with the instrument-list
+    # header even when most of the family is silent in that system.
+    full_staff_names = [
+        "Clarinet 1 in B♭", "Clarinet 1 in A",
+        "Clarinet 2 in B♭", "Clarinet 2 in A",
+    ]
+    abbrev_map = resolve_staff_abbreviations(full_staff_names)
+    assert abbrev_map["Clarinet 2 in A"] == "cl4"
+
+    # Only "Clarinet 2 in A" is active in this system.
+    prefixes = ensemble_abbrev_prefixes(["Clarinet 2 in A"], abbrev_map=abbrev_map)
+    assert prefixes == ['⠜' + abbrev_to_brl("cl4")]
 
 
 def test_ensemble_abbrev_prefixes_adds_dot_3_only_where_a_gap_remains():

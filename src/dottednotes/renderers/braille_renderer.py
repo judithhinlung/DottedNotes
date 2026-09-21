@@ -337,8 +337,13 @@ _ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
 # Sec. 33.2.1's own Example 33.2.1-1 abbreviates "Trumpet in B-flat" as
 # just "tp", the key dropped entirely, so the same qualifier fronting the
 # name instead of trailing it must be dropped the same way before
-# resolving against Table 29.
-_KEY_NAME_PATTERN = r'[A-G](?:-?(?:flat|sharp)|[b#])?'
+# resolving against Table 29. Real MusicXML exports (e.g. music21's
+# <part-name>) often spell the accidental as the actual Unicode flat/
+# sharp glyph ("B♭", "F♯") rather than the ASCII "b"/"#"/"flat"/"sharp"
+# forms, so both must be accepted or a name like "Clarinet 1 in B♭" fails
+# to match at all and falls through to the generic fallback instead of
+# resolving via Table 29.
+_KEY_NAME_PATTERN = r'[A-G](?:-?(?:flat|sharp)|[b#♭♯])?'
 _KEY_QUALIFIER_RE = re.compile(rf'^{_KEY_NAME_PATTERN}$', re.IGNORECASE)
 
 # The same key/transposition qualifier, but trailing the name instead of
@@ -349,6 +354,18 @@ _KEY_QUALIFIER_RE = re.compile(rf'^{_KEY_NAME_PATTERN}$', re.IGNORECASE)
 # example numbers exactly this shape ("Horn [1] in F" -> "hn1", "Horn [2]
 # in C" -> "hn2"), confirming the key must be dropped before matching.
 _TRAILING_KEY_QUALIFIER_RE = re.compile(rf'^(.*?)\s+in\s+({_KEY_NAME_PATTERN})$', re.IGNORECASE)
+
+# A numbered part with a trailing transposition qualifier ("Clarinet 1 in
+# B♭", "Clarinet 1 in A", "Horn 1 in F"). Real orchestral MusicXML numbers
+# these *per transposition*, restarting at 1 for each key a doubling
+# instrument switches to (three B-flat clarinets and three A clarinets are
+# "Clarinet 1/2/3 in B♭" and "Clarinet 1/2/3 in A", not 1-6) -- but BANA's
+# instrument list counts every desk of the same instrument once, regardless
+# of which crook/transposition it's reading from that movement, so all six
+# clarinets need distinct identifiers "cl1".."cl6". `_renumber_transposed_
+# families()` uses this to detect the pattern and renumber by order of
+# appearance across the *whole* staff list, discarding the per-key digit.
+_TRANSPOSED_FAMILY_RE = re.compile(rf'^(.+?)\s+\d+\s+in\s+{_KEY_NAME_PATTERN}$', re.IGNORECASE)
 
 
 def _roman_to_arabic(numeral: str) -> Optional[str]:
@@ -469,13 +486,26 @@ def _table29_lookup(staff_name: str) -> Optional[str]:
 
 
 def staff_abbreviation(staff_name: str) -> str:
-    """Look up a staff's BANA Table 29 abbreviation, falling back to its
-    first two letters (or "ms" for an unnamed staff) when not in the table."""
+    """Look up a staff's BANA Table 29 abbreviation. When not in the
+    table, fall back to the name's initials if it has more than one word
+    (e.g. "Bass Oboe" -> "bo", "Bass Trombone" -> "bt" -- distinct, unlike
+    both reducing to "ba" from "Bass"'s first two letters), or its first
+    two letters for a single-word name (e.g. "Contrabassoon" -> "co"), or
+    "ms" for an unnamed staff. A trailing/leading key/transposition
+    qualifier is stripped first (same as the Table 29 lookup above) so it
+    doesn't pollute the fallback -- e.g. "Tenor Tuba in B♭" falls back
+    from "Tenor Tuba", not the four-word original."""
     abbrev = _table29_lookup(staff_name)
     if abbrev:
         return abbrev
-    words = [w for w in staff_name.split() if w]
-    return words[0][:2].lower() if words else "ms"
+    fallback_name = _strip_trailing_key_qualifier(staff_name) or staff_name
+    fallback_name = _strip_leading_key_qualifier(fallback_name) or fallback_name
+    words = [w for w in fallback_name.split() if w]
+    if not words:
+        return "ms"
+    if len(words) > 1:
+        return ''.join(w[0] for w in words).lower()
+    return words[0][:2].lower()
 
 
 def abbrev_to_brl(abbrev: str) -> str:
@@ -520,6 +550,44 @@ def wrap_run_over_line(line: str, width: int, indent_cells: int = 2) -> list[str
     return result
 
 
+def _renumber_transposed_families(staff_names: list[str]) -> dict[str, str]:
+    """For a doubling instrument that switches transposition mid-list
+    (e.g. "Clarinet 1 in B♭"/"Clarinet 1 in A"/"Clarinet 2 in B♭"/...),
+    real MusicXML numbers each key group separately -- three B-flat
+    clarinets and three A clarinets are "Clarinet 1/2/3 in B♭" and
+    "Clarinet 1/2/3 in A", not a single 1-6 run -- but BANA's instrument
+    list counts every desk of the instrument once, so those six parts
+    need distinct identifiers "cl1".."cl6", not two colliding "cl1"s, two
+    colliding "cl2"s, and two colliding "cl3"s.
+
+    Returns `{staff_name: override_abbrev}` only for names belonging to
+    a family with 2+ *distinct* names sharing one Table 29 base -- a
+    lone "Clarinet 1 in B♭" with no "in A" counterpart is left to resolve
+    its own embedded number normally. Numbers are assigned by order of
+    first appearance across the whole list (matching how a full score's
+    parts are laid out key group by key group), not by the digit each
+    name happens to carry."""
+    family_names: dict[str, list[str]] = {}
+    for name in staff_names:
+        match = _TRANSPOSED_FAMILY_RE.match(name)
+        if not match:
+            continue
+        base_abbrev = _table29_lookup(match.group(1))
+        if not base_abbrev:
+            continue
+        seen = family_names.setdefault(base_abbrev, [])
+        if name not in seen:
+            seen.append(name)
+
+    overrides: dict[str, str] = {}
+    for base_abbrev, names in family_names.items():
+        if len(names) <= 1:
+            continue
+        for n, name in enumerate(names, start=1):
+            overrides[name] = f"{base_abbrev}{n}"
+    return overrides
+
+
 _DISALLOWED_SINGLE_LETTER_IDENTIFIERS = frozenset({'c', 'd', 'f', 'p'})
 
 
@@ -534,11 +602,13 @@ def _disambiguate_colliding_abbreviations(
     unrelated instruments. BANA Sec. 33.2.1 leaves devising a *better*
     2-3 letter abbreviation to transcriber judgment ("conveying an
     immediate suggestion of the name") -- this is deliberately not
-    attempted here. Instead, every occurrence after the first in a
-    colliding group is numbered (BANA Sec. 33.2.2's own numbering-suffix
-    convention), and a warning (this codebase's existing warn-not-error
-    convention, e.g. `warn_disallowed_single_letters` below) alerts the
-    developer that a real, better abbreviation should be supplied.
+    attempted here. Instead, every occurrence in a colliding group is
+    numbered by order of appearance (BANA Sec. 33.2.2's own numbering-
+    suffix convention), including the first -- e.g. "Tambourine"/"Tam-Tam"
+    (both falling back to "ta") become "ta1"/"ta2", not a bare "ta" left
+    on the first one -- and a warning (this codebase's existing warn-not-
+    error convention, e.g. `warn_disallowed_single_letters` below) alerts
+    the developer that a real, better abbreviation should be supplied.
 
     Staff names repeated verbatim (e.g. two staves both literally named
     "Violin") are left alone: that is not a Table-29/fallback resolution
@@ -564,9 +634,29 @@ def _disambiguate_colliding_abbreviations(
             stacklevel=3,
         )
         for n, i in enumerate(indices, start=1):
-            if n > 1:
-                result[i] = f"{abbrev}{n}"
+            result[i] = f"{abbrev}{n}"
     return result
+
+
+def resolve_staff_abbreviations(staff_names: list[str]) -> dict[str, str]:
+    """Compute the final BANA identifier for every name in a full staff
+    list, once: `_renumber_transposed_families()`'s cross-key clarinet-
+    style renumbering and `_disambiguate_colliding_abbreviations()`'s
+    collision safety net both need to see every staff in the piece to
+    assign identifiers correctly (e.g. distinguishing "cl1".."cl6" needs
+    to know about all six clarinet parts, not just whichever ones happen
+    to be playing in one system). `render_name_abbreviation_table()`
+    (the §33.2/§38.2 instrument-list header, always given the full staff
+    list) uses this directly; `ensemble_abbrev_prefixes()` (the ⠜XX
+    prefix on each system's music lines, given only that system's
+    *active* staves -- BANA 33.1 omits tacet parts) must reuse this same
+    map rather than recomputing its own from a partial list, or its
+    prefixes would drift out of sync with the header table's identifiers
+    from one system to the next."""
+    overrides = _renumber_transposed_families(staff_names)
+    bare_abbrevs = [overrides.get(name, staff_abbreviation(name)) for name in staff_names]
+    abbrevs = _disambiguate_colliding_abbreviations(staff_names, bare_abbrevs)
+    return dict(zip(staff_names, abbrevs))
 
 
 def render_name_abbreviation_table(
@@ -595,8 +685,8 @@ def render_name_abbreviation_table(
     character list, not a §38.2-specific "should" rule."""
     name_brls = [encode_literary_braille(name)[:-1] for name in staff_names]
     max_name_len = max((len(n) for n in name_brls), default=0)
-    bare_abbrevs = [staff_abbreviation(name) for name in staff_names]
-    abbrevs = _disambiguate_colliding_abbreviations(staff_names, bare_abbrevs)
+    abbrev_map = resolve_staff_abbreviations(staff_names)
+    abbrevs = [abbrev_map[name] for name in staff_names]
     blank_cell = chr(0x2800)
     lines = []
     for name, name_brl, abbrev in zip(staff_names, name_brls, abbrevs):
@@ -625,7 +715,10 @@ def render_name_abbreviation_table(
     return lines
 
 
-def ensemble_abbrev_prefixes(staff_names: list[str], music_strs: Optional[list[str]] = None) -> list[str]:
+def ensemble_abbrev_prefixes(
+    staff_names: list[str], music_strs: Optional[list[str]] = None,
+    abbrev_map: Optional[dict[str, str]] = None,
+) -> list[str]:
     """Build the '⠜XX' abbreviation prefixes for one system's staff lines,
     aligned to a common column (BANA 33.4: "the music of each line begins
     one space beyond the end of the longest abbreviation"). A staff whose
@@ -644,8 +737,21 @@ def ensemble_abbrev_prefixes(staff_names: list[str], music_strs: Optional[list[s
     none of them show a bare abbreviation running straight into music.
     Only a caller with no music info at all (`music_strs` omitted, or an
     empty string for a given staff) gets no dot 3 for a zero-gap staff,
-    since there's nothing to confirm real content follows."""
-    bare_prefixes = ['⠜' + abbrev_to_brl(staff_abbreviation(name)) for name in staff_names]
+    since there's nothing to confirm real content follows.
+
+    `staff_names` here is typically only the *active* staves for this one
+    system (BANA 33.1 omits tacet parts from a parallel), which is too
+    partial a view to correctly renumber a cross-transposition family like
+    "Clarinet 1 in B♭"/"Clarinet 1 in A" on its own. Callers that already
+    resolved identifiers for the *full* piece via `resolve_staff_
+    abbreviations()` should pass that map as `abbrev_map` so every
+    system's prefixes agree with the instrument-list header; omitting it
+    falls back to resolving each name in isolation via `staff_
+    abbreviation()`, as before."""
+    bare_prefixes = [
+        '⠜' + abbrev_to_brl(abbrev_map[name] if abbrev_map else staff_abbreviation(name))
+        for name in staff_names
+    ]
     max_len = max((len(p) for p in bare_prefixes), default=0)
     if music_strs is None:
         music_strs = [""] * len(staff_names)
@@ -1505,6 +1611,11 @@ class BrailleRenderer:
         if score.title:
             lines.append(center_line(encode_literary_braille(score.title), self.line_width))
 
+        # Resolved once from the full staff list (not per-system) so every
+        # system's ⠜XX prefixes agree with the header table below -- see
+        # resolve_staff_abbreviations()'s docstring.
+        abbrev_map = resolve_staff_abbreviations([staff.name for staff in score.staves])
+
         # §38.2: "The names of the characters with their identifiers must
         # be given in a table at the beginning of the score" -- reuses the
         # same name+identifier table shape as §33.2's instrument list.
@@ -1571,6 +1682,7 @@ class BrailleRenderer:
             prefixes = ensemble_abbrev_prefixes(
                 [score.staves[s].name for s in active],
                 ["".join(slice_strs) for slice_strs in slices],
+                abbrev_map=abbrev_map,
             )
             max_prefix_len = max(len(p) for p in prefixes)
             measure_widths = [
@@ -1846,6 +1958,11 @@ class BrailleRenderer:
             [staff.name for staff in score.staves], self.line_width,
         ))
 
+        # Resolved once from the full staff list (not per-system) so every
+        # system's ⠜XX prefixes agree with the header table above -- see
+        # resolve_staff_abbreviations()'s docstring.
+        abbrev_map = resolve_staff_abbreviations([staff.name for staff in score.staves])
+
         # Signature line
         first_staff = score.staves[0]
         signature_parts = []
@@ -1918,6 +2035,7 @@ class BrailleRenderer:
             prefixes = ensemble_abbrev_prefixes(
                 [score.staves[s].name for s in active],
                 ["".join(slice_strs) for slice_strs in slices],
+                abbrev_map=abbrev_map,
             )
             max_prefix_len = max(len(p) for p in prefixes)
 
