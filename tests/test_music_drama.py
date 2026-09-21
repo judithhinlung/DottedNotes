@@ -116,6 +116,32 @@ def test_ordinary_instrument_list_does_not_warn_about_single_letters():
     assert not any("c/d/f, or p" in str(w.message) for w in caught)
 
 
+def test_render_name_abbreviation_table_disambiguates_colliding_fallback_abbreviations():
+    # Table 29 has no entry for "Tubular Bells"; its fallback ("tu")
+    # collides with "Tuba"'s real Table-29 entry ('Tuba': 'tu'). Two
+    # different instruments must never end up with the identical
+    # identifier -- the second is numbered instead, and a warning fires.
+    from dottednotes.renderers.braille_renderer import render_name_abbreviation_table, abbrev_to_brl
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        lines = render_name_abbreviation_table(["Tuba", "Tubular Bells"], 40)
+    assert abbrev_to_brl("tu") in lines[0]
+    assert abbrev_to_brl("tu2") in lines[1]
+    assert lines[0] != lines[1]
+    assert any("tu" in str(w.message) for w in caught)
+
+
+def test_render_name_abbreviation_table_leaves_true_duplicate_names_alone():
+    # Two staves genuinely, verbatim named the same thing are not a
+    # Table-29/fallback resolution ambiguity -- out of scope here.
+    from dottednotes.renderers.braille_renderer import render_name_abbreviation_table
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        lines = render_name_abbreviation_table(["Violin", "Violin"], 40)
+    assert lines[0] == lines[1]
+    assert not any("Identifier" in str(w.message) for w in caught)
+
+
 # ---------------------------------------------------------------------------
 # S11c-18: BANA §38.3 stage directions -- "Single words or short phrases
 # may be placed in the word lines of the characters to whom they apply,"

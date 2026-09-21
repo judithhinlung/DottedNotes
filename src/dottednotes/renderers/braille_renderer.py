@@ -338,7 +338,17 @@ _ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
 # just "tp", the key dropped entirely, so the same qualifier fronting the
 # name instead of trailing it must be dropped the same way before
 # resolving against Table 29.
-_KEY_QUALIFIER_RE = re.compile(r'^[A-G](?:-?(?:flat|sharp)|[b#])?$', re.IGNORECASE)
+_KEY_NAME_PATTERN = r'[A-G](?:-?(?:flat|sharp)|[b#])?'
+_KEY_QUALIFIER_RE = re.compile(rf'^{_KEY_NAME_PATTERN}$', re.IGNORECASE)
+
+# The same key/transposition qualifier, but trailing the name instead of
+# leading it (e.g. "Horn 1 in F", "Trumpet 2 in C") -- real MusicXML part
+# names for transposing brass/winds put the number *before* the key, which
+# would otherwise defeat _table29_lookup()'s trailing-numeral match (the
+# last token is the key, not the number). BANA Sec. 33.2.2's own worked
+# example numbers exactly this shape ("Horn [1] in F" -> "hn1", "Horn [2]
+# in C" -> "hn2"), confirming the key must be dropped before matching.
+_TRAILING_KEY_QUALIFIER_RE = re.compile(rf'^(.*?)\s+in\s+({_KEY_NAME_PATTERN})$', re.IGNORECASE)
 
 
 def _roman_to_arabic(numeral: str) -> Optional[str]:
@@ -371,6 +381,18 @@ def _singular_forms(name: str) -> list[str]:
     return forms
 
 
+def _strip_trailing_key_qualifier(name: str) -> Optional[str]:
+    """Drop a trailing " in <key>" transposition qualifier (e.g. "Horn 1
+    in F", "Trumpet 2 in C") -- the mirror image of
+    `_strip_leading_key_qualifier`'s "Bb Clarinet" case, and BANA Sec.
+    33.2.2's own worked example ("Horn [1] in F" -> "hn1", "Horn [2] in
+    C" -> "hn2"): the key qualifier is dropped entirely before the part
+    number is appended to the Table 29 base abbreviation. Returns None
+    when `name` doesn't end with one."""
+    match = _TRAILING_KEY_QUALIFIER_RE.match(name)
+    return match.group(1) if match else None
+
+
 def _strip_leading_key_qualifier(name: str) -> Optional[str]:
     """Drop a leading bare key/transposition qualifier word (e.g. "Bb" in
     "Bb Clarinet", "C" in "C Tuba"), or None if `name` doesn't start with one."""
@@ -389,12 +411,20 @@ def _table29_lookup(staff_name: str) -> Optional[str]:
     and a numbered part given as an Arabic digit rather than the table's
     Roman numeral ("Violin I") or with no dedicated table entry at all
     ("Flute 1", "Horn 1" -- Sec. 33.2.2 appends the part number, as a
-    lower-cell digit, directly after the base abbreviation)."""
+    lower-cell digit, directly after the base abbreviation), and a
+    trailing key/transposition qualifier after the number ("Horn 1 in
+    F", "Trumpet 2 in C" -- Sec. 33.2.2's own worked example)."""
     lower_table = {key.lower(): val for key, val in TABLE_29_ENGLISH.items()}
 
     abbrev = lower_table.get(staff_name.lower())
     if abbrev:
         return abbrev
+
+    trailing_stripped = _strip_trailing_key_qualifier(staff_name)
+    if trailing_stripped:
+        abbrev = _table29_lookup(trailing_stripped)
+        if abbrev:
+            return abbrev
 
     numeral_match = re.match(r'^(.+?)\s+(\d+|[IVXLCDM]+)$', staff_name)
     if not numeral_match:
@@ -493,6 +523,52 @@ def wrap_run_over_line(line: str, width: int, indent_cells: int = 2) -> list[str
 _DISALLOWED_SINGLE_LETTER_IDENTIFIERS = frozenset({'c', 'd', 'f', 'p'})
 
 
+def _disambiguate_colliding_abbreviations(
+    staff_names: list[str], abbrevs: list[str],
+) -> list[str]:
+    """Ensure no two *different* staff names in one list share the
+    identical abbreviation. Table 29 has no entry for many compound/
+    register-qualified instrument names (e.g. "Bass Oboe", "Bass
+    Trombone", "Tuba" vs. "Tubular Bells"), so `staff_abbreviation()`'s
+    generic first-two-letters fallback can genuinely collide across
+    unrelated instruments. BANA Sec. 33.2.1 leaves devising a *better*
+    2-3 letter abbreviation to transcriber judgment ("conveying an
+    immediate suggestion of the name") -- this is deliberately not
+    attempted here. Instead, every occurrence after the first in a
+    colliding group is numbered (BANA Sec. 33.2.2's own numbering-suffix
+    convention), and a warning (this codebase's existing warn-not-error
+    convention, e.g. `warn_disallowed_single_letters` below) alerts the
+    developer that a real, better abbreviation should be supplied.
+
+    Staff names repeated verbatim (e.g. two staves both literally named
+    "Violin") are left alone: that is not a Table-29/fallback resolution
+    ambiguity, so it is out of scope here."""
+    groups: dict[str, list[int]] = {}
+    for i, abbrev in enumerate(abbrevs):
+        groups.setdefault(abbrev, []).append(i)
+
+    result = list(abbrevs)
+    for abbrev, indices in groups.items():
+        distinct_names = {staff_names[i] for i in indices}
+        if len(distinct_names) <= 1:
+            continue
+        warnings.warn(
+            f"Identifier '{abbrev}' is used for more than one different "
+            f"instrument/staff name in this list "
+            f"({', '.join(sorted(distinct_names))}) -- BANA Sec. 33.2.1 "
+            "leaves devising a clearer 2- or 3-letter abbreviation to "
+            "the transcriber's judgment; the extra occurrences have "
+            "been numbered only as a non-guessing safety net so they "
+            "are not silently identical -- supply a better abbreviation "
+            "for these instruments if possible.",
+            stacklevel=3,
+        )
+        for n, i in enumerate(indices, start=1):
+            if n > 1:
+                result[i] = f"{abbrev}{n}"
+    return result
+
+
 def render_name_abbreviation_table(
     staff_names: list[str], line_width: int, warn_disallowed_single_letters: bool = False,
 ) -> list[str]:
@@ -510,13 +586,20 @@ def render_name_abbreviation_table(
     §33's ordinary instrument list) warns (does not raise) when a name's
     computed abbreviation is exactly one of those, matching this
     codebase's existing warn-not-error convention for BANA "should" rules
-    (e.g. `parse_instrument_list()`'s Table-29-mismatch warning)."""
+    (e.g. `parse_instrument_list()`'s Table-29-mismatch warning).
+
+    Runs `_disambiguate_colliding_abbreviations()` unconditionally (not
+    gated by `warn_disallowed_single_letters`) over the whole list first,
+    since two different instruments/characters sharing one identifier is
+    a correctness bug for both the §33.2 instrument list and the §38.2
+    character list, not a §38.2-specific "should" rule."""
     name_brls = [encode_literary_braille(name)[:-1] for name in staff_names]
     max_name_len = max((len(n) for n in name_brls), default=0)
+    bare_abbrevs = [staff_abbreviation(name) for name in staff_names]
+    abbrevs = _disambiguate_colliding_abbreviations(staff_names, bare_abbrevs)
     blank_cell = chr(0x2800)
     lines = []
-    for name, name_brl in zip(staff_names, name_brls):
-        abbrev = staff_abbreviation(name)
+    for name, name_brl, abbrev in zip(staff_names, name_brls, abbrevs):
         if warn_disallowed_single_letters and abbrev in _DISALLOWED_SINGLE_LETTER_IDENTIFIERS:
             warnings.warn(
                 f"Identifier '{abbrev}' for '{name}' is a single letter "

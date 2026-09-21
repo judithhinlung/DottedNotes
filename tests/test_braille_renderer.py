@@ -247,6 +247,27 @@ def test_staff_abbreviation_resolves_plural_section_names_to_table_29():
     assert staff_abbreviation("Horns in F I/II") == "ho"
 
 
+def test_staff_abbreviation_strips_trailing_key_qualifier_before_numeral_match():
+    # BANA Sec. 33.2.2's own worked example numbers a Table-29 instrument
+    # that also carries a *trailing* key/transposition qualifier
+    # ("Horn [1] in F" -> "hn1", "Horn [2] in C" -> "hn2"). The qualifier
+    # must be dropped before the numeral-suffix match, or its own
+    # trailing token ("F"/"C") defeats the numeral regex and the part
+    # falls through to the generic first-two-letters fallback, losing
+    # the distinguishing number (every horn collapsing to "ho").
+    assert staff_abbreviation("Horn 1 in F") == "hn1"
+    assert staff_abbreviation("Horn 2 in F") == "hn2"
+    assert staff_abbreviation("Horn 1 IN F") == "hn1"
+    assert staff_abbreviation("Trumpet 1 in C") == "tp1"
+    assert staff_abbreviation("Trumpet 2 in C") == "tp2"
+
+    # A combined-section name has no isolatable single part number at
+    # the very end ("Horns in F I/II" ends in "I/II", not a bare key) --
+    # this is the pre-existing, deliberately out-of-scope ambiguous case
+    # and must keep falling back to "ho" unchanged.
+    assert staff_abbreviation("Horns in F I/II") == "ho"
+
+
 def test_ensemble_abbrev_prefixes_adds_dot_3_only_where_a_gap_remains():
     # BANA 33.4: "the music of each line begins one space beyond the end
     # of the longest abbreviation"; BANA 33.4.1: "the signature
