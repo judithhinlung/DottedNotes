@@ -70,6 +70,8 @@ class Score:
         full_measure_repeat: str = "single-voice",
         min_repeated_measures: int = 2,
         include_clef_sign: bool = False,
+        lead_voice: Optional[str] = None,
+        include_accompaniment_outline: bool = True,
     ) -> str:
         from dottednotes.renderers.braille_renderer import BrailleRenderer
         return BrailleRenderer(
@@ -80,6 +82,8 @@ class Score:
             full_measure_repeat=full_measure_repeat,
             min_repeated_measures=min_repeated_measures,
             include_clef_sign=include_clef_sign,
+            lead_voice=lead_voice,
+            include_accompaniment_outline=include_accompaniment_outline,
         ).render(self)
 
     @staticmethod

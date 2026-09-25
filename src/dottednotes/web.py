@@ -219,6 +219,8 @@ def _render_output(
     full_measure_repeat: str,
     min_repeated_measures: int,
     include_clef_sign: bool,
+    lead_voice: Optional[str] = None,
+    include_accompaniment_outline: bool = True,
 ) -> dict:
     """Render `score` to `target_format` and (for LilyPond) attempt PDF/MIDI
     compilation, returning {"files", "compile_success", "compile_error"}.
@@ -272,6 +274,8 @@ def _render_output(
             full_measure_repeat=full_measure_repeat,
             min_repeated_measures=min_repeated_measures,
             include_clef_sign=include_clef_sign,
+            lead_voice=lead_voice,
+            include_accompaniment_outline=include_accompaniment_outline,
         )
         if target_format == "brl":
             output_brl = job_dir / f"{input_path.stem}_output.brl"
@@ -363,6 +367,8 @@ async def convert_file(
     full_measure_repeat: str = Form("single-voice"),  # "off", "single-voice", "multi-voice"
     min_repeated_measures: int = Form(2),
     include_clef_sign: bool = Form(False),
+    lead_voice: Optional[str] = Form(None),
+    no_accompaniment_outline: bool = Form(False),
 ):
     contents = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(contents) > MAX_UPLOAD_SIZE:
@@ -404,6 +410,8 @@ async def convert_file(
         "full_measure_repeat": full_measure_repeat,
         "min_repeated_measures": min_repeated_measures,
         "include_clef_sign": include_clef_sign,
+        "lead_voice": lead_voice,
+        "no_accompaniment_outline": no_accompaniment_outline,
     }
     with open(job_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(meta, f)
@@ -518,6 +526,8 @@ async def convert_file(
             category, format_overrides, compression, measure_numbers,
             page_numbers, measure_numbering, octave_mark_every_measure,
             full_measure_repeat, min_repeated_measures, include_clef_sign,
+            lead_voice=lead_voice,
+            include_accompaniment_outline=not no_accompaniment_outline,
         )
 
         return {
@@ -592,6 +602,8 @@ async def set_instrument(job_id: str, instrument: str = Form(...)):
             meta.get("octave_mark_every_measure", False),
             meta.get("full_measure_repeat", "single-voice"),
             meta.get("min_repeated_measures", 2), meta.get("include_clef_sign", False),
+            lead_voice=meta.get("lead_voice"),
+            include_accompaniment_outline=not meta.get("no_accompaniment_outline", False),
         )
         return {
             "job_id": job_id,
@@ -657,6 +669,8 @@ async def set_key_mode(job_id: str, mode: str = Form(...)):
             meta.get("octave_mark_every_measure", False),
             meta.get("full_measure_repeat", "single-voice"),
             meta.get("min_repeated_measures", 2), meta.get("include_clef_sign", False),
+            lead_voice=meta.get("lead_voice"),
+            include_accompaniment_outline=not meta.get("no_accompaniment_outline", False),
         )
         return {
             "job_id": job_id,
@@ -919,6 +933,8 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
                 full_measure_repeat=meta.get("full_measure_repeat", "single-voice"),
                 min_repeated_measures=meta.get("min_repeated_measures", 2),
                 include_clef_sign=meta.get("include_clef_sign", False),
+                lead_voice=meta.get("lead_voice"),
+                include_accompaniment_outline=not meta.get("no_accompaniment_outline", False),
             )
             if file_type == "brl":
                 writer.write_unicode(part_score, output_path)

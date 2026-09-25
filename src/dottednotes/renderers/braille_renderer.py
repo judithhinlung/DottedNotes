@@ -913,6 +913,8 @@ class TranscriptionMode(Enum):
     VOCAL_SOLO = auto()
     SOLO_WITH_ACCOMPANIMENT = auto()
     CHORAL_ENSEMBLE = auto()
+    CHORAL_WITH_ACCOMPANIMENT = auto()
+    CHORAL_WITH_ORCHESTRA = auto()
 
 
 def _item_has_ensemble_resolved_chord(item: Any) -> bool:
@@ -944,6 +946,26 @@ def _staff_has_ensemble_resolved_chord(staff: Staff) -> bool:
         for measure in staff.measures
         for item in measure.notes
     )
+
+
+def _leading_vocal_group_length(staves: list[Staff]) -> int:
+    """How many staves, starting from the first, form BANA §37.1's vocal-
+    ensemble group ahead of any accompaniment. A staff counts as vocal if
+    it carries lyrics (the reliable signal for a §38.2 character-list
+    staff, whose name alone doesn't resolve to InstrumentFamily.VOCAL the
+    way "Soprano"/"Alto" do) or resolves to InstrumentFamily.VOCAL by name
+    even without lyrics (e.g. a wordless vocalise). Stops at the first
+    staff that is neither. Callers rely on vocal staves always preceding
+    any accompaniment staves, the same ordering SOLO_WITH_ACCOMPANIMENT
+    already assumes for its own solo-staff-first shape."""
+    from dottednotes.models.instrument import InstrumentFamily, get_instrument_family
+    n = 0
+    for staff in staves:
+        if staff.lyrics or get_instrument_family(staff.name) == InstrumentFamily.VOCAL:
+            n += 1
+        else:
+            break
+    return n
 
 
 # "auto": engine numbers measures sequentially from 1, ignoring whatever
@@ -983,6 +1005,8 @@ class BrailleRenderer:
         include_clef_sign: bool = False,
         vocal_measure_number_every: int = 0,
         include_character_list: bool = False,
+        lead_voice: Optional[str] = None,
+        include_accompaniment_outline: bool = True,
     ):
         self.line_width = line_width
         self.show_measure_numbers = show_measure_numbers
@@ -1054,6 +1078,24 @@ class BrailleRenderer:
         # Score model distinguishes "these voice names are opera
         # characters" from "these are generic voice parts" on its own.
         self.include_character_list = include_character_list
+        # BANA §29.8: for an *ensemble* accompaniment (as opposed to a true
+        # solo), the outline shows "the most prominent elements" -- left to
+        # the transcriber's judgment, not a rule that names a fixed voice.
+        # `lead_voice` names the vocal staff (by Staff.name, case-
+        # insensitive) whose part is used for CHORAL_WITH_ACCOMPANIMENT's
+        # outline; None (default) picks the soprano staff by name, falling
+        # back to the first vocal staff if none is named "Soprano". Has no
+        # effect on any other mode (SOLO_WITH_ACCOMPANIMENT's outline is
+        # always the lone solo staff, unambiguous by construction).
+        self.lead_voice = lead_voice
+        # §29.8 also explicitly allows omitting the outline entirely "if
+        # the keyboard accompaniment doubles all or most of the music of
+        # the solo or ensemble" -- common in hymn accompaniments. False
+        # renders CHORAL_WITH_ACCOMPANIMENT's keyboard block as plain
+        # right-/left-hand lines with no outline line above them (the
+        # right-hand line then carries the measure number itself, per
+        # _build_piano_line_from_strings's show_number default).
+        self.include_accompaniment_outline = include_accompaniment_outline
 
     def _detect_transcription_mode(self, score: Score) -> TranscriptionMode:
         # is_piano is computed first and independent of isinstance(score,
@@ -1090,6 +1132,36 @@ class BrailleRenderer:
             )
         ):
             return TranscriptionMode.SOLO_WITH_ACCOMPANIMENT
+        # BANA §37.1 + §29.8/§33 (combined): a vocal ensemble (2+ voices)
+        # followed by an accompaniment is transcribed as two separate
+        # blocks, never one flat ENSEMBLE parallel mixing voices and
+        # accompaniment -- §29.8's keyboard-outline mechanism if the
+        # accompaniment is 1-2 keyboard staves (CHORAL_WITH_ACCOMPANIMENT),
+        # or a plain §33 instrumental-ensemble block otherwise
+        # (CHORAL_WITH_ORCHESTRA -- BANA defines no outline mechanism for a
+        # non-keyboard accompaniment, so none is rendered there). Checked
+        # before CHORAL_ENSEMBLE's all-vocal predicate below (which this
+        # shape would otherwise fail, since accompaniment staves aren't
+        # vocal) and before the generic ENSEMBLE/OrchestraScore fallback,
+        # for the same reason as SOLO_WITH_ACCOMPANIMENT above. Only
+        # SOLO_WITH_ACCOMPANIMENT's single-voice-plus-keyboard shape (just
+        # above) is excluded here, not a single voice plus a non-keyboard
+        # accompaniment (e.g. a solo aria with orchestra) -- that shape
+        # isn't handled by any mode yet and still falls through to
+        # ENSEMBLE, unchanged from before this mode existed.
+        vocal_n = _leading_vocal_group_length(score.staves)
+        accompaniment_staves = score.staves[vocal_n:]
+        if (
+            vocal_n >= 2
+            and accompaniment_staves
+            and any(s.lyrics for s in score.staves[:vocal_n])
+        ):
+            if len(accompaniment_staves) in (1, 2) and all(
+                get_instrument_family(s.name) == InstrumentFamily.KEYBOARD_HARP
+                for s in accompaniment_staves
+            ):
+                return TranscriptionMode.CHORAL_WITH_ACCOMPANIMENT
+            return TranscriptionMode.CHORAL_WITH_ORCHESTRA
         # BANA §37.1: a vocal ensemble (2+ all-vocal staves, no
         # accompaniment) is its own "expanded bar-over-bar format" --
         # word lines then music lines per parallel -- never the generic
@@ -1239,7 +1311,11 @@ class BrailleRenderer:
             and score.staves[0].lyrics
         ):
             skip_staff_indices = frozenset({0})
-        elif mode == TranscriptionMode.CHORAL_ENSEMBLE:
+        elif mode in (
+            TranscriptionMode.CHORAL_ENSEMBLE,
+            TranscriptionMode.CHORAL_WITH_ACCOMPANIMENT,
+            TranscriptionMode.CHORAL_WITH_ORCHESTRA,
+        ):
             skip_staff_indices = frozenset(
                 i for i, staff in enumerate(score.staves) if staff.lyrics
             )
@@ -1259,6 +1335,10 @@ class BrailleRenderer:
             return self._render_solo_with_accompaniment(score)
         elif mode == TranscriptionMode.CHORAL_ENSEMBLE:
             return self._render_choral_ensemble(score, rest_only_grid)
+        elif mode == TranscriptionMode.CHORAL_WITH_ACCOMPANIMENT:
+            return self._render_choral_with_accompaniment(score, rest_only_grid)
+        elif mode == TranscriptionMode.CHORAL_WITH_ORCHESTRA:
+            return self._render_choral_with_orchestra(score, rest_only_grid, measure_repeat_originals)
         else:
             return self._render_single_line(score)
 
@@ -1492,12 +1572,125 @@ class BrailleRenderer:
         # before-a-new-heading convention already used elsewhere (S11c-2).
         return solo_block.rstrip("\n") + "\n\n" + accompaniment_block
 
+    def _lead_voice_staff(self, vocal_staves: list[Staff]) -> Staff:
+        """§29.8 leaves an *ensemble* accompaniment's outline content to
+        the transcriber's judgment ("the most prominent elements") rather
+        than naming a fixed voice. `self.lead_voice`, if set, names the
+        vocal staff by (case-insensitive) `Staff.name` explicitly;
+        otherwise the soprano staff is used as a reasonable default (the
+        top line in the overwhelming majority of SATB writing), falling
+        back to the first vocal staff if none is named "Soprano"."""
+        if self.lead_voice is not None:
+            for staff in vocal_staves:
+                if staff.name.strip().lower() == self.lead_voice.strip().lower():
+                    return staff
+            raise ValueError(
+                f"lead_voice {self.lead_voice!r} does not match any vocal "
+                f"staff name; available names: {[s.name for s in vocal_staves]}"
+            )
+        for staff in vocal_staves:
+            if 'soprano' in staff.name.lower():
+                return staff
+        return vocal_staves[0]
+
+    def _render_choral_with_accompaniment(
+        self, score: Score, rest_only_grid: list[list[bool]],
+    ) -> str:
+        """BANA §37.1 + §29.8: a vocal ensemble (2+ voices) with keyboard
+        accompaniment is transcribed as two separate blocks -- the
+        ensemble per §37.1, the accompaniment separately per §29.8 --
+        never one flat ENSEMBLE parallel. See `_lead_voice_staff` for how
+        §29.8's ensemble-outline judgment call is resolved here."""
+        vocal_n = _leading_vocal_group_length(score.staves)
+        vocal_staves = score.staves[:vocal_n]
+        keyboard_staves = score.staves[vocal_n:]
+
+        vocal_score = Score(title=score.title)
+        for staff in vocal_staves:
+            vocal_score.add_staff(staff)
+        choral_block = self._render_choral_ensemble(vocal_score, rest_only_grid[:vocal_n])
+
+        rh_staff = keyboard_staves[0]
+        lh_staff = keyboard_staves[1] if len(keyboard_staves) > 1 else None
+        if lh_staff is not None and len(lh_staff.measures) != len(rh_staff.measures):
+            raise ValueError(
+                "BANA §29.8 keyboard-accompaniment rendering expects the right- "
+                f"and left-hand staves to share the same measure count, got "
+                f"{len(rh_staff.measures)} and {len(lh_staff.measures)}."
+            )
+        if any(len(vs.measures) != len(rh_staff.measures) for vs in vocal_staves):
+            raise ValueError(
+                "BANA §29.8 keyboard-accompaniment rendering expects the "
+                "vocal ensemble and keyboard accompaniment to share the "
+                "same measure count."
+            )
+
+        outline_measures = None
+        if self.include_accompaniment_outline:
+            lead_staff = self._lead_voice_staff(vocal_staves)
+            outline_measures = build_solo_outline_measures(lead_staff.measures)
+
+        accompaniment_block = self._render_accompaniment_with_outline(rh_staff, lh_staff, outline_measures)
+        return choral_block.rstrip("\n") + "\n\n" + accompaniment_block
+
+    def _render_choral_with_orchestra(
+        self,
+        score: Score,
+        rest_only_grid: list[list[bool]],
+        measure_repeat_originals: dict[tuple[int, int], list],
+    ) -> str:
+        """BANA §37.1 + §33: a vocal ensemble with instrumental-ensemble
+        (orchestral/pit) accompaniment is transcribed as two separate
+        blocks -- the vocal ensemble per §37.1, the instrumental ensemble
+        separately per §33 -- never one flat parallel mixing voices and
+        instruments. Unlike keyboard accompaniment (§29.8), BANA defines
+        no outline mechanism for a non-keyboard accompaniment, so none is
+        rendered here."""
+        vocal_n = _leading_vocal_group_length(score.staves)
+        vocal_staves = score.staves[:vocal_n]
+        orchestra_staves = score.staves[vocal_n:]
+
+        vocal_score = Score(title=score.title)
+        for staff in vocal_staves:
+            vocal_score.add_staff(staff)
+        choral_block = self._render_choral_ensemble(vocal_score, rest_only_grid[:vocal_n])
+
+        # No title here: the choral block above already rendered it (per
+        # score.title), and _render_ensemble would otherwise repeat it --
+        # the same "only the first/primary block carries the title"
+        # convention _render_solo_with_accompaniment's accompaniment block
+        # follows (it takes no title argument at all).
+        orchestra_score = OrchestraScore()
+        for staff in orchestra_staves:
+            orchestra_score.add_staff(staff)
+        orchestra_rest_only_grid = rest_only_grid[vocal_n:]
+        # measure_repeat_originals is keyed by staff index in the original,
+        # combined score -- re-key to orchestra_score's own indexing (its
+        # staves start over at 0) before handing it to _render_ensemble,
+        # which indexes rest_only_grid/measure_repeat_originals by its own
+        # score's staff positions.
+        orchestra_measure_repeat_originals = {
+            (s_idx - vocal_n, m_idx): original
+            for (s_idx, m_idx), original in measure_repeat_originals.items()
+            if s_idx >= vocal_n
+        }
+        orchestra_block = self._render_ensemble(
+            orchestra_score, orchestra_rest_only_grid, orchestra_measure_repeat_originals,
+        )
+
+        return choral_block.rstrip("\n") + "\n\n" + orchestra_block
+
     def _render_accompaniment_with_outline(
-        self, rh_staff: Staff, lh_staff: Optional[Staff], outline_measures: list[Measure],
+        self, rh_staff: Staff, lh_staff: Optional[Staff], outline_measures: Optional[list[Measure]],
     ) -> str:
         """BANA §29.8's keyboard-accompaniment block: a solo-outline line
         (⠐⠜, carrying the measure number) above the right hand (⠨⠜),
-        with the left hand (⠸⠜, if present) below."""
+        with the left hand (⠸⠜, if present) below. `outline_measures=None`
+        (§29.8: an ensemble's outline "may be omitted entirely if the
+        keyboard accompaniment doubles all or most of the music") renders
+        just the right/left hand, with the measure number moved back onto
+        the right-hand line (`_build_piano_line_from_strings`'s
+        `show_number` default)."""
         lines = []
         signature_parts = []
         if rh_staff.key_signature:
@@ -1517,7 +1710,7 @@ class BrailleRenderer:
         ) if lh_staff is not None else {}
         outline_key_changes = key_signature_changes_by_index(
             outline_measures, rh_staff.key_signature.sharps_or_flats if rh_staff.key_signature else 0
-        )
+        ) if outline_measures is not None else {}
 
         idx = 0
         n_measures = len(rh_staff.measures)
@@ -1538,22 +1731,27 @@ class BrailleRenderer:
                     self.compression_level, force_all_starts=self.octave_mark_every_measure,
                     key_changes=lh_key_changes,
                 ) if lh_staff is not None else ([], None))
-                outline_strs, tmp_outline = render_measure_slice(
+                outline_strs, tmp_outline = (render_measure_slice(
                     outline_measures, idx, group_size, prev_outline, rh_staff.time_signature,
                     self.compression_level, force_all_starts=self.octave_mark_every_measure,
                     key_changes=outline_key_changes,
-                )
+                ) if outline_measures is not None else ([], None))
 
                 m_num = self._display_measure_number(rh_staff.measures, idx)
-                test_outline = self._build_outline_line_from_strings(m_num, outline_strs)
-                test_rh = self._build_piano_line_from_strings(m_num, rh_strs, is_right=True, show_number=False)
+                test_outline = (
+                    self._build_outline_line_from_strings(m_num, outline_strs)
+                    if outline_measures is not None else None
+                )
+                test_rh = self._build_piano_line_from_strings(
+                    m_num, rh_strs, is_right=True, show_number=(outline_measures is None)
+                )
                 test_lh = (
                     self._build_piano_line_from_strings(m_num, lh_strs, is_right=False, show_number=False)
                     if lh_staff is not None else None
                 )
 
                 fits = (
-                    len(test_outline) <= self.line_width
+                    (test_outline is None or len(test_outline) <= self.line_width)
                     and len(test_rh) <= self.line_width
                     and (test_lh is None or len(test_lh) <= self.line_width)
                 )
@@ -1575,14 +1773,19 @@ class BrailleRenderer:
                     self.compression_level, force_all_starts=self.octave_mark_every_measure,
                     key_changes=lh_key_changes,
                 ) if lh_staff is not None else ([], None))
-                outline_strs, tmp_outline = render_measure_slice(
+                outline_strs, tmp_outline = (render_measure_slice(
                     outline_measures, idx, 1, prev_outline, rh_staff.time_signature,
                     self.compression_level, force_all_starts=self.octave_mark_every_measure,
                     key_changes=outline_key_changes,
-                )
+                ) if outline_measures is not None else ([], None))
                 m_num = self._display_measure_number(rh_staff.measures, idx)
-                test_outline = self._build_outline_line_from_strings(m_num, outline_strs)
-                test_rh = self._build_piano_line_from_strings(m_num, rh_strs, is_right=True, show_number=False)
+                test_outline = (
+                    self._build_outline_line_from_strings(m_num, outline_strs)
+                    if outline_measures is not None else None
+                )
+                test_rh = self._build_piano_line_from_strings(
+                    m_num, rh_strs, is_right=True, show_number=(outline_measures is None)
+                )
                 test_lh = (
                     self._build_piano_line_from_strings(m_num, lh_strs, is_right=False, show_number=False)
                     if lh_staff is not None else None
@@ -1590,7 +1793,8 @@ class BrailleRenderer:
                 best = (1, test_outline, test_rh, test_lh, tmp_rh, tmp_lh, tmp_outline)
 
             fit_size, outline_line, rh_line, lh_line, tmp_rh, tmp_lh, tmp_outline = best
-            lines.append(outline_line)
+            if outline_line is not None:
+                lines.append(outline_line)
             lines.append(rh_line)
             if lh_line is not None:
                 lines.append(lh_line)

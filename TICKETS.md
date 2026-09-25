@@ -7747,6 +7747,32 @@ This needs: (a) a reference number embedded in the *music* line (not the word li
 
 ---
 
+### [ ] S11c-24: Implement vocal ensemble (SATB) with keyboard or instrumental-ensemble accompaniment (hymn/theater vocal-score format)
+
+**Why:** S11c-10/S11c-12 covered a single solo voice with keyboard accompaniment (§29.8) and an unaccompanied vocal ensemble (§37.1), but explicitly deferred the combination -- a hymn (SATB + piano) or musical-theater vocal score (SATB/character voices + piano or pit orchestra), where 2+ vocal staves and an accompaniment both appear in the same score. S11c-12's own "Why" assumed this would fall to S11c-9/10's solo-plus-keyboard mode, but that mode hardcodes exactly one non-keyboard staff at `score.staves[0]` -- it has no path for multiple simultaneous vocal staves, so a real SATB+piano score fell through to the generic §33 `ENSEMBLE` layout (wrong: it would interleave voices and piano hands into one flat parallel, never BANA's "two separate transcriptions" rule).
+
+Verified against the actual BANA Music Braille Code 2015 manual (not memory, per this file's own citation rule): there is no dedicated chapter for "SATB + accompaniment." §37.1 governs the vocal ensemble, §29.8 governs the keyboard accompaniment, and §38.1 (Music Drama) cross-references both for a full vocal-score/theater scenario -- always as two separate blocks, "an instrumental accompaniment is not included in the parallel." Critically, §29.8 does **not** mandate the soprano as the accompaniment's outline source for an *ensemble* (as opposed to a true solo): it says the outline should show "the most prominent elements," left to the transcriber's judgment, capped at one line, and **may be omitted entirely if the keyboard doubles all or most of the ensemble's music** (common in real hymn accompaniments). For a non-keyboard (orchestral/pit) accompaniment, BANA defines no outline mechanism at all -- just two separate blocks (§37.1 for the choir, §33 for the instruments).
+
+**Steps taken:**
+1. Added `TranscriptionMode.CHORAL_WITH_ACCOMPANIMENT` (2+ vocal staves + 1-2 trailing `KEYBOARD_HARP` staves) and `TranscriptionMode.CHORAL_WITH_ORCHESTRA` (2+ vocal staves + 1+ trailing non-keyboard-only instrumental staves), detected via a new `_leading_vocal_group_length()` helper (`renderers/braille_renderer.py`) that treats a staff as vocal if it carries lyrics or resolves to `InstrumentFamily.VOCAL` -- checked before `CHORAL_ENSEMBLE`'s all-vocal predicate and the generic `ENSEMBLE` fallback, mirroring how `SOLO_WITH_ACCOMPANIMENT` is checked early for the same reason.
+2. `_render_choral_with_accompaniment()` renders the vocal staves through the existing `_render_choral_ensemble()` (unchanged, reused as-is on a temporary sub-`Score`) followed by a blank line and `_render_accompaniment_with_outline()` (also reused, now accepting `outline_measures: Optional[...]`) for the keyboard block.
+3. Since BANA leaves the ensemble-outline judgment call to the transcriber, added `BrailleRenderer(lead_voice=..., include_accompaniment_outline=...)` (plumbed through `Score.to_braille()`, `BRFWriter`, and CLI flags `--lead-voice`/`--no-accompaniment-outline`): defaults to the staff literally named "Soprano" (falling back to the first vocal staff), overridable by name, or the outline can be omitted entirely per §29.8's explicit doubling exception. `_lead_voice_staff()` raises clearly if an override name doesn't match any vocal staff.
+4. `_render_choral_with_orchestra()` renders the vocal block the same way, then the accompaniment staves through the existing `_render_ensemble()` unchanged (already handles arbitrary staff counts/families) -- no outline, since BANA defines none for a non-keyboard accompaniment.
+5. Added parser-side round trips mirroring `solo_with_accompaniment_parser.py`'s two-block-split pattern: `parser/choral_with_accompaniment_parser.py` (delegates to the existing `parse_choral_ensemble()` + `parse_keyboard_accompaniment()`) and `parser/choral_with_orchestra_parser.py` (delegates to `parse_choral_ensemble()` + `EnsembleParser`). Neither is wired into the CLI's forward `_parse_score()` dispatcher, matching `parse_choral_ensemble()`/`parse_solo_with_accompaniment()`'s existing status as round-trip/testing parsers rather than composer-facing input formats.
+6. Added `tests/test_choral_with_accompaniment.py` covering mode detection (SATB+piano, 2-voice+1-hand-piano, SATB+orchestra, plain a-cappella SATB unaffected), the lead-voice default/override/case-insensitivity/unmatched-name-raises behavior, outline-present-by-default vs. `include_accompaniment_outline=False`, the never-an-outline guarantee for `CHORAL_WITH_ORCHESTRA`, a measure-count-mismatch error, and round trips through both new parser modules.
+
+**Scope not covered (left for a follow-up if needed):** a single vocal staff plus a *non-keyboard* accompaniment (e.g. a solo aria with orchestra, no piano) isn't handled by any mode yet -- `SOLO_WITH_ACCOMPANIMENT` requires the accompaniment to be all-keyboard, and the new modes here require 2+ vocal staves -- so that shape still falls through to generic `ENSEMBLE`, unchanged from before this ticket.
+
+**Definition of Done:**
+- [ ] A 2+-voice vocal ensemble with 1-2 keyboard staves renders as two separate blocks (§37.1 ensemble, then §29.8 accompaniment with a configurable outline), never one flat `ENSEMBLE` parallel.
+- [ ] A 2+-voice vocal ensemble with non-keyboard (orchestral) accompaniment staves renders as two separate blocks (§37.1, then §33), with no outline line ever produced.
+- [ ] `lead_voice` defaults to a staff named "Soprano" (falling back to the first vocal staff), is overridable by name (case-insensitive), and raises a clear error for an unmatched name.
+- [ ] `include_accompaniment_outline=False` omits the outline line entirely and moves the measure number back onto the keyboard right-hand line.
+- [ ] Both new shapes round-trip through their respective parser modules.
+- [ ] `pytest tests/` passes with no regressions.
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

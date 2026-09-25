@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 from dottednotes.models.score import Score
 from dottednotes.renderers.braille_renderer import BrailleRenderer, encode_literary_braille
 
@@ -40,6 +40,8 @@ class BRFWriter:
         full_measure_repeat: str = "single-voice",
         min_repeated_measures: int = 2,
         include_clef_sign: bool = False,
+        lead_voice: Optional[str] = None,
+        include_accompaniment_outline: bool = True,
     ):
         self.line_width = line_width
         self.page_height = page_height
@@ -67,6 +69,10 @@ class BRFWriter:
         self.min_repeated_measures = min_repeated_measures
         # See BrailleRenderer.include_clef_sign (BANA Par. 4.1).
         self.include_clef_sign = include_clef_sign
+        # See BrailleRenderer.lead_voice / .include_accompaniment_outline
+        # (BANA §29.8's ensemble-outline judgment call).
+        self.lead_voice = lead_voice
+        self.include_accompaniment_outline = include_accompaniment_outline
 
     def write(self, score: Score, filepath: Union[str, Path]) -> None:
         """Render a score and write it to a BRF file in ASCII braille."""
@@ -90,6 +96,8 @@ class BRFWriter:
             full_measure_repeat=self.full_measure_repeat,
             min_repeated_measures=self.min_repeated_measures,
             include_clef_sign=self.include_clef_sign,
+            lead_voice=self.lead_voice,
+            include_accompaniment_outline=self.include_accompaniment_outline,
         )
         raw_music = renderer.render(score)
         music_lines = [line.rstrip() for line in raw_music.splitlines()]

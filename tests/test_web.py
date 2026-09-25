@@ -468,3 +468,81 @@ def test_key_mode_selection_and_override():
     # Invalid mode returns 400
     invalid = client.post(f"/api/jobs/{job_id}/key-mode", data={"mode": "dorian"})
     assert invalid.status_code == 400
+
+
+def test_index_html_has_lead_voice_and_no_accompaniment_outline_controls():
+    # Regression test for the lead-voice/accompaniment-outline web controls
+    # (S11c-24's SATB + keyboard accompaniment feature) -- mirrors
+    # test_index_html_has_measure_numbers_checkbox_and_brl_option's "read
+    # the actual served markup" approach so a later edit to index.html
+    # can't silently drop these controls without a test noticing.
+    response = client.get("/")
+    assert response.status_code == 200
+    html = response.text
+    assert 'name="lead_voice"' in html
+    assert 'name="no_accompaniment_outline"' in html
+    assert 'type="checkbox"' in html
+
+
+def test_render_output_threads_lead_voice_and_accompaniment_outline_options(tmp_path):
+    # /api/convert's forward BRF/BRL parser can't yet produce a
+    # CHORAL_WITH_ACCOMPANIMENT-shaped Score from an uploaded file (that
+    # combined format isn't wired into the composer-facing input parser,
+    # same as plain choral-ensemble/solo-with-accompaniment input --
+    # see choral_with_accompaniment_parser.py's module docstring), so this
+    # exercises _render_output directly with a hand-built SATB+piano Score
+    # to confirm the web layer's lead_voice/no_accompaniment_outline Form
+    # fields actually reach BrailleRenderer instead of being silently
+    # dropped somewhere in the plumbing.
+    from dottednotes.web import _render_output
+    from dottednotes.models import Score, Staff, Note, Duration, Measure, TimeSignature
+
+    def note(name, octave):
+        return Note(dots=frozenset(), category=None, raw_brl="", note_name=name, octave=octave,
+                    duration=Duration(value=4))
+
+    def voice(name, notes, lyrics):
+        s = Staff(name=name)
+        s.time_signature = TimeSignature(dots=frozenset(), category=None, raw_brl="", numerator=4, denominator=4)
+        m = Measure(number=1)
+        for n in notes:
+            m.add_note(n)
+        s.add_measure(m)
+        s.lyrics = lyrics
+        return s
+
+    def kb(name, notes):
+        s = Staff(name=name)
+        s.time_signature = TimeSignature(dots=frozenset(), category=None, raw_brl="", numerator=4, denominator=4)
+        m = Measure(number=1)
+        for n in notes:
+            m.add_note(n)
+        s.add_measure(m)
+        return s
+
+    def hymn_score():
+        score = Score(title="")
+        score.add_staff(voice("Soprano", [note("C", 5)] * 4, ["A", "B", "C", "D"]))
+        score.add_staff(voice("Alto", [note("A", 4)] * 4, ["A", "B", "C", "D"]))
+        score.add_staff(kb("Piano right hand", [note("C", 5)] * 4))
+        score.add_staff(kb("Piano left hand", [note("C", 3)] * 4))
+        return score
+
+    def render(name, lead_voice, include_outline):
+        job_dir = tmp_path / name
+        job_dir.mkdir()
+        input_path = job_dir / "hymn.brf"
+        _render_output(
+            hymn_score(), job_dir, input_path, name, "brl",
+            None, None, "full", True, True, "auto", False, "single-voice", 2, False,
+            lead_voice=lead_voice, include_accompaniment_outline=include_outline,
+        )
+        return (job_dir / "hymn_output.brl").read_text(encoding="utf-8")
+
+    default_output = render("default", None, True)
+    alto_output = render("alto", "Alto", True)
+    no_outline_output = render("no-outline", None, False)
+
+    assert "⠐⠜" in default_output          # outline present by default (soprano)
+    assert "⠐⠜" not in no_outline_output   # omitted when include_accompaniment_outline=False
+    assert default_output != alto_output   # lead_voice="Alto" changes the outlined part

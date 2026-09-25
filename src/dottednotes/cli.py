@@ -307,6 +307,8 @@ def _run_convert(args: argparse.Namespace) -> None:
                 full_measure_repeat=args.full_measure_repeat,
                 min_repeated_measures=args.min_repeated_measures,
                 include_clef_sign=args.include_clef_sign,
+                lead_voice=args.lead_voice,
+                include_accompaniment_outline=not args.no_accompaniment_outline,
             )
             is_brl = output_path is not None and Path(output_path).suffix.lower() == ".brl"
             if is_brl:
@@ -487,6 +489,28 @@ def main() -> None:
              "omitted otherwise). When on, the clef is stated once, right "
              "after the first measure's number, not next to the key/time "
              "signature. Off by default; has no effect on .ly output.",
+    )
+    convert_parser.add_argument(
+        "--lead-voice",
+        help="For a vocal-ensemble-with-keyboard-accompaniment score "
+             "(e.g. SATB + piano, as in a hymn) rendered to .brf/.brl "
+             "output, name the vocal staff (e.g. 'Soprano') whose part is "
+             "outlined above the keyboard's right hand (BANA §29.8). BANA "
+             "leaves this to the transcriber's judgment rather than always "
+             "naming the soprano; defaults to the staff named 'Soprano' if "
+             "omitted, or the first vocal staff if none is. Has no effect "
+             "on any other score shape or on .ly output.",
+    )
+    convert_parser.add_argument(
+        "--no-accompaniment-outline",
+        action="store_true",
+        help="For a vocal-ensemble-with-keyboard-accompaniment score "
+             "rendered to .brf/.brl output, omit the solo-outline line "
+             "above the keyboard's right hand entirely -- BANA §29.8 "
+             "explicitly allows this when the keyboard doubles most of "
+             "the ensemble's music, common in hymn accompaniments. "
+             "Included by default; has no effect on any other score shape "
+             "or on .ly output.",
     )
     convert_parser.add_argument(
         "--no-page-numbers",

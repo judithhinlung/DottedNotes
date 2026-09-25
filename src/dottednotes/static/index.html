@@ -121,6 +121,20 @@
                             <p class="help-text">Clef signs are normally omitted in braille music (BANA 4.1). Turn this on for a facsimile transcription — the clef is stated once, right after the first measure's number.</p>
                         </div>
 
+                        <div class="form-group" id="group-lead-voice">
+                            <label for="lead_voice">Lead Voice for Accompaniment Outline</label>
+                            <input type="text" id="lead_voice" name="lead_voice" placeholder="e.g., Soprano (default), Alto, Tenor, Bass">
+                            <p class="help-text">For a vocal-ensemble (SATB) score with piano accompaniment, names the voice part outlined above the keyboard's right hand (BANA §29.8). BANA leaves this to the transcriber's judgment rather than always naming the soprano; defaults to the staff named "Soprano" if left blank. Has no effect on any other score shape.</p>
+                        </div>
+
+                        <div class="form-group checkbox-group" id="group-no-accompaniment-outline">
+                            <label for="no_accompaniment_outline" class="checkbox-label">
+                                <input type="checkbox" id="no_accompaniment_outline" name="no_accompaniment_outline" value="true">
+                                <span>Omit Accompaniment Outline</span>
+                            </label>
+                            <p class="help-text">For a vocal-ensemble-with-keyboard-accompaniment score, skips the solo-outline line above the keyboard's right hand entirely — BANA §29.8 explicitly allows this when the keyboard doubles most of the ensemble's music, common in hymn accompaniments. Included by default.</p>
+                        </div>
+
                         <div class="form-group" id="group-full-measure-repeat">
                             <label for="full_measure_repeat">Full-Measure Repeat</label>
                             <select id="full_measure_repeat" name="full_measure_repeat">
