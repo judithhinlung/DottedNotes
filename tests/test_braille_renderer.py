@@ -236,19 +236,44 @@ def test_staff_abbreviation_resolves_plural_section_names_to_table_29():
     assert staff_abbreviation("Violoncellos") == "vc"
     assert staff_abbreviation("Double Basses") == "db"
 
-    # Combined-instrument staff names (one staff notating two doubled
-    # parts) are an explicit scope boundary -- BANA 33.2.2's combined-
-    # numbering convention for these is out of scope here, so they must
-    # keep falling through to the generic fallback, not accidentally
-    # match a singularization candidate. That generic fallback takes
-    # initials for a multi-word name (after stripping a trailing key
-    # qualifier, e.g. "Clarinets I/II in B-flat" -> "Clarinets I/II" ->
-    # "ci"), so a combined name is unaffected by *which* instruments it
-    # names -- it's still just word-initials of whatever's left.
+    # Combined-instrument staff names (one staff notating two like parts)
+    # resolve via BANA Sec. 33.2.2's combined-numbering convention: the
+    # Table 29 base abbreviation, then both part numbers brailled "from
+    # larger to smaller" (Sec. 33.2.2's own worked example, "Oboes 1&2"
+    # -> "o21"). A Roman-numeral pair ("I/II") names the same combination
+    # as its Arabic digits and resolves identically.
+    assert staff_abbreviation("Bassoons I/II") == "b21"
+    assert staff_abbreviation("Clarinets I/II in B-flat") == "cl21"
+    # "in F" sits *before* the numeral here, not trailing -- the base
+    # name still resolves once the combined-numeral suffix is stripped.
+    assert staff_abbreviation("Horns in F I/II") == "hn21"
+
+    # A genuinely compound doubling name ("Piccolo, Flutes I/II" -- one
+    # player doubling piccolo and flute) has no single Table 29 base to
+    # resolve against ("Piccolo, Flutes" isn't an instrument), so it's
+    # unaffected by the combined-numbering convention and keeps falling
+    # through to the generic word-initials fallback.
     assert staff_abbreviation("Piccolo, Flutes I/II") == "pfi"
-    assert staff_abbreviation("Clarinets I/II in B-flat") == "ci"
-    assert staff_abbreviation("Bassoons I/II") == "bi"
-    assert staff_abbreviation("Horns in F I/II") == "hifi"
+
+
+def test_staff_abbreviation_combined_numeral_matches_bana_worked_example():
+    # BANA Sec. 33.2.2 Example 33.2.2-1's own worked case: "Oboes 1&2"
+    # (two oboe parts combined onto a single staff) abbreviates to the
+    # Table 29 base "o" plus both digits, larger first -- "o21", not the
+    # naively-ordered "o12".
+    assert staff_abbreviation("Oboes 1&2") == "o21"
+    assert staff_abbreviation("Oboe 1&2") == "o21"
+
+    # A Roman-numeral pair names the same combination and must resolve
+    # identically -- per the developer's request, "I/II" is treated as
+    # just the Arabic digits "1" and "2".
+    assert staff_abbreviation("Oboe I/II") == "o21"
+    assert staff_abbreviation("Oboes I/II") == "o21"
+
+    # Three or more like parts combined onto one staff generalize the
+    # same "larger to smaller" ordering.
+    assert staff_abbreviation("Trumpet III/IV") == "tp43"
+    assert staff_abbreviation("Trumpet 3/4") == "tp43"
 
 
 def test_staff_abbreviation_strips_trailing_key_qualifier_before_numeral_match():
@@ -265,11 +290,12 @@ def test_staff_abbreviation_strips_trailing_key_qualifier_before_numeral_match()
     assert staff_abbreviation("Trumpet 1 in C") == "tp1"
     assert staff_abbreviation("Trumpet 2 in C") == "tp2"
 
-    # A combined-section name has no isolatable single part number at
-    # the very end ("Horns in F I/II" ends in "I/II", not a bare key) --
-    # this is the pre-existing, deliberately out-of-scope ambiguous case
-    # and falls back to word-initials of the whole name unchanged.
-    assert staff_abbreviation("Horns in F I/II") == "hifi"
+    # A combined-section name doesn't end in a bare key ("Horns in F
+    # I/II" ends in "I/II"), so the trailing-key-qualifier strip itself
+    # doesn't fire here -- the combined-numeral suffix is stripped first
+    # instead, leaving "Horns in F" to resolve via the trailing-key path
+    # on its own recursive call.
+    assert staff_abbreviation("Horns in F I/II") == "hn21"
 
 
 def test_staff_abbreviation_handles_unicode_flat_and_sharp_key_qualifiers():

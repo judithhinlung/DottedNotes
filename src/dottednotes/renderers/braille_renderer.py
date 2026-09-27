@@ -383,6 +383,36 @@ def _arabic_to_roman(numeral: str) -> Optional[str]:
     return None
 
 
+# Two or more like-instrument part numbers combined onto a single staff
+# ("Oboe I/II", "Oboes 1&2", "Trumpet III/IV") -- BANA Sec. 33.2.2 treats a
+# Roman numeral exactly like the Arabic digit it names (its own worked
+# example is "Oboes 1&2", but "I/II" is the same designation), so either
+# form must resolve here.
+_COMBINED_NUMERAL_RE = re.compile(
+    r'^(.+?)\s+((?:\d+|[IVXLCDM]+)(?:\s*[/&]\s*(?:\d+|[IVXLCDM]+))+)$'
+)
+
+
+def _combined_numeral_digits(token: str) -> Optional[str]:
+    """Convert a combined-parts numeral token ("I/II", "1/2", "1&2",
+    "III/IV") to BANA Sec. 33.2.2's lower-cell digit string for a single
+    staff notating two or more like-instrument parts: each piece (Roman or
+    Arabic) resolved to Arabic, then brailled "in order from larger to
+    smaller" -- the section's own worked example, "Oboes 1&2" -> abbrev
+    "o21", not "o12". Returns None if any piece isn't a numeral 1-10 (the
+    only range `_ROMAN_NUMERALS` covers)."""
+    pieces = re.split(r'\s*[/&]\s*', token)
+    if len(pieces) < 2:
+        return None
+    digits: list[int] = []
+    for piece in pieces:
+        arabic = piece if piece.isdigit() else _roman_to_arabic(piece)
+        if arabic is None:
+            return None
+        digits.append(int(arabic))
+    return ''.join(str(d) for d in sorted(digits, reverse=True))
+
+
 def _singular_forms(name: str) -> list[str]:
     """Plausible singular forms of a plural/section instrument name (e.g.
     "Violins" -> "Violin", "Basses" -> "Bass"), stripping only the last word."""
@@ -428,9 +458,14 @@ def _table29_lookup(staff_name: str) -> Optional[str]:
     and a numbered part given as an Arabic digit rather than the table's
     Roman numeral ("Violin I") or with no dedicated table entry at all
     ("Flute 1", "Horn 1" -- Sec. 33.2.2 appends the part number, as a
-    lower-cell digit, directly after the base abbreviation), and a
-    trailing key/transposition qualifier after the number ("Horn 1 in
-    F", "Trumpet 2 in C" -- Sec. 33.2.2's own worked example)."""
+    lower-cell digit, directly after the base abbreviation), a trailing
+    key/transposition qualifier after the number ("Horn 1 in F", "Trumpet
+    2 in C" -- Sec. 33.2.2's own worked example), and two or more like
+    parts combined onto one staff, Roman or Arabic ("Oboe I/II", "Oboes
+    1&2", "Trumpet III/IV" -- Sec. 33.2.2 treats a Roman numeral as just
+    the Arabic digit it names, and braille the combined digits "in order
+    from larger to smaller": its own worked example is "Oboes 1&2" ->
+    "o21", not "o12")."""
     lower_table = {key.lower(): val for key, val in TABLE_29_ENGLISH.items()}
 
     abbrev = lower_table.get(staff_name.lower())
@@ -442,6 +477,15 @@ def _table29_lookup(staff_name: str) -> Optional[str]:
         abbrev = _table29_lookup(trailing_stripped)
         if abbrev:
             return abbrev
+
+    combined_match = _COMBINED_NUMERAL_RE.match(staff_name)
+    if combined_match:
+        head, token = combined_match.group(1), combined_match.group(2)
+        digits = _combined_numeral_digits(token)
+        if digits:
+            base_abbrev = _table29_lookup(head)
+            if base_abbrev:
+                return base_abbrev + digits
 
     numeral_match = re.match(r'^(.+?)\s+(\d+|[IVXLCDM]+)$', staff_name)
     if not numeral_match:
