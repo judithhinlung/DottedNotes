@@ -275,6 +275,48 @@ def test_staff_abbreviation_combined_numeral_matches_bana_worked_example():
     assert staff_abbreviation("Trumpet III/IV") == "tp43"
     assert staff_abbreviation("Trumpet 3/4") == "tp43"
 
+    # Real-world Italian scores join a combined-part pair with "." rather
+    # than "/" or "&" -- must resolve identically.
+    assert staff_abbreviation("Oboe I.II") == "o21"
+
+
+def test_staff_abbreviation_resolves_italian_french_german_table_29():
+    # BANA Sec. 33.2.1: "abbreviations for the English, French, Italian,
+    # and German names ... is given in Table 29" -- all four columns, not
+    # just English, must resolve. Real repro: a Grieg orchestral MusicXML
+    # file with Italian instrument names and "." as its combined-part
+    # separator, which previously fell through entirely to the generic
+    # word-initials fallback (no Italian table existed at all) and then
+    # picked up a spurious digit from an unrelated cross-instrument
+    # collision-disambiguation pass -- e.g. "Corni I.II"/"Timpani"/
+    # "Trombe I.II"/"Tromboni I" all reduced to word-initials "ti" and
+    # were disambiguated as "ti1".."ti4", none of which is a real BANA
+    # Sec. 33.2.2 part number.
+    assert staff_abbreviation("Flauto piccolo") == "pc"
+    assert staff_abbreviation("Flauti I.II") == "fl21"
+    assert staff_abbreviation("Oboi") == "o"
+    assert staff_abbreviation("Clarinetti in A") == "cl"
+    assert staff_abbreviation("Fagotti") == "fg"
+    assert staff_abbreviation("Corni I.II") == "cn21"
+    assert staff_abbreviation("Corni III.IV") == "cn43"
+    assert staff_abbreviation("Trombe I.II") == "tr21"
+    assert staff_abbreviation("Timpani") == "tim"
+    assert staff_abbreviation("Tromboni I") == "tb1"
+    assert staff_abbreviation("Tromboni II") == "tb2"
+    assert staff_abbreviation("Tuba") == "tu"
+    assert staff_abbreviation("Gran Cassa") == "gc"
+    assert staff_abbreviation("Violoncelli") == "vc"
+    assert staff_abbreviation("Violini I") == "v1"
+    assert staff_abbreviation("Violini II") == "v2"
+    assert staff_abbreviation("Viole") == "vl"
+
+    # One sanity check each for French and German, confirming those
+    # tables load and resolve too.
+    assert staff_abbreviation("Hautbois") == "hb"
+    assert staff_abbreviation("Violon I") == "v1"
+    assert staff_abbreviation("Kontrabass") == "kb"
+    assert staff_abbreviation("Horn") == "hn"
+
 
 def test_staff_abbreviation_strips_trailing_key_qualifier_before_numeral_match():
     # BANA Sec. 33.2.2's own worked example numbers a Table-29 instrument

@@ -4864,6 +4864,32 @@ def test_table_29_english_matches_bana_manual():
     assert TABLE_29_ENGLISH['Bassoon'] == 'b'
 
 
+def test_table_29_italian_french_german_match_bana_manual():
+    # Spot-check against Music_Braille_Code_2015.pdf Table 29(B)/(C)/(D),
+    # pp.29-31.
+    from dottednotes.bana_symbols import (
+        TABLE_29_ITALIAN, TABLE_29_FRENCH, TABLE_29_GERMAN, TABLE_29_ALL_LANGUAGES,
+    )
+    assert TABLE_29_ITALIAN['Flauto'] == 'fl'
+    assert TABLE_29_ITALIAN['Corno'] == 'cn'
+    assert TABLE_29_ITALIAN['Violino I'] == 'v1'
+    assert TABLE_29_ITALIAN['Contrabasso'] == 'cb'
+    assert TABLE_29_FRENCH['Hautbois'] == 'hb'
+    assert TABLE_29_FRENCH['Basson'] == 'b'
+    assert TABLE_29_FRENCH['Violon II'] == 'v2'
+    assert TABLE_29_GERMAN['Klarinette'] == 'kl'
+    assert TABLE_29_GERMAN['Posaune'] == 'pos'
+    assert TABLE_29_GERMAN['Kontrabass'] == 'kb'
+
+    # No name string collides across languages with a different
+    # abbreviation -- a handful of names are spelled identically in more
+    # than one language (e.g. "Oboe", "Horn", "Violoncello"), so a plain
+    # dict merge must not silently drop or overwrite a conflicting value.
+    for table in (TABLE_29_ENGLISH, TABLE_29_ITALIAN, TABLE_29_FRENCH, TABLE_29_GERMAN):
+        for name, abbrev in table.items():
+            assert TABLE_29_ALL_LANGUAGES[name] == abbrev
+
+
 def test_decode_abbreviation_simple():
     # "fl" — no §33.2.2 numbering.
     cells = BRLInputPipeline()._ascii_to_unicode('FL')

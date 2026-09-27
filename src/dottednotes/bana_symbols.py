@@ -427,6 +427,115 @@ TABLE_29_ENGLISH: dict[str, str] = {
     'Double bass': 'db',
 }
 
+# Table 29(B), Italian. Same source and key/value conventions as
+# TABLE_29_ENGLISH above.
+TABLE_29_ITALIAN: dict[str, str] = {
+    'Flauto piccolo': 'pc',
+    'Flauto': 'fl',
+    'Oboe': 'o',
+    'Corno inglese': 'ci',
+    'Clarinetto': 'cl',
+    'Clarinetto basso': 'bcl',
+    'Fagotto': 'fg',
+    'Contrafagotto': 'cfg',
+    'Corno': 'cn',
+    'Tromba': 'tr',
+    'Trombone': 'tb',
+    'Tuba': 'tu',
+    'Timpani': 'tim',
+    'Piatti': 'pi',
+    'Triangolo': 'tri',
+    'Tamburo militare': 'tbm',
+    'Gran cassa': 'gc',
+    'Arpa mano destra': 'ad',
+    'Arpa mano sinistra': 'as',
+    'Piano mano destra': 'pd',
+    'Piano mano sinistra': 'ps',
+    'Violino I': 'v1',
+    'Violino II': 'v2',
+    'Viola': 'vl',
+    'Violoncello': 'vc',
+    'Contrabasso': 'cb',
+}
+
+# Table 29(C), French. Same source and key/value conventions as
+# TABLE_29_ENGLISH above.
+TABLE_29_FRENCH: dict[str, str] = {
+    'Petite flûte': 'pfl',
+    'Grande flûte': 'fl',
+    'Hautbois': 'hb',
+    'Cor anglais': 'ca',
+    'Clarinette': 'cl',
+    'Clarinette basse': 'bcl',
+    'Basson': 'b',
+    'Contrebasson': 'bb',
+    'Cor': 'cor',
+    'Trompette': 'tp',
+    'Trombone': 'tb',
+    'Tuba': 'tu',
+    'Timbales': 'tim',
+    'Cymbale': 'cym',
+    'Triangle': 'tri',
+    'Caisse claire': 'ccl',
+    'Grosse caisse': 'gc',
+    'Harpe main droite': 'hd',
+    'Harpe main gauche': 'hg',
+    'Piano main droite': 'pd',
+    'Piano main gauche': 'pg',
+    'Violon I': 'v1',
+    'Violon II': 'v2',
+    'Alto': 'vl',
+    'Violoncelle': 'vc',
+    'Contrebasse': 'cb',
+}
+
+# Table 29(D), German. Same source and key/value conventions as
+# TABLE_29_ENGLISH above.
+TABLE_29_GERMAN: dict[str, str] = {
+    'Kleine Flöte': 'kfl',
+    'Grosse Flöte': 'fl',
+    'Oboe': 'o',
+    'Englisches Horn': 'eh',
+    'Klarinette': 'kl',
+    'Bassklarinette': 'bkl',
+    'Fagott': 'fg',
+    'Doppelfagott': 'dfg',
+    'Horn': 'hn',
+    'Trompete': 'tp',
+    'Posaune': 'pos',
+    'Basstuba': 'tu',
+    'Pauken': 'pk',
+    'Becken': 'bk',
+    'Triangel': 'tri',
+    'Kleine Trommel': 'kt',
+    'Grosse Trommel': 'gt',
+    'Harfe rechte Hand': 'hr',
+    'Harfe linke Hand': 'hl',
+    'Klavier rechte Hand': 'khr',
+    'Klavier linke Hand': 'khl',
+    'Violine I': 'v1',
+    'Violine II': 'v2',
+    'Bratsche': 'br',
+    'Violoncello': 'vc',
+    'Kontrabass': 'kb',
+}
+
+# Merged view of all four Table 29 language columns, keyed the same way as
+# each individual table -- used wherever a staff/instrument name needs to
+# resolve regardless of which of the four languages it's written in (Sec.
+# 33.2.1: "abbreviations for the English, French, Italian, and German names
+# ... is given in Table 29"). Verified by hand that no name string collides
+# across languages with a *different* abbreviation -- a handful of names are
+# spelled identically in more than one language (e.g. "Oboe", "Horn",
+# "Violoncello"), always with the same abbreviation there too, so a plain
+# dict merge is safe.
+TABLE_29_ALL_LANGUAGES: dict[str, str] = {
+    **TABLE_29_ENGLISH,
+    **TABLE_29_ITALIAN,
+    **TABLE_29_FRENCH,
+    **TABLE_29_GERMAN,
+}
+
 # ---------------------------------------------------------------------------
 # Lower-cell digits (§33.2.2's numbering-digit sign, and the same cells
 # already confirmed elsewhere in this table for other purposes — e.g. '⠲'

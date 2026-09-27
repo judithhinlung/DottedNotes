@@ -13,7 +13,7 @@ from ..bana_symbols import (
     NUMBER_SIGN,
     KEY_SIGNATURE_CELLS,
     TIME_SIGNATURE_CELLS,
-    TABLE_29_ENGLISH,
+    TABLE_29_ALL_LANGUAGES,
     ITALIC_WORD_INDICATOR,
     ITALIC_PASSAGE_INDICATOR,
     ITALIC_TERMINATOR,
@@ -314,7 +314,7 @@ def _find_instrument_list(lines: list[str]) -> tuple[list[str], int]:
 
 
 _KNOWN_ABBREVIATION_PREFIXES = {
-    re.sub(r'[0-9]+$', '', abbrev) for abbrev in TABLE_29_ENGLISH.values()
+    re.sub(r'[0-9]+$', '', abbrev) for abbrev in TABLE_29_ALL_LANGUAGES.values()
 }
 
 

@@ -17,7 +17,7 @@ from ..bana_symbols import (
     END_WORD_SIGN,
     LOWER_DIGIT_CELLS,
     LITERARY_DIGITS,
-    TABLE_29_ENGLISH,
+    TABLE_29_ALL_LANGUAGES,
     WORD_SIGN,
 )
 from ..models.instrument import InstrumentInfo
@@ -159,7 +159,8 @@ def parse_instrument_list(text: str) -> list[InstrumentInfo]:
     block that don't contain a WORD_SIGN...END_WORD_SIGN abbreviation are
     skipped rather than raising, so a stray blank line is harmless.
 
-    Each returned entry whose name is a Table 29(A) instrument has its
+    Each returned entry whose name is a Table 29 instrument (any of the
+    English/Italian/French/German columns, Sec. 33.2.1) has its
     abbreviation checked against the table; a mismatch produces a plain-text
     warning (not an error — a transcriber may deliberately deviate) rather
     than being silently accepted.
@@ -169,13 +170,13 @@ def parse_instrument_list(text: str) -> list[InstrumentInfo]:
         entry = _parse_line(line)
         if entry is None:
             continue
-        expected = TABLE_29_ENGLISH.get(entry.name)
+        expected = TABLE_29_ALL_LANGUAGES.get(entry.name)
         if expected is not None:
             actual = entry.abbreviation + (entry.part_number or '')
             if actual != expected:
                 warnings.warn(
                     f"Instrument '{entry.name}': abbreviation '{actual}' "
-                    f"does not match Table 29(A)'s '{expected}'.",
+                    f"does not match Table 29's '{expected}'.",
                     stacklevel=2,
                 )
         entries.append(entry)
@@ -185,17 +186,18 @@ def parse_instrument_list(text: str) -> list[InstrumentInfo]:
 def resolve_abbreviation(name: str, overrides: dict[str, str] | None = None) -> str:
     """Return the BANA abbreviation for `name` (§33.2.1).
 
-    Looks up Table 29(A) first, then `overrides`. Raises ValueError if
-    neither has an entry — per §33.2.1, an abbreviation for an instrument
-    outside Table 29 must be a deliberate 2-3 letter transcriber choice
-    ("conveying an immediate suggestion of the name"), never a silent guess.
+    Looks up Table 29 first (any of its English/Italian/French/German
+    columns), then `overrides`. Raises ValueError if neither has an entry —
+    per §33.2.1, an abbreviation for an instrument outside Table 29 must be
+    a deliberate 2-3 letter transcriber choice ("conveying an immediate
+    suggestion of the name"), never a silent guess.
     """
-    if name in TABLE_29_ENGLISH:
-        return TABLE_29_ENGLISH[name]
+    if name in TABLE_29_ALL_LANGUAGES:
+        return TABLE_29_ALL_LANGUAGES[name]
     if overrides and name in overrides:
         return overrides[name]
     raise ValueError(
-        f"No Table 29(A) abbreviation for '{name}' and none supplied via "
+        f"No Table 29 abbreviation for '{name}' and none supplied via "
         "overrides. Per BANA §33.2.1, supply an explicit 2-3 letter "
         "abbreviation conveying an immediate suggestion of the name "
         "(e.g. 'glo' for glockenspiel, 'tt' for tam-tam) — it must not be "

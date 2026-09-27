@@ -14,7 +14,7 @@ from dottednotes.models.tuplet import Tuplet
 from dottednotes.models.in_accord import InAccord
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
 from dottednotes.bana_symbols import (
-    TABLE_29_ENGLISH, ITALIC_WORD_INDICATOR, ITALIC_PASSAGE_INDICATOR, ITALIC_TERMINATOR,
+    TABLE_29_ALL_LANGUAGES, ITALIC_WORD_INDICATOR, ITALIC_PASSAGE_INDICATOR, ITALIC_TERMINATOR,
 )
 from dottednotes.exceptions import BrailleParseError
 from dottednotes.parser.ensemble_parser import (
@@ -384,24 +384,25 @@ def _arabic_to_roman(numeral: str) -> Optional[str]:
 
 
 # Two or more like-instrument part numbers combined onto a single staff
-# ("Oboe I/II", "Oboes 1&2", "Trumpet III/IV") -- BANA Sec. 33.2.2 treats a
+# ("Oboe I/II", "Oboes 1&2", "Trumpet III/IV", "Corni I.II" -- real-world
+# Italian scores join with "." rather than "/") -- BANA Sec. 33.2.2 treats a
 # Roman numeral exactly like the Arabic digit it names (its own worked
-# example is "Oboes 1&2", but "I/II" is the same designation), so either
-# form must resolve here.
+# example is "Oboes 1&2", but "I/II" is the same designation), so any of
+# these forms must resolve here.
 _COMBINED_NUMERAL_RE = re.compile(
-    r'^(.+?)\s+((?:\d+|[IVXLCDM]+)(?:\s*[/&]\s*(?:\d+|[IVXLCDM]+))+)$'
+    r'^(.+?)\s+((?:\d+|[IVXLCDM]+)(?:\s*[./&]\s*(?:\d+|[IVXLCDM]+))+)$'
 )
 
 
 def _combined_numeral_digits(token: str) -> Optional[str]:
     """Convert a combined-parts numeral token ("I/II", "1/2", "1&2",
-    "III/IV") to BANA Sec. 33.2.2's lower-cell digit string for a single
-    staff notating two or more like-instrument parts: each piece (Roman or
-    Arabic) resolved to Arabic, then brailled "in order from larger to
-    smaller" -- the section's own worked example, "Oboes 1&2" -> abbrev
-    "o21", not "o12". Returns None if any piece isn't a numeral 1-10 (the
-    only range `_ROMAN_NUMERALS` covers)."""
-    pieces = re.split(r'\s*[/&]\s*', token)
+    "III/IV", "I.II") to BANA Sec. 33.2.2's lower-cell digit string for a
+    single staff notating two or more like-instrument parts: each piece
+    (Roman or Arabic) resolved to Arabic, then brailled "in order from
+    larger to smaller" -- the section's own worked example, "Oboes 1&2" ->
+    abbrev "o21", not "o12". Returns None if any piece isn't a numeral 1-10
+    (the only range `_ROMAN_NUMERALS` covers)."""
+    pieces = re.split(r'\s*[./&]\s*', token)
     if len(pieces) < 2:
         return None
     digits: list[int] = []
@@ -414,8 +415,17 @@ def _combined_numeral_digits(token: str) -> Optional[str]:
 
 
 def _singular_forms(name: str) -> list[str]:
-    """Plausible singular forms of a plural/section instrument name (e.g.
-    "Violins" -> "Violin", "Basses" -> "Bass"), stripping only the last word."""
+    """Plausible singular forms of a plural/section instrument name,
+    stripping only the last word: the regular English pattern ("Violins"
+    -> "Violin", "Basses" -> "Bass"), and the two regular Italian noun
+    patterns Table 29(B) actually needs -- Sec. 33.2.1's "Italian ...
+    names ... in Table 29" -- since Italian plurals never end in "s" so
+    the English patterns above never fire for them: "-o"/"-e" nouns take
+    "-i" ("Flauto" -> "Flauti", "Trombone" -> "Tromboni"), and "-a" nouns
+    take "-e" ("Viola" -> "Viole", "Tromba" -> "Trombe"). Both an "-i"
+    ending's "-o" and "-e" candidates are tried since either source
+    ending is possible and only one will ever match a real Table 29(B)
+    entry."""
     words = name.split()
     if not words:
         return []
@@ -425,6 +435,12 @@ def _singular_forms(name: str) -> list[str]:
         forms.append(' '.join(words[:-1] + [last_word[:-2]]))
     if last_word.endswith('s'):
         forms.append(' '.join(words[:-1] + [last_word[:-1]]))
+    if last_word.endswith('i') and len(last_word) > 1:
+        stem = last_word[:-1]
+        forms.append(' '.join(words[:-1] + [stem + 'o']))
+        forms.append(' '.join(words[:-1] + [stem + 'e']))
+    if last_word.endswith('e') and len(last_word) > 1:
+        forms.append(' '.join(words[:-1] + [last_word[:-1] + 'a']))
     return forms
 
 
@@ -450,8 +466,12 @@ def _strip_leading_key_qualifier(name: str) -> Optional[str]:
 
 
 def _table29_lookup(staff_name: str) -> Optional[str]:
-    """Resolve `staff_name` against BANA Table 29, tolerating the
-    plural/section-style part names real MusicXML exports use (e.g.
+    """Resolve `staff_name` against BANA Table 29 -- all four of its
+    language columns (English, Italian, French, German, via
+    `TABLE_29_ALL_LANGUAGES`; Sec. 33.2.1: "abbreviations for the English,
+    French, Italian, and German names ... is given in Table 29") -- and
+    tolerating the plural/section-style part names real MusicXML exports
+    use (e.g.
     "Violins I", "Violas", "Double Basses") against the table's singular
     solo-instrument keys ("Violin I", "Viola", "Double bass"), a leading
     key/transposition qualifier ("Bb Clarinet", "C Tuba" -- Sec. 33.2.1),
@@ -466,7 +486,7 @@ def _table29_lookup(staff_name: str) -> Optional[str]:
     the Arabic digit it names, and braille the combined digits "in order
     from larger to smaller": its own worked example is "Oboes 1&2" ->
     "o21", not "o12")."""
-    lower_table = {key.lower(): val for key, val in TABLE_29_ENGLISH.items()}
+    lower_table = {key.lower(): val for key, val in TABLE_29_ALL_LANGUAGES.items()}
 
     abbrev = lower_table.get(staff_name.lower())
     if abbrev:
