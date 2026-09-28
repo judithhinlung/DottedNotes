@@ -1251,14 +1251,30 @@ class EnsembleParser:
                 # *previous* measure's chunk for the carry-forward repair
                 # below to have caught it in -- there's nothing before the
                 # first marker to spill from. Recover it directly here
-                # instead: widen the first chunk to start right after the
-                # abbreviation (never later than the marker column, so a
-                # flush-registered header -- abbrev end == marker column --
-                # is unaffected).
+                # instead: the first chunk always starts right after this
+                # line's own abbreviation ends, regardless of what column
+                # the header's marker declared -- never earlier (a
+                # flush-registered header, abbrev end == marker column, is
+                # unaffected) and, importantly, never later either. An
+                # instrument whose abbreviation is *longer* than whatever
+                # the header row was column-registered against (e.g. a
+                # 3-letter abbreviation like "SDR"/"BDR"/"TIM" among mostly
+                # 1-2 letter names) has abbrev_end fall *after* the marker
+                # column; using the marker column then (the old
+                # `min(cols[0], abbrev_end)`, which silently assumed
+                # abbrev_end <= cols[0] always) lands the slice inside the
+                # abbreviation itself, on its closing END_WORD_SIGN cell --
+                # that stray cell then re-tokenizes with nothing before it,
+                # a bare augmentation dot "with no preceding note or rest"
+                # whenever the instrument's rhythm starts that measure with
+                # a rest (confirmed against a real multi-marker orchestral
+                # fixture: Snare drum/Bass drum/Timpani, whose 3-letter
+                # abbreviations ran past several markers' columns while
+                # every 1-2 letter instrument in the same score did not).
                 if cols and abbrev_cells is not None:
                     leading_ws = len(line) - len(line.lstrip('⠀ '))
                     abbrev_end = leading_ws + len(abbrev_cells)
-                    cols[0] = min(cols[0], abbrev_end)
+                    cols[0] = abbrev_end
 
                 # The column offset between a marker and its measure's real
                 # content isn't always the same one cell the carry-forward
