@@ -292,6 +292,12 @@ def _render_output(
         export_musicxml(score, str(output_xml))
         available_files["musicxml"] = f"/api/jobs/{job_id}/musicxml"
 
+        # Generate companion Expressive MIDI (DAW)
+        output_midi = job_dir / f"{input_path.stem}_expressive.mid"
+        from .renderers.expressive_midi_renderer import export_expressive_midi
+        export_expressive_midi(score, str(output_midi))
+        available_files["expressive_midi"] = f"/api/jobs/{job_id}/expressive-midi"
+
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported target format: '{target_format}'")
 
@@ -704,6 +710,8 @@ def get_job_file(job_id: str, file_type: str):
         "brf": (".brf", "text/plain"),
         "brl": (".brl", "text/plain"),
         "musicxml": (".musicxml", "application/xml"),
+        "expressive-midi": (".mid", "audio/midi"),
+        "expressive_midi": (".mid", "audio/midi"),
     }
 
     if file_type not in valid_suffixes:
@@ -721,6 +729,11 @@ def get_job_file(job_id: str, file_type: str):
         expected_suffix = f"_output.{file_type}"
         for f in matching_files:
             if f.name.endswith(expected_suffix):
+                target_file = f
+                break
+    elif file_type in ("expressive-midi", "expressive_midi"):
+        for f in matching_files:
+            if f.name.endswith("_expressive.mid"):
                 target_file = f
                 break
     if not target_file:
@@ -799,6 +812,10 @@ async def set_part_instrument(job_id: str, part_idx: int, instrument: str = Form
     xml_path = part_dir / f"{input_stem}_{part_name_slug}.musicxml"
     export_musicxml(part_score, str(xml_path))
 
+    from .renderers.expressive_midi_renderer import export_expressive_midi
+    midi_path = part_dir / f"{input_stem}_{part_name_slug}_expressive.mid"
+    export_expressive_midi(part_score, str(midi_path))
+
     return {
         "job_id": job_id,
         "part_idx": part_idx,
@@ -806,6 +823,7 @@ async def set_part_instrument(job_id: str, part_idx: int, instrument: str = Form
         "files": {
             "ly": f"/api/jobs/{job_id}/parts/{part_idx}/ly",
             "musicxml": f"/api/jobs/{job_id}/parts/{part_idx}/musicxml",
+            "expressive_midi": f"/api/jobs/{job_id}/parts/{part_idx}/expressive-midi",
         },
     }
 
@@ -844,6 +862,8 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
         "brf": (".brf", "text/plain"),
         "brl": (".brl", "text/plain"),
         "musicxml": (".musicxml", "application/xml"),
+        "expressive-midi": (".mid", "audio/midi"),
+        "expressive_midi": (".mid", "audio/midi"),
     }
     
     if file_type not in valid_suffixes:
@@ -856,6 +876,8 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
     output_filename = f"{input_stem}_{part_name_slug}{suffix}"
     if file_type in ("brf", "brl"):
         output_filename = f"{input_stem}_{part_name_slug}_output{suffix}"
+    elif file_type in ("expressive-midi", "expressive_midi"):
+        output_filename = f"{input_stem}_{part_name_slug}_expressive.mid"
         
     output_path = part_dir / output_filename
     
@@ -944,6 +966,10 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
         elif file_type == "musicxml":
             from .renderers.musicxml_renderer import export_musicxml
             export_musicxml(part_score, str(output_path))
+            
+        elif file_type in ("expressive-midi", "expressive_midi"):
+            from .renderers.expressive_midi_renderer import export_expressive_midi
+            export_expressive_midi(part_score, str(output_path))
             
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported file type: '{file_type}'")

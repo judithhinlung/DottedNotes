@@ -282,6 +282,12 @@ def _run_convert(args: argparse.Namespace) -> None:
     is_musicxml_output = output_path is not None and Path(output_path).suffix.lower() in (".musicxml", ".mxl", ".xml")
     is_braille_output = output_path is not None and Path(output_path).suffix.lower() in (".brf", ".brl")
 
+    if args.expressive_midi and not is_musicxml_output:
+        output_desc = "stdout" if output_path is None else f"a {Path(output_path).suffix} output path"
+        raise DottedNotesError(
+            f"--expressive-midi requires MusicXML (.musicxml/.mxl) output, not {output_desc}."
+        )
+
     if is_musicxml_output:
         if args.compile:
             raise DottedNotesError(
@@ -290,6 +296,13 @@ def _run_convert(args: argparse.Namespace) -> None:
         from dottednotes.renderers.musicxml_renderer import export_musicxml
         export_musicxml(score, output_path)
         print(f"Written to {output_path}", file=sys.stderr)
+
+        if args.expressive_midi:
+            from dottednotes.renderers.expressive_midi_renderer import export_expressive_midi
+            out_p = Path(output_path)
+            midi_out_path = out_p.with_name(f"{out_p.stem}_expressive.mid")
+            export_expressive_midi(score, str(midi_out_path))
+            print(f"Written to {midi_out_path}", file=sys.stderr)
     else:
         if is_braille_output:
             if args.compile:
@@ -562,6 +575,13 @@ def main() -> None:
              "or their relative minor keys before encoding to LilyPond "
              "(since braille key signatures only specify the number of "
              "sharps/flats, e.g. one flat for F major vs D minor). Defaults to major.",
+    )
+    convert_parser.add_argument(
+        "--expressive-midi",
+        action="store_true",
+        help="When exporting to MusicXML (.musicxml/.mxl), also generate a "
+             "companion Expressive MIDI (DAW) performance file with CC11 "
+             "dynamics and articulation gate scaling alongside the .musicxml file.",
     )
     convert_parser.set_defaults(func=_run_convert)
 

@@ -613,3 +613,46 @@ def test_cli_key_mode(monkeypatch, tmp_path):
     assert r"\key e \minor" in content_minor
 
 
+def test_cli_musicxml_exports_musicxml_only_by_default(monkeypatch, tmp_path, capsys):
+    brf = _write_simple_brf(tmp_path)
+    out_xml = tmp_path / "piece.musicxml"
+    expected_midi = tmp_path / "piece_expressive.mid"
+
+    _run_main(monkeypatch, ["convert", str(brf), str(out_xml)])
+
+    assert out_xml.exists()
+    assert not expected_midi.exists()
+
+    captured = capsys.readouterr()
+    assert f"Written to {out_xml}" in captured.err
+    assert "_expressive.mid" not in captured.err
+
+
+def test_cli_musicxml_with_expressive_midi_flag(monkeypatch, tmp_path, capsys):
+    brf = _write_simple_brf(tmp_path)
+    out_xml = tmp_path / "piece.musicxml"
+    expected_midi = tmp_path / "piece_expressive.mid"
+
+    _run_main(monkeypatch, ["convert", str(brf), str(out_xml), "--expressive-midi"])
+
+    assert out_xml.exists()
+    assert expected_midi.exists()
+    assert expected_midi.read_bytes().startswith(b"MThd")
+
+    captured = capsys.readouterr()
+    assert f"Written to {out_xml}" in captured.err
+    assert f"Written to {expected_midi}" in captured.err
+
+
+def test_cli_expressive_midi_rejects_non_musicxml_output(monkeypatch, tmp_path, capsys):
+    brf = _write_simple_brf(tmp_path)
+    out_ly = tmp_path / "piece.ly"
+
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(monkeypatch, ["convert", str(brf), str(out_ly), "--expressive-midi"])
+    assert exc_info.value.code != 0
+
+    captured = capsys.readouterr()
+    assert "--expressive-midi requires MusicXML (.musicxml/.mxl) output" in captured.err
+
+

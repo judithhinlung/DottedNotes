@@ -113,7 +113,9 @@ DottedNotes/
 │       ├── renderers/
 │       │   ├── __init__.py
 │       │   ├── lilypond_formatter.py  # LilyPondFormatter: per-category \paper{}/staff-size settings
-│       │   └── braille_renderer.py    # BrailleRenderer (Sprint 9): Score -> BRF text, solo/piano/
+│       │   ├── braille_renderer.py    # BrailleRenderer (Sprint 9): Score -> BRF text, solo/piano/
+│       │   ├── musicxml_renderer.py   # export_musicxml: MusicXML export via music21
+│       │   └── expressive_midi_renderer.py # ExpressiveMidiRenderer: DAW/Performance MIDI (CC11 dynamics, velocity accents, duration gates)
 │       │                               # ensemble layout + line packing. `compression_level` param
 │       │                               # ("full"/"minimal"/"none", Sprint 9b) runs an articulation-
 │       │                               # carry-shorthand pass and a measure-repeat-sign pass before

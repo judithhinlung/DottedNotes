@@ -546,3 +546,40 @@ def test_render_output_threads_lead_voice_and_accompaniment_outline_options(tmp_
     assert "⠐⠜" in default_output          # outline present by default (soprano)
     assert "⠐⠜" not in no_outline_output   # omitted when include_accompaniment_outline=False
     assert default_output != alto_output   # lead_voice="Alto" changes the outlined part
+
+
+def test_musicxml_and_expressive_midi_export():
+    file_content = "⠐⠹".encode("utf-8")
+    response = client.post(
+        "/api/convert",
+        files={"file": ("test_score.brf", io.BytesIO(file_content), "text/plain")},
+        data={
+            "target_format": "musicxml",
+            "category": "Solo Piano",
+            "profile": "standard",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    job_id = data["job_id"]
+
+    assert "musicxml" in data["files"]
+    assert "expressive_midi" in data["files"]
+    assert data["files"]["expressive_midi"] == f"/api/jobs/{job_id}/expressive-midi"
+
+    xml_resp = client.get(f"/api/jobs/{job_id}/musicxml")
+    assert xml_resp.status_code == 200
+    assert "application/xml" in xml_resp.headers["content-type"]
+    assert "<score-partwise" in xml_resp.text
+
+    midi_resp = client.get(f"/api/jobs/{job_id}/expressive-midi")
+    assert midi_resp.status_code == 200
+    assert "audio/midi" in midi_resp.headers["content-type"]
+    assert midi_resp.content.startswith(b"MThd")
+
+    # Also test part-level expressive-midi serving
+    part_midi_resp = client.get(f"/api/jobs/{job_id}/parts/0/expressive-midi")
+    assert part_midi_resp.status_code == 200
+    assert "audio/midi" in part_midi_resp.headers["content-type"]
+    assert part_midi_resp.content.startswith(b"MThd")
+

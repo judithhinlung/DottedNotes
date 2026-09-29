@@ -220,10 +220,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const links = downloadLinks.querySelectorAll('.download-btn');
         links.forEach(link => {
             const fileType = link.getAttribute('data-file-type');
+            const endpointType = fileType === 'expressive_midi' ? 'expressive-midi' : fileType;
             if (val === 'full') {
-                link.href = `/api/jobs/${jobId}/${fileType}`;
+                link.href = `/api/jobs/${jobId}/${endpointType}`;
             } else {
-                link.href = `/api/jobs/${jobId}/parts/${val}/${fileType}`;
+                link.href = `/api/jobs/${jobId}/parts/${val}/${endpointType}`;
             }
         });
     }
@@ -251,10 +252,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dynamically update MIDI player source if a source exists
         if (midiPlayer.src) {
+            const isExpressive = midiPlayer.src.includes('expressive-midi') || midiPlayer.src.includes('expressive_midi');
+            const midiEndpoint = isExpressive ? 'expressive-midi' : 'midi';
             if (val === 'full') {
-                midiPlayer.src = `/api/jobs/${jobId}/midi`;
+                midiPlayer.src = `/api/jobs/${jobId}/${midiEndpoint}`;
             } else {
-                midiPlayer.src = `/api/jobs/${jobId}/parts/${val}/midi`;
+                midiPlayer.src = `/api/jobs/${jobId}/parts/${val}/${midiEndpoint}`;
             }
         }
     });
@@ -535,9 +538,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Auto-load MIDI file if present in the results
-        const midiAvailable = !!(data.files && data.files.midi);
+        const midiUrl = (data.files && (data.files.midi || data.files.expressive_midi)) || '';
+        const midiAvailable = !!midiUrl;
         if (midiAvailable) {
-            midiPlayer.src = data.files.midi;
+            midiPlayer.src = midiUrl;
             midiPlayerContainer.classList.remove('hidden');
         } else {
             midiPlayerContainer.classList.add('hidden');
@@ -563,6 +567,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     announceText += ' A MIDI player is available for playback.';
                 }
             }
+        } else if (data.target_format === 'musicxml') {
+            compileState = 'not_applicable';
+            if (midiAvailable) {
+                announceText = 'Score converted successfully to MusicXML and Expressive MIDI (DAW). An audio player is available for playback.';
+            }
         }
 
         // Update compile section state
@@ -580,7 +589,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 'midi': { text: '🎵 MIDI Audio', title: 'Download compiled MIDI audio file' },
                 'brf': { text: '⠃ BANA Braille (BRF)', title: 'Download formatted ASCII braille music file' },
                 'brl': { text: '⠃ BANA Braille (BRL)', title: 'Download formatted Unicode braille music file' },
-                'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' }
+                'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' },
+                'expressive_midi': { text: '🎹 Expressive MIDI (DAW)', title: 'Download performance MIDI with CC11 dynamics and articulation timing for DAWs' }
             };
  
             for (const [key, url] of Object.entries(files)) {
@@ -745,8 +755,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Keep the MIDI player in sync: setting the instrument can change
         // which MIDI file (if any) the server has compiled for this job.
-        if (data.files && data.files.midi) {
-            midiPlayer.src = data.files.midi;
+        const midiUrl = (data.files && (data.files.midi || data.files.expressive_midi)) || '';
+        if (midiUrl) {
+            midiPlayer.src = midiUrl;
             midiPlayerContainer.classList.remove('hidden');
         } else {
             midiPlayerContainer.classList.add('hidden');
@@ -776,7 +787,8 @@ document.addEventListener('DOMContentLoaded', () => {
             'midi': { text: '🎵 MIDI Audio', title: 'Download compiled MIDI audio file' },
             'brf': { text: '⠃ BANA Braille (BRF)', title: 'Download formatted ASCII braille music file' },
             'brl': { text: '⠃ BANA Braille (BRL)', title: 'Download formatted Unicode braille music file' },
-            'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' }
+            'musicxml': { text: '🎼 MusicXML File', title: 'Download sheet music in MusicXML format' },
+            'expressive_midi': { text: '🎹 Expressive MIDI (DAW)', title: 'Download performance MIDI with CC11 dynamics and articulation timing for DAWs' }
         };
         const fileKeys = Object.keys(files);
         if (fileKeys.length > 0) {

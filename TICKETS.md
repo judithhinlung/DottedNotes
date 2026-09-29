@@ -9342,3 +9342,82 @@ un-updated `Measure.key_signature_mode` would immediately look like a
 - [ ] `--key-mode` applied to a multi-key-signature BRF piece updates
       every key instance consistently, not just the header
 - [ ] `pytest tests/` passes with no regressions
+
+---
+
+# Future Feature Backlog: Workflow & DAW Integrations
+
+Goal: Expand DottedNotes beyond transcription into bi-directional DAW integration, multi-stem sequencer workflows, and high-volume batch processing for composers and transcribers.
+
+---
+
+### [ ] BACKLOG-1: Standard MIDI File Import to Braille Music (MIDI-to-Braille)
+
+**Why:**
+Currently DottedNotes supports BRF -> LilyPond/PDF/MIDI/MusicXML, and MusicXML -> BRF. However, blind composers frequently sketch or improvise musical ideas directly on a MIDI keyboard into Logic Pro, Reaper, or hardware sequencers. Without a MIDI-to-Braille path, they cannot read back or review their own keyboard performances in braille notation on a braille notetaker or refreshable braille display without sighted assistance or cumbersome third-party DAW quantization tools. Adding a MIDI import pipeline enables end-to-end `piece.mid` -> `piece.brf`/`piece.brl`.
+
+**Steps:**
+1. Create `src/dottednotes/parser/midi_parser.py` with `load_midi(file_path: Path | str, quantize_grid: str = "16th") -> Score`.
+2. Map MIDI tracks to `Staff` instances, detecting clefs based on pitch range (or keyboard split if single-track two-hand performance).
+3. Quantize event onsets and durations to standard musical divisions (triplet, 16th, 8th, quarter, etc.) using `music21` quantization engine.
+4. Translate note pitches, velocities (into BANA dynamic levels), and key/time signature events into the internal `Score` / `Measure` / `Note` model.
+5. Add `.mid` / `.midi` extension support to CLI `convert` input detection and web UI upload validation.
+6. Add unit and integration tests with solo instrument and keyboard MIDI fixtures.
+
+**Definition of Done:**
+- [ ] `dottednotes convert improvisation.mid piece.brf` converts a standard Type 0/1 MIDI file into valid BANA braille music
+- [ ] Key signatures, time signatures, and tempos in the MIDI file are parsed into measure headers
+- [ ] Pitches and durations are quantized cleanly without generating unreadable fraction rests
+- [ ] Web UI accepts `.mid`/`.midi` uploads and displays Braille, LilyPond, and MusicXML export options
+- [ ] `pytest tests/` passes with comprehensive test coverage
+
+**Senior note:**
+Raw MIDI has no concept of note spelling (e.g. F# vs Gb) or measure boundaries if played without a click. Always default to key-signature-aware pitch spelling and standard metric quantization grids (16th note default) to avoid creating unreadable micro-rests.
+
+---
+
+### [ ] BACKLOG-2: Multi-Track DAW Stem & Marker Export
+
+**Why:**
+While `--expressive-midi` generates a single unified Type 1 Standard MIDI File containing all parts on distinct channels, modern DAW workflows (especially in Logic Pro, Cubase, and Reaper) frequently require individual stem files per instrument or vocal part (e.g., `01_Soprano_expressive.mid`, `02_Alto_expressive.mid`, etc.) so they can be dragged directly onto separate software instrument tracks without needing manual channel demultiplexing. Additionally, embedding rehearsal marks and measure markers allows the DAW timeline to instantly match the score structure.
+
+**Steps:**
+1. Extend `ExpressiveMidiRenderer` with an `export_stems(score: Score, output_dir: Path, stem_pattern: str = "{index:02d}_{name}_expressive.mid") -> list[Path]` method.
+2. In each track stem, write standard MIDI track meta-events: Track Name (`0x03`), Instrument Name (`0x04`), Time Signature (`0x58`), Key Signature (`0x59`), and Tempo (`0x51`).
+3. Add Score rehearsal marks / section titles as MIDI Marker meta-events (`0x06`) at the exact tick offsets.
+4. Add CLI flag `--stems` to `convert` when exporting with `--expressive-midi`.
+5. In the Web UI, add a "Download DAW Stems (ZIP)" option when MusicXML target is converted on a multi-part score.
+
+**Definition of Done:**
+- [ ] `dottednotes convert orchestra.brf orchestra.musicxml --expressive-midi --stems` writes individual `.mid` stems for every staff in the score alongside the master file
+- [ ] Each stem starts at tick 0 and maintains identical tempo/meter maps for sample-accurate alignment across DAW tracks
+- [ ] Section headings and rehearsal letters are embedded as MIDI marker events
+- [ ] `pytest tests/` passes with tests verifying multi-track stem generation and marker tick positions
+
+**Senior note:**
+Always ensure track 1 of each stem retains the master tempo map and meter changes even if that track has initial rests. DAWs rely on tick-0 tempo events in every imported stem to keep multiple audio/MIDI tracks locked to the project grid.
+
+---
+
+### [ ] BACKLOG-3: Batch / Directory Conversion Mode (CLI & Web)
+
+**Why:**
+Composers and transcribers frequently work with multi-movement works (e.g. 5 movements of a suite), hymn collections, or choral folders containing dozens of `.brf` files. Currently, converting a collection requires running the CLI once per file or uploading files one-by-one in the web UI. A batch mode allows converting an entire directory of braille scores into print-ready scores, MusicXML, and DAW files in a single pass.
+
+**Steps:**
+1. In `src/dottednotes/cli.py`, allow the input argument to be a directory path or glob pattern (e.g., `dottednotes convert "pieces/*.brf" --output-dir dist/ --compile`).
+2. Add `--output-dir` (or `-d`) flag to specify destination folder for converted files.
+3. If an individual file fails with a validation or parsing error, log a plain-text warning to stderr and continue processing remaining files (exiting with non-zero summary code at the end if any failed).
+4. In `src/dottednotes/web.py`, add `/api/convert-batch` accepting a `.zip` archive containing multiple braille or score files, returning a downloadable `.zip` of converted outputs.
+5. Add CLI and Web test coverage for multi-file conversion.
+
+**Definition of Done:**
+- [ ] `dottednotes convert folder/ --output-dir out/ --target-format musicxml --expressive-midi` processes all supported files in `folder/` into `out/`
+- [ ] Batch processing is robust against single-file errors: failure of file 3 does not abort files 4 through 10
+- [ ] Clear summary report is emitted to stderr indicating succeeded, warned, and failed files without ASCII progress bars
+- [ ] Web UI supports uploading a `.zip` file and downloading a `.zip` containing all converted scores and audio
+- [ ] `pytest tests/` passes
+
+**Senior note:**
+Keep batch progress output strictly screen-reader friendly: emit one line per completed file (`[OK] prelude.brf -> prelude.ly`, `[FAILED] fugue.brf: syntax error at L12`), avoiding animated in-place spinner characters or carriage-return (`\r`) overwriting.
+

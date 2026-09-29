@@ -85,6 +85,12 @@ dottednotes convert piece.brf piece.ly
 # Convert and compile to PDF + MIDI (requires lilypond to be installed on your PATH)
 dottednotes convert piece.brf piece.ly --compile
 
+# Convert to MusicXML
+dottednotes convert piece.brf piece.musicxml
+
+# Convert to MusicXML and generate companion Expressive MIDI (DAW) with CC11 dynamics and articulation timing
+dottednotes convert piece.brf piece.musicxml --expressive-midi
+
 # Verbose output — prints diagnostic info (detected encoding, tokens, validation warnings) to stderr
 dottednotes convert piece.brf piece.ly --verbose
 
@@ -146,6 +152,17 @@ dottednotes --version
   * `staff_size` (float, global staff size in points)
   * `basic_distance` (float, basic distance between systems)
   * `padding` (float, padding spacing between systems)
+
+* **`--expressive-midi`**:
+  When converting to MusicXML (`.musicxml` or `.mxl` output path), generates a companion **Expressive MIDI (DAW)** performance file (`<stem>_expressive.mid`) alongside the MusicXML score.
+
+  This follows the convention of `--compile` generating PDF and MIDI files alongside a `.ly` score. While LilyPond's MIDI is geared toward score proof-reading, Expressive MIDI is tailored for software instruments, sequencers, and Digital Audio Workstations (DAWs):
+  * **CC11 (Expression):** Continuously interpolates dynamic levels (ppp to fff) and dynamic hairpins (crescendo and decrescendo) evaluated every 20 ticks.
+  * **Velocity:** Dynamic baselines with articulation accents (+20 velocity for accents and marcato).
+  * **Gate / Duration Scaling:** Applies realistic note durations—staccato (50%), tenuto (102%), slurred legato (100%), and standard unslurred (90%).
+  * **Universal Standard:** Emits Type 1 Standard MIDI Files (SMF) using standard General MIDI program numbers, without proprietary sound library keyswitches.
+
+  Requires a `.musicxml` or `.mxl` output path.
 
 * **`--report`**:
   Runs the BANA validator on the parsed music score and prints a line-by-line list of correction warnings (such as sign order violations, missing octave marks under register rules, and shorthand recommendations) to `stderr`.
@@ -279,8 +296,8 @@ The web UI's options mirror the CLI's `convert` flags one-to-one — the "What d
 options mean?" link on the page points back to this section.
 
 * **Target Format**: LilyPond (`.ly`, `.pdf`, `.midi`), Braille Music (`.brf`),
-  Braille Music (`.brl`), or MusicXML (`.musicxml`). Corresponds to `dottednotes convert`'s
-  choice of output file extension.
+  Braille Music (`.brl`), or MusicXML (`.musicxml` + Expressive MIDI). Corresponds to `dottednotes convert`'s
+  choice of output file extension. When MusicXML is selected, an Expressive MIDI (DAW) file is generated alongside the score, available for download or immediate playback in the browser audio player.
 * **Layout Category**: same as `--category` — Default (auto-detect), Solo Piano, Art Song,
   Chamber, Orchestral, or Lead Sheet.
 * **Braille Compression**: same as `--compression` — Full Compression, Minimal
