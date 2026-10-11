@@ -56,18 +56,18 @@ class Tuplet:
     items: list = field(default_factory=list)
     ratio: tuple[int, int] = (3, 2)
 
-    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_pitch: tuple[int, int], key_signature: Optional[KeySignature] = None) -> tuple[str, tuple[int, int]]:
         parts: list[str] = []
-        cur_midi = prev_midi
+        cur_pitch = prev_pitch
         for item in self.items:
             if hasattr(item, 'to_relative_lilypond'):
-                s, cur_midi = item.to_relative_lilypond(cur_midi, key_signature=key_signature)
+                s, cur_pitch = item.to_relative_lilypond(cur_pitch, key_signature=key_signature)
             else:
                 s = item.to_lilypond(key_signature=key_signature)
             parts.append(s)
         inner = ' '.join(parts)
         num, den = self.ratio
-        return f'\\tuplet {num}/{den} {{ {inner} }}', cur_midi
+        return f'\\tuplet {num}/{den} {{ {inner} }}', cur_pitch
 
     def to_braille(
         self,

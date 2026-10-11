@@ -265,8 +265,8 @@ class Score:
 
         if len(self.staves) == 1:
             staff = self.staves[0]
-            anchor, start_midi = staff.relative_anchor()
-            staff_content = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
+            anchor, start_pitch = staff.relative_anchor()
+            staff_content = staff.to_lilypond(start_pitch=start_pitch, measure_numbers=measure_numbers)
             if staff.lyrics and self.chord_names is not None:
                 # BANA Sec. 36: a strophic song with lyrics, chords, and
                 # melody together (see strophic_song_parser.py) -- combines
@@ -346,11 +346,11 @@ class Score:
         for family, run_staves in runs:
             if len(run_staves) == 1:
                 staff = run_staves[0]
-                anchor, start_midi = staff.relative_anchor()
+                anchor, start_pitch = staff.relative_anchor()
                 if staff.lyrics:
                     relative_block = [
                         f"    \\relative {anchor} {{",
-                        staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers),
+                        staff.to_lilypond(start_pitch=start_pitch, measure_numbers=measure_numbers),
                         "    }",
                     ]
                     transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
@@ -375,7 +375,7 @@ class Score:
                 else:
                     relative_block = [
                         f"  \\relative {anchor} {{",
-                        staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers),
+                        staff.to_lilypond(start_pitch=start_pitch, measure_numbers=measure_numbers),
                         "  }",
                     ]
                     block_lines = [
@@ -389,10 +389,10 @@ class Score:
                 group_context = "PianoStaff" if family == InstrumentFamily.KEYBOARD_HARP else "StaffGroup"
                 block_lines = [f"\\new {group_context} <<"]
                 for staff in run_staves:
-                    anchor, start_midi = staff.relative_anchor()
+                    anchor, start_pitch = staff.relative_anchor()
                     if staff.lyrics:
                         relative_block = [f"      \\relative {anchor} {{"]
-                        staff_ly = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
+                        staff_ly = staff.to_lilypond(start_pitch=start_pitch, measure_numbers=measure_numbers)
                         for line in staff_ly.splitlines():
                             relative_block.append("        " + line.strip())
                         relative_block.append("      }")
@@ -415,7 +415,7 @@ class Score:
                         block_lines.append("  \\new Staff {")
                         block_lines.extend(self._midi_instrument_line(staff, '    '))
                         relative_block = [f"    \\relative {anchor} {{"]
-                        staff_ly = staff.to_lilypond(start_midi=start_midi, measure_numbers=measure_numbers)
+                        staff_ly = staff.to_lilypond(start_pitch=start_pitch, measure_numbers=measure_numbers)
                         for line in staff_ly.splitlines():
                             relative_block.append("      " + line.strip())
                         relative_block.append("    }")

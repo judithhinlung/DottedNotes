@@ -467,7 +467,7 @@ def test_musicxml_quintuplet_ratio_beyond_three_two():
     assert braille.startswith('⠸⠢⠄')
     assert '⠆' not in braille
 
-    ly, _ = tuplet.to_relative_lilypond(60)
+    ly, _ = tuplet.to_relative_lilypond((0, 4))
     assert ly.startswith(r'\tuplet 5/4 {')
 
 

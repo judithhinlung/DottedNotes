@@ -28,6 +28,17 @@ _NOTE_SEMITONES: dict[str, int] = {
     'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11,
 }
 
+# Diatonic letter-name step within an octave, C=0..B=6 -- used (never
+# semitone distance) to compute \relative octave marks; see
+# Note._relative_octave_marks().
+_LETTER_STEP: dict[str, int] = {
+    'C': 0, 'D': 1, 'E': 2, 'F': 3, 'G': 4, 'A': 5, 'B': 6,
+}
+
+# Default \relative seed: middle C (letter C, octave 4), matching the old
+# MIDI-60 default this (letter_step, octave) tuple representation replaces.
+DEFAULT_RELATIVE_PITCH: tuple[int, int] = (0, 4)
+
 # How each accidental type shifts the MIDI pitch (keyed by AccidentalType.name)
 _ACCIDENTAL_MIDI_OFFSETS: dict[str, int] = {
     'SHARP': 1, 'FLAT': -1, 'NATURAL': 0, 'DOUBLE_SHARP': 2, 'DOUBLE_FLAT': -2,
@@ -362,44 +373,61 @@ class Note(BrailleSymbol):
             self.breath_mark == other.breath_mark
         )
 
-    def _relative_pitch_str(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
-        """Return (pitch_only_str, new_midi) for use inside a chord <...> block.
+    def _diatonic_ref(self) -> tuple[int, int]:
+        """This note's (letter_step, octave) pair, the state threaded through
+        \\relative-block rendering to seed the next note's octave computation."""
+        return (_LETTER_STEP[self.note_name], self.octave)
 
-        Renders only the pitch (name + accidental + octave marks), no duration
-        or other markings.  Each chord note is relative to the preceding chord note.
+    def _relative_octave_marks(self, prev_pitch: tuple[int, int]) -> tuple[str, tuple[int, int]]:
+        """Return (octave_marks, new_prev_pitch) for use inside a \\relative block.
+
+        Computes the ' or , marks needed so this note's absolute pitch is
+        reached from `prev_pitch`, following LilyPond's real nearest-octave
+        rule: the previous note's octave is adjusted by the diatonic interval
+        (counted by letter name -- C-D-E-F-G-A-B steps -- disregarding any
+        accidental) that is a fourth or less, choosing the direction (up or
+        down) that interval is found in. A diminished fifth and an augmented
+        fourth span the same six semitones but are different-sized diatonic
+        intervals, so accidentals never enter this calculation at all.
+
+        Verified against the real `lilypond` binary: `\\relative c' { ees4 a4 }`
+        resolves to `ees' a'` (E to A is a diatonic fourth -- no octave mark
+        needed), while `\\relative c' { dis4 a4 }` resolves to `dis' a` (D to A
+        is a diatonic fifth down -- one octave lower), even though dis and ees
+        are the same MIDI pitch. A chromatic/semitone-distance model can't
+        distinguish these two cases; a prior version of this method used one
+        and produced spurious octave marks whenever an accidental pushed the
+        chromatic distance across the tritone boundary without changing the
+        diatonic letter distance (e.g. E-flat to A).
         """
-        acc_type = self._effective_accidental_type(key_signature)
-        semitone = _NOTE_SEMITONES[self.note_name]
-        if acc_type:
-            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
-
-        base = (prev_midi // 12) * 12 + semitone
-        # LilyPond's real nearest-neighbor rule breaks an exact tritone tie
-        # (6 semitones either way) toward the LOWER pitch -- verified against
-        # the real lilypond binary's \displayMusic output (S10d-16). The
-        # window must therefore be asymmetric the other way: base can be as
-        # low as prev_midi - 6 before shifting up, but must shift down again
-        # once it exceeds prev_midi + 5 (not + 6, which would let the upper
-        # tritone candidate stand).
-        while base < prev_midi - 6:
-            base += 12
-        while base > prev_midi + 5:
-            base -= 12
-
-        target_midi = self._midi_pitch(key_signature)
-        diff = target_midi - base
-        octave_adj = diff // 12
+        prev_letter, prev_octave = prev_pitch
+        cur_letter = _LETTER_STEP[self.note_name]
+        diff = (cur_letter - prev_letter) % 7
+        if diff > 3:
+            diff -= 7
+        candidate_octave = (prev_octave * 7 + prev_letter + diff) // 7
+        octave_adj = self.octave - candidate_octave
         if octave_adj > 0:
             octave_str = "'" * octave_adj
         elif octave_adj < 0:
             octave_str = "," * (-octave_adj)
         else:
             octave_str = ""
+        return octave_str, self._diatonic_ref()
+
+    def _relative_pitch_str(self, prev_pitch: tuple[int, int], key_signature: Optional[KeySignature] = None) -> tuple[str, tuple[int, int]]:
+        """Return (pitch_only_str, new_prev_pitch) for use inside a chord <...> block.
+
+        Renders only the pitch (name + accidental + octave marks), no duration
+        or other markings.  Each chord note is relative to the preceding chord note.
+        """
+        acc_type = self._effective_accidental_type(key_signature)
+        octave_str, new_pitch = self._relative_octave_marks(prev_pitch)
 
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
         accidental_str = self._accidental_suffix(acc_type)
         fingering_str = ''.join(f.to_lilypond() for f in self.fingerings)
-        return f"{ly_name}{accidental_str}{octave_str}{fingering_str}", target_midi
+        return f"{ly_name}{accidental_str}{octave_str}{fingering_str}", new_pitch
 
     def _midi_pitch(self, key_signature: Optional[KeySignature] = None) -> int:
         """MIDI pitch number for this note (C4 = 60)."""
@@ -409,52 +437,27 @@ class Note(BrailleSymbol):
             semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
         return 12 * (self.octave + 1) + semitone
 
-    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
-        """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
+    def to_relative_lilypond(self, prev_pitch: tuple[int, int], key_signature: Optional[KeySignature] = None) -> tuple[str, tuple[int, int]]:
+        """Return (lilypond_str, new_prev_pitch) for use inside a \\relative block.
 
         Grace notes participate in the relative pitch chain: the grace note
-        is rendered relative to prev_midi, and the main note is rendered
+        is rendered relative to prev_pitch, and the main note is rendered
         relative to the grace note's pitch.
 
-        Computes the octave marks needed so that the note's absolute pitch is
-        preserved relative to prev_midi, following LilyPond's nearest-neighbor rule:
-        choose the occurrence of the pitch class within a tritone of prev_midi,
-        then add ' or , marks to reach the actual target octave.
+        See `_relative_octave_marks()` for the octave-mark computation itself.
         """
         # Handle grace notes: each renders relative to the previous, chained in order.
         grace_str = ''
         if self.grace_note:
             parts = []
             for gn in self.grace_note.notes:
-                note_str, prev_midi = gn.to_relative_lilypond(prev_midi, key_signature=key_signature)
+                note_str, prev_pitch = gn.to_relative_lilypond(prev_pitch, key_signature=key_signature)
                 parts.append(note_str)
             prefix = r'\appoggiatura' if self.grace_note.long_appoggiatura else r'\grace'
             grace_str = f'{prefix} {{ {" ".join(parts)} }} '
 
         acc_type = self._effective_accidental_type(key_signature)
-        semitone = _NOTE_SEMITONES[self.note_name]
-        if acc_type:
-            semitone += _ACCIDENTAL_MIDI_OFFSETS.get(acc_type.name, 0)
-
-        # Natural relative MIDI: the occurrence of this pitch class closest to
-        # prev_midi. An exact tritone tie (6 semitones either way) breaks
-        # toward the LOWER pitch, matching real LilyPond -- see
-        # _relative_pitch_str's identical window for the S10d-16 citation.
-        base = (prev_midi // 12) * 12 + semitone
-        while base < prev_midi - 6:
-            base += 12
-        while base > prev_midi + 5:
-            base -= 12
-
-        target_midi = self._midi_pitch(key_signature)
-        diff = target_midi - base
-        octave_adj = diff // 12
-        if octave_adj > 0:
-            octave_str = "'" * octave_adj
-        elif octave_adj < 0:
-            octave_str = "," * (-octave_adj)
-        else:
-            octave_str = ""
+        octave_str, new_pitch = self._relative_octave_marks(prev_pitch)
 
         ly_name = NOTE_NAME_TO_LILYPOND[self.note_name]
         accidental_str = self._accidental_suffix(acc_type)
@@ -484,7 +487,7 @@ class Note(BrailleSymbol):
             pedal_str = r"\sustainOn\sustainOff"
         result = (f"{grace_str}{ly_name}{accidental_str}{octave_str}{duration_str}{tremolo_str}{fingering_str}"
                   f"{articulation_str}{ornament_str}{fermata_str}{tie_str}{dynamic_str}{slur_str}{pedal_str}{breath_mark_str}")
-        return result, target_midi
+        return result, new_pitch
 
 
 @dataclass
@@ -513,9 +516,9 @@ class Rest(BrailleSymbol):
             return f"R{self.duration.to_lilypond()}{pedal_str}"
         return f"r{self.duration.to_lilypond()}{pedal_str}"
 
-    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
-        """Rests do not change the pitch reference; pass prev_midi through unchanged."""
-        return self.to_lilypond(key_signature=key_signature), prev_midi
+    def to_relative_lilypond(self, prev_pitch: tuple[int, int], key_signature: Optional[KeySignature] = None) -> tuple[str, tuple[int, int]]:
+        """Rests do not change the pitch reference; pass prev_pitch through unchanged."""
+        return self.to_lilypond(key_signature=key_signature), prev_pitch
 
     def to_braille(self) -> str:
         if self.is_full_measure:

@@ -815,30 +815,91 @@ def test_fermata_and_breath_mark_survive_measure_to_lilypond():
     assert "\\set breathMarkType = #'caesura \\breathe" in ly
 
 
-def test_relative_pitch_exact_tritone_tie_breaks_toward_lower_octave():
-    # LilyPond's \relative nearest-neighbor rule breaks an exact tritone tie
-    # (6 semitones either direction) toward the LOWER pitch -- verified
-    # against the real lilypond binary's \displayMusic output (S10d-16):
+def test_relative_pitch_diatonic_distance_cis_to_g_goes_down_a_fourth():
+    # LilyPond's \relative rule picks the octave by diatonic letter-step
+    # distance (never semitones), choosing the smaller interval -- verified
+    # against the real lilypond binary's \displayLilyMusic output:
     # `\relative c' { cis'' g }` resolves the bare, unmarked "g" to the
-    # octave *below* cis'' (a descending tritone), not the octave above.
-    # cis'' = MIDI 85 (octave 6); the two G candidates are G5 (MIDI 79,
-    # -6) and G6 (MIDI 91, +6) -- an exact tie that must resolve to G5.
-    prev_midi = 85  # cis'' (octave 6)
-    g = _make_note('G', 5, 8)  # target: G, octave 5 (MIDI 79)
-    ly, new_midi = g.to_relative_lilypond(prev_midi)
-    assert ly == 'g8'  # no octave marks needed -- G5 is the tie-break winner
-    assert new_midi == 79
+    # octave *below* cis'' (C down to G is a fourth: C-B-A-G), not the
+    # octave above (C up to G is a fifth: C-D-E-F-G, the bigger interval).
+    # cis'' = letter C, octave 6; the chosen G lands in octave 5.
+    prev_pitch = (0, 6)  # letter C, octave 6 (cis'')
+    g = _make_note('G', 5, 8)  # target: G, octave 5
+    ly, new_pitch = g.to_relative_lilypond(prev_pitch)
+    assert ly == 'g8'  # no octave marks needed -- G5 is the closer octave
+    assert new_pitch == (4, 5)  # letter G, octave 5
 
 
-def test_relative_pitch_str_exact_tritone_tie_breaks_toward_lower_octave():
-    # Same tie-break rule, exercised through the chord-note code path
-    # (_relative_pitch_str), which duplicates to_relative_lilypond()'s
-    # nearest-neighbor window.
-    prev_midi = 85
+def test_relative_pitch_str_diatonic_distance_cis_to_g_goes_down_a_fourth():
+    # Same diatonic-distance rule, exercised through the chord-note code
+    # path (_relative_pitch_str), which shares _relative_octave_marks()
+    # with to_relative_lilypond().
+    prev_pitch = (0, 6)
     g = _make_note('G', 5, 8)
-    pitch_str, new_midi = g._relative_pitch_str(prev_midi)
+    pitch_str, new_pitch = g._relative_pitch_str(prev_pitch)
     assert pitch_str == 'g'
-    assert new_midi == 79
+    assert new_pitch == (4, 5)
+
+
+def test_relative_pitch_eb_to_a_same_octave_needs_no_mark():
+    # Regression test: a real piece (daisies-with-toy-piano.brf, Violin I
+    # mm. 31-32) had E-flat4 followed by A4, both genuinely octave 4 in the
+    # parsed model, but the old chromatic/semitone-distance implementation
+    # saw E-flat to A as an exact 6-semitone tritone, hit its tie-break
+    # rule, and emitted a spurious octave-up mark -- which the real
+    # lilypond binary then resolved one octave too high (A5). E-flat to A
+    # is a diatonic FOURTH (E-F-G-A, 3 letter-steps), not a tritone tie, so
+    # no mark should be emitted at all. Verified against the real
+    # `lilypond` binary: `\relative c' { ees4 a4 }` -> `ees'4 a'4`.
+    eb = _make_note('E', 4, 4, accidental=Accidental(
+        dots=frozenset(), category=SymbolCategory.ACCIDENTAL, raw_brl='⠣', type=AccidentalType.FLAT
+    ))
+    a = _make_note('A', 4, 8)
+    _, prev_pitch = eb.to_relative_lilypond((0, 4))
+    ly, new_pitch = a.to_relative_lilypond(prev_pitch)
+    assert ly == 'a8'  # no octave mark
+    assert new_pitch == (5, 4)  # letter A, octave 4
+
+
+def test_relative_pitch_dsharp_to_a_drops_an_octave():
+    # D-sharp and E-flat are the same MIDI pitch, but LilyPond's \relative
+    # rule is letter-name-based (ignores accidentals entirely), so the same
+    # following "A" resolves to a DIFFERENT octave depending on which
+    # enharmonic spelling precedes it: D to A is a diatonic FIFTH up, which
+    # is farther than a fourth down (D-C-B-A), so the fourth-down direction
+    # wins and A drops to the octave below D. A chromatic/MIDI-distance
+    # model can never reproduce this, since it can't see the letter name.
+    # Verified against the real `lilypond` binary:
+    # `\relative c' { dis4 a4 }` -> `dis'4 a4` (A one octave below D).
+    ds = _make_note('D', 4, 4, accidental=Accidental(
+        dots=frozenset(), category=SymbolCategory.ACCIDENTAL, raw_brl='⠩', type=AccidentalType.SHARP
+    ))
+    a = _make_note('A', 3, 8)
+    _, prev_pitch = ds.to_relative_lilypond((0, 4))
+    ly, new_pitch = a.to_relative_lilypond(prev_pitch)
+    assert ly == 'a8'  # no octave mark -- A3 is the closer (fourth-down) octave
+    assert new_pitch == (5, 3)  # letter A, octave 3
+
+
+def test_measure_to_lilypond_eb_to_a_across_measure_boundary_stays_in_octave_4():
+    # End-to-end regression for the real bug (daisies-with-toy-piano.brf,
+    # Violin I mm. 31-32): a measure ending on E-flat4 followed by a measure
+    # starting on A4, both genuinely octave 4, threaded across the measure
+    # boundary the same way Staff.to_lilypond() chains prev_pitch between
+    # measures. Must render with no octave mark on the "a" -- the prior bug
+    # emitted a spurious "'" here, which the real lilypond binary then
+    # resolved a full octave too high (A5).
+    m1 = Measure(number=31)
+    m1.add_note(_make_note('E', 4, 8, accidental=Accidental(
+        dots=frozenset(), category=SymbolCategory.ACCIDENTAL, raw_brl='⠣', type=AccidentalType.FLAT
+    )))
+    m2 = Measure(number=32)
+    m2.add_note(_make_note('A', 4, 8))
+
+    ly1, prev_pitch = m1.to_lilypond((0, 4))
+    ly2, _ = m2.to_lilypond(prev_pitch)
+    assert 'a8' in ly2
+    assert "a'8" not in ly2
 
 
 def test_measure_volta_single_ending_to_braille():
@@ -891,7 +952,7 @@ def test_chord_with_fermata_and_breath_mark_to_lilypond():
     ly = chord.to_lilypond()
     assert '\\henzelongfermata' in ly
     assert "\\set breathMarkType = #'comma \\breathe" in ly
-    ly_rel, _ = chord.to_relative_lilypond(60)
+    ly_rel, _ = chord.to_relative_lilypond((0, 4))
     assert '\\henzelongfermata' in ly_rel
     assert "\\set breathMarkType = #'comma \\breathe" in ly_rel
 
@@ -912,9 +973,9 @@ def test_chord_with_grace_note_on_written_note_to_lilypond():
     assert "a'" in ly.split('<')[0]
     assert '<' in ly and '>' in ly
 
-    ly_rel, ref_midi = chord.to_relative_lilypond(60)
+    ly_rel, ref_pitch = chord.to_relative_lilypond((0, 4))
     assert ly_rel.startswith(r'\grace')
-    assert ref_midi == written._midi_pitch()
+    assert ref_pitch == written._diatonic_ref()
 
 
 def test_note_with_accent():

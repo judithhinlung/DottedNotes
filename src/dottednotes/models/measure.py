@@ -354,7 +354,7 @@ class Measure:
                 total += _item_ticks(item)
         return total
 
-    def to_lilypond(self, prev_midi: int = 60, key_signature_mode: str = "major") -> tuple[str, int]:
+    def to_lilypond(self, prev_pitch: tuple[int, int] = (0, 4), key_signature_mode: str = "major") -> tuple[str, tuple[int, int]]:
         from .key_signature import KeySignature
         key_sig = KeySignature(
             dots=frozenset(),
@@ -366,10 +366,10 @@ class Measure:
         parts: list[str] = []
         for marking in self.text_markings:
             parts.append(marking.to_lilypond())
-        cur_midi = prev_midi
+        cur_pitch = prev_pitch
         for item in self.notes:
             if hasattr(item, 'to_relative_lilypond'):
-                s, cur_midi = item.to_relative_lilypond(cur_midi, key_signature=key_sig)
+                s, cur_pitch = item.to_relative_lilypond(cur_pitch, key_signature=key_sig)
             else:
                 s = item.to_lilypond(key_signature=key_sig)
             parts.append(s)
@@ -402,7 +402,7 @@ class Measure:
         # here) -- see its `_group_voltas`/volta-rendering code for the
         # real implementation, including the \relative pitch-chaining
         # verified against the real lilypond binary.
-        return result, cur_midi
+        return result, cur_pitch
 
     def to_braille(
         self,

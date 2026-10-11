@@ -66,9 +66,9 @@ def test_alternating_tremolo_to_relative_lilypond():
     n1 = _note('C', 4, 2)
     n2 = _note('D', 4, 2)
     alt = AlternatingTremolo(items=[n1, n2], subdivision=16)
-    ly, midi = alt.to_relative_lilypond(60)
+    ly, new_pitch = alt.to_relative_lilypond((0, 4))
     assert ly == r'\repeat tremolo 4 { c16 d16 }'
-    assert midi == 62
+    assert new_pitch == (1, 4)  # letter D, octave 4
 
 
 # --- Parser: repeated-note tremolo, single sign ---
@@ -173,7 +173,7 @@ def test_parse_alternating_tremolo_notes():
     assert alt.subdivision == 16
     assert [n.note_name for n in alt.items] == ['C', 'D']
     assert all(n.duration.value == 2 for n in alt.items)
-    ly, _ = alt.to_relative_lilypond(60)
+    ly, _ = alt.to_relative_lilypond((0, 4))
     assert ly == r'\repeat tremolo 4 { c16 d16 }'
 
 
@@ -185,7 +185,7 @@ def test_parse_alternating_tremolo_chords():
     alt = notes[0]
     assert isinstance(alt, AlternatingTremolo)
     assert all(isinstance(item, Chord) for item in alt.items)
-    ly, _ = alt.to_relative_lilypond(60)
+    ly, _ = alt.to_relative_lilypond((0, 4))
     assert ly == r'\repeat tremolo 2 { <c a>16 <d b>16 }'
 
 

@@ -139,32 +139,32 @@ class Chord:
         extra = _chord_extras(written)
         return f"{grace_str}<{' '.join(parts)}>{dur}{tremolo_str}{extra}"
 
-    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
-        """Return (lilypond_str, new_prev_midi) for use inside a \\relative block.
+    def to_relative_lilypond(self, prev_pitch: tuple[int, int], key_signature: Optional[KeySignature] = None) -> tuple[str, tuple[int, int]]:
+        """Return (lilypond_str, new_prev_pitch) for use inside a \\relative block.
 
-        The first note is relative to prev_midi.  Each subsequent note within
+        The first note is relative to prev_pitch.  Each subsequent note within
         the chord is relative to the preceding chord note.  After the chord,
-        prev_midi advances to the first note's MIDI pitch (LilyPond rule).
+        prev_pitch advances to the first note's own pitch (LilyPond rule).
         """
         written = self.notes[0]
 
         # A grace note attached to the written note (BANA interval-shorthand
         # chords can carry one, e.g. Children's Piece mm. 10/11/14/15) renders
-        # before the chord, relative to prev_midi -- same chaining as
+        # before the chord, relative to prev_pitch -- same chaining as
         # Note.to_relative_lilypond()'s own grace-note handling.
         grace_str = ''
         if written.grace_note:
             grace_parts = []
             for gn in written.grace_note.notes:
-                note_str, prev_midi = gn.to_relative_lilypond(prev_midi, key_signature=key_signature)
+                note_str, prev_pitch = gn.to_relative_lilypond(prev_pitch, key_signature=key_signature)
                 grace_parts.append(note_str)
             prefix = r'\appoggiatura' if written.grace_note.long_appoggiatura else r'\grace'
             grace_str = f'{prefix} {{ {" ".join(grace_parts)} }} '
 
         parts: list[str] = []
-        cur_midi = prev_midi
+        cur_pitch = prev_pitch
         for note in self.notes:
-            pitch_str, cur_midi = note._relative_pitch_str(cur_midi, key_signature=key_signature)
+            pitch_str, cur_pitch = note._relative_pitch_str(cur_pitch, key_signature=key_signature)
             parts.append(pitch_str)
 
         dur = self.duration.to_lilypond()
@@ -172,8 +172,8 @@ class Chord:
         extra = _chord_extras(written)
 
         # After the chord, reference advances to the first note (LilyPond rule).
-        ref_midi = written._midi_pitch(key_signature=key_signature)
-        return f"{grace_str}<{' '.join(parts)}>{dur}{tremolo_str}{extra}", ref_midi
+        ref_pitch = written._diatonic_ref()
+        return f"{grace_str}<{' '.join(parts)}>{dur}{tremolo_str}{extra}", ref_pitch
 
 
 def NOTE_PITCH_ONLY(note: Note, key_signature: Optional[KeySignature] = None) -> str:

@@ -132,9 +132,9 @@ class OrchestraScore(Score):
                 drum_content = staff.to_lilypond_drummode(measure_numbers=measure_numbers)
                 music_block = [r"\drummode {", drum_content, '}']
             else:
-                anchor, start_midi = staff.relative_anchor()
+                anchor, start_pitch = staff.relative_anchor()
                 staff_content = staff.to_lilypond(
-                    start_midi=start_midi, include_clef=False, measure_numbers=measure_numbers
+                    start_pitch=start_pitch, include_clef=False, measure_numbers=measure_numbers
                 )
                 music_block = [f"\\relative {anchor} {{", staff_content, '}']
             wrapped = self._wrap_transpose(staff, music_block, '', concert_pitch)

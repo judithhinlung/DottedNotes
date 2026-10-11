@@ -604,7 +604,7 @@ def test_triplet_to_lilypond_uses_tuplet_syntax():
         notes = _parse('⠐⠆⠙⠑⠋')
     tup = notes[0]
     assert isinstance(tup, Tuplet)
-    ly, _ = tup.to_relative_lilypond(60)
+    ly, _ = tup.to_relative_lilypond((0, 4))
     assert ly == r'\tuplet 3/2 { c8 d8 e8 }'
 
 
@@ -2306,7 +2306,7 @@ def test_parser_down_bow_renders_on_chord():
     from dottednotes.models import Chord
     items = _parse_chords('⠣⠃⠐⠹⠬')
     assert isinstance(items[0], Chord)
-    ly = items[0].to_relative_lilypond(60)[0]
+    ly = items[0].to_relative_lilypond((0, 4))[0]
     assert r'\downbow' in ly
 
 
@@ -3945,7 +3945,7 @@ def test_chord_lilypond_format():
     # ⠐⠹⠬ = C4 quarter + 3rd below (A3) in C major
     items = _parse_chords('⠐⠹⠬')
     chord = items[0]
-    ly = chord.to_relative_lilypond(60)[0]
+    ly = chord.to_relative_lilypond((0, 4))[0]
     # Outer structure: angle brackets wrap both pitch names
     assert ly.startswith('<')
     assert '>4' in ly
@@ -4054,8 +4054,8 @@ def test_parser_chord_tie_attaches_to_first_chord_only():
 
 def test_parser_chord_tie_renders_tilde_in_lilypond():
     items = _parse_chords('⠐⠹⠬' + _CHORD_TIE + '⠐⠹⠬')
-    ly0 = items[0].to_relative_lilypond(60)[0]
-    ly1 = items[1].to_relative_lilypond(60)[0]
+    ly0 = items[0].to_relative_lilypond((0, 4))[0]
+    ly1 = items[1].to_relative_lilypond((0, 4))[0]
     assert ly0.count('~') == 1
     assert ly0.index('~') > ly0.index('>')  # placed after the chord's closing bracket
     assert '~' not in ly1
@@ -4371,26 +4371,25 @@ def test_part_measure_renders_lilypond():
 
 def test_in_accord_to_relative_lilypond_structure():
     ia = _parse_in_accord(_FULL_ACCORD)[0]
-    ly, _ = ia.to_relative_lilypond(60)
+    ly, _ = ia.to_relative_lilypond((0, 4))
     assert ly.startswith('<<')
     assert ly.endswith('>>')
     assert ly.count('\\\\') == 1  # exactly one separator for two voices
 
 
-def test_in_accord_to_relative_lilypond_prev_midi_advances_through_last_voice():
+def test_in_accord_to_relative_lilypond_prev_pitch_advances_through_last_voice():
     # LilyPond's \relative pitch tracking treats '<<', '\\', and '>>' as
     # complete no-ops -- a purely sequential/textual chain through the
     # token stream (verified against real `lilypond`'s `\displayLilyMusic`
     # output; see test_lilypond_parser.py's in-accord tests for the
-    # disambiguating cases). So prev_midi must advance through voice 1
-    # (C4 D4 E4 F4, ending at F4=65) and then through voice 2, which
-    # chains from voice 1's F4 rather than resetting to the original
-    # prev_midi=60: G4=67, A4=69, B4=71, C5=72.
+    # disambiguating cases). So prev_pitch must advance through voice 1
+    # (C4 D4 E4 F4, ending at F4) and then through voice 2, which chains
+    # from voice 1's F4 rather than resetting to the original prev_pitch
+    # (letter C, octave 4): G4, A4, B4, C5.
     items = _parse_in_accord(_FULL_ACCORD)
     ia = items[0]
-    _, new_midi = ia.to_relative_lilypond(60)
-    # C5 = MIDI 72
-    assert new_midi == 72
+    _, new_pitch = ia.to_relative_lilypond((0, 4))
+    assert new_pitch == (0, 5)  # letter C, octave 5
 
 
 def test_in_accord_renders_inside_measure_to_lilypond():

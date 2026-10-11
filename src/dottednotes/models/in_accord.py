@@ -84,7 +84,7 @@ class InAccord:
             part_strs.append(_render_note_list_to_braille(part, curr_prev, curr_measure_start, time_signature, key_signature, compression_level))
         return sep.join(part_strs)
 
-    def to_relative_lilypond(self, prev_midi: int, key_signature: Optional[KeySignature] = None) -> tuple[str, int]:
+    def to_relative_lilypond(self, prev_pitch: tuple[int, int], key_signature: Optional[KeySignature] = None) -> tuple[str, tuple[int, int]]:
         """Render as LilyPond simultaneous voices.
 
         LilyPond's \\relative pitch tracking treats '<<', '\\\\', and '>>' as
@@ -92,23 +92,23 @@ class InAccord:
         token stream, blind to the << \\\\ >> structure (verified against the
         real `lilypond` binary's `\\displayLilyMusic` output). So voice 2's
         first note continues the reference from voice 1's LAST note (not from
-        `prev_midi`, the pitch before '<<'), voice 3 continues from voice 2's
+        `prev_pitch`, the pitch before '<<'), voice 3 continues from voice 2's
         last note, and whatever follows '>>' continues from the LAST voice's
         last note, not `parts[0]`'s.
 
-        Returns (lilypond_str, new_prev_midi).
+        Returns (lilypond_str, new_prev_pitch).
         """
         voice_strs: list[str] = []
-        cur_midi = prev_midi
+        cur_pitch = prev_pitch
 
         for part in self.parts:
             note_strs: list[str] = []
             for item in part:
                 if hasattr(item, 'to_relative_lilypond'):
-                    s, cur_midi = item.to_relative_lilypond(cur_midi, key_signature=key_signature)
+                    s, cur_pitch = item.to_relative_lilypond(cur_pitch, key_signature=key_signature)
                 else:
                     s = item.to_lilypond(key_signature=key_signature)
                 note_strs.append(s)
             voice_strs.append('{ ' + ' '.join(note_strs) + ' }')
 
-        return '<< ' + ' \\\\ '.join(voice_strs) + ' >>', cur_midi
+        return '<< ' + ' \\\\ '.join(voice_strs) + ' >>', cur_pitch

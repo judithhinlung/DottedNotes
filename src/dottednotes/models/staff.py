@@ -148,15 +148,19 @@ class Staff:
 
         return sig_str + "".join(measure_strs)
 
-    def relative_anchor(self) -> tuple[str, int]:
-        """Return (anchor_pitch, start_midi) for this staff's \\relative block.
+    def relative_anchor(self) -> tuple[str, tuple[int, int]]:
+        """Return (anchor_pitch, start_pitch) for this staff's \\relative block.
 
         Chosen from the staff's first pitched note so that note needs no
         octave marks at all -- the LilyPond idiom hand-engravers use (e.g. a
         bass-register staff opens with `\\relative c`, not `\\relative c'`;
         see tests/fixtures/Children_s_Piece.ly and fingering_melody.ly, whose
         lower/left-hand staves both open on plain `c`). Falls back to middle
-        C (`c'`, MIDI 60) when the staff has no pitched notes.
+        C (`c'`, octave 4) when the staff has no pitched notes.
+
+        `start_pitch` is a (letter_step, octave) pair -- the anchor is always
+        the letter C (step 0) by construction, since the anchor pitch above
+        is always some number of octave marks on plain `c`.
         """
         octave = self._first_note_octave()
         if octave is None:
@@ -168,12 +172,12 @@ class Staff:
             marks = "'" * (octave - base)
         else:
             marks = ''
-        start_midi = 12 * (octave + 1)  # MIDI pitch of C in that octave (C4 = 60)
-        return f'c{marks}', start_midi
+        start_pitch = (0, octave)  # letter C, this staff's anchor octave
+        return f'c{marks}', start_pitch
 
     def to_lilypond(
         self,
-        start_midi: int = 60,
+        start_pitch: tuple[int, int] = (0, 4),
         include_clef: bool = True,
         measure_numbers: bool = False,
     ) -> str:
@@ -258,7 +262,7 @@ class Staff:
         from .note import Rest
         from .key_signature import KeySignature as _KeySignature
 
-        prev_midi = start_midi
+        prev_pitch = start_pitch
         measure_lines: list[str] = []
 
         volta_groups_by_start = {g['shared_start']: g for g in self._find_volta_groups()}
@@ -277,8 +281,8 @@ class Staff:
         while i < len(self.measures):
             if i in volta_groups_by_start:
                 group = volta_groups_by_start[i]
-                group_lines, prev_midi, last_key = self._render_volta_group(
-                    group, prev_midi, measure_numbers, last_key
+                group_lines, prev_pitch, last_key = self._render_volta_group(
+                    group, prev_pitch, measure_numbers, last_key
                 )
                 measure_lines.extend(group_lines)
                 i = group['group_end']
@@ -351,7 +355,7 @@ class Staff:
                 i = j
             else:
                 m = self.measures[i]
-                ly_str, prev_midi = m.to_lilypond(prev_midi=prev_midi, key_signature_mode=m.key_signature_mode)
+                ly_str, prev_pitch = m.to_lilypond(prev_pitch=prev_pitch, key_signature_mode=m.key_signature_mode)
                 if measure_numbers:
                     measure_lines.append(f'    % {m.number}')
                 measure_lines.append('    ' + ly_str)
@@ -470,9 +474,9 @@ class Staff:
         return groups
 
     def _render_volta_group(
-        self, group: dict, prev_midi: int, measure_numbers: bool,
+        self, group: dict, prev_pitch: tuple[int, int], measure_numbers: bool,
         last_key: tuple[int, str] = (0, "major"),
-    ) -> tuple[list[str], int, tuple[int, str]]:
+    ) -> tuple[list[str], tuple[int, int], tuple[int, str]]:
         """Render one `_find_volta_groups()` entry as
         `\\repeat volta N { ... } \\alternative { \\volta k { ... } ... }`
         (LilyPond Notation Reference Sec. 4.1.3).
@@ -482,7 +486,7 @@ class Staff:
         `lilypond` 2.24.4 binary's `\\displayLilyMusic` output, the same way
         this project verified `<< \\\\ >>`'s sequential (not per-voice)
         chaining (see CLAUDE.md's Known Issues and
-        `InAccord.to_relative_lilypond()`). So `prev_midi` threads straight
+        `InAccord.to_relative_lilypond()`). So `prev_pitch` threads straight
         through the shared section into the first `\\volta` branch, from
         that branch's last note into the next branch, and so on -- the
         value returned here is the LAST branch's ending pitch, matching
@@ -494,14 +498,14 @@ class Staff:
         this specific construct (a `\\key` inside `\\repeat volta`/
         `\\volta` is preserved literally in the linear token stream, with
         no scoping/reset at any of those block boundaries), so `last_key`
-        threads through exactly like `cur_midi`: sequentially through the
+        threads through exactly like `cur_pitch`: sequentially through the
         shared section, then branch by branch, returning the LAST branch's
         ending key.
         """
         from .key_signature import KeySignature as _KeySignature
 
         lines: list[str] = []
-        cur_midi = prev_midi
+        cur_pitch = prev_pitch
         cur_key = last_key
 
         def _emit_key_if_changed(m: Measure, indent: str) -> None:
@@ -520,7 +524,7 @@ class Staff:
         for idx in range(group['shared_start'], group['shared_end']):
             m = self.measures[idx]
             _emit_key_if_changed(m, '        ')
-            ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=m.key_signature_mode)
+            ly_str, cur_pitch = m.to_lilypond(prev_pitch=cur_pitch, key_signature_mode=m.key_signature_mode)
             if measure_numbers:
                 lines.append(f'        % {m.number}')
             lines.append('        ' + ly_str)
@@ -533,14 +537,14 @@ class Staff:
             for idx in range(branch_start, branch_end):
                 m = self.measures[idx]
                 _emit_key_if_changed(m, '            ')
-                ly_str, cur_midi = m.to_lilypond(prev_midi=cur_midi, key_signature_mode=m.key_signature_mode)
+                ly_str, cur_pitch = m.to_lilypond(prev_pitch=cur_pitch, key_signature_mode=m.key_signature_mode)
                 if measure_numbers:
                     lines.append(f'            % {m.number}')
                 lines.append('            ' + ly_str)
             lines.append('        }')
         lines.append('    }')
 
-        return lines, cur_midi, cur_key
+        return lines, cur_pitch, cur_key
 
     def resolve_clef(self) -> str | None:
         """Public accessor for this staff's resolved \\clef directive (S5b-8),
