@@ -62,6 +62,7 @@ class OrchestraScore(Score):
         category_override: Optional[str] = None,
         format_overrides: Optional[dict] = None,
         measure_numbers: bool = False,
+        concert_pitch_source: bool = False,
     ) -> str:
         from ..renderers.lilypond_formatter import LilyPondFormatter
         formatter = LilyPondFormatter()
@@ -106,12 +107,65 @@ class OrchestraScore(Score):
         if not self.staves:
             return "\n\n".join(parts) + "\n"
 
+        variable_defs, var_names = self._build_variable_defs(concert_pitch, measure_numbers, concert_pitch_source=concert_pitch_source)
+
+        runs = self._group_by_family(self.staves)
+
+        if concert_pitch or not self._has_transposing_staff(self.staves):
+            # Either already concert pitch (one notation is correct for both
+            # engraving and playback), or no transposing instrument is
+            # present at all -- a single \score with both \layout and \midi
+            # is correct either way.
+            score_lines = self._assemble_score_lines(
+                runs, var_names, short_names, include_layout=True, include_midi=True
+            )
+            parts.append("\n".join(variable_defs))
+            parts.append("\n".join(score_lines))
+        else:
+            # Traditional full-score notation was requested: each
+            # transposing instrument in its own written key. A single
+            # \score with \midi alongside that notation would play back the
+            # untransposed noteheads literally -- wrong sounding pitch for
+            # any transposing instrument. Define a second set of music
+            # variables rendered fresh in concert pitch (name_suffix keeps
+            # them from colliding with the print variables above) and give
+            # them their own \midi-only \score, leaving the written-pitch
+            # \score as \layout-only.
+            midi_variable_defs, midi_var_names = self._build_variable_defs(
+                True, measure_numbers, name_suffix='Sounding', concert_pitch_source=concert_pitch_source
+            )
+            print_score_lines = self._assemble_score_lines(
+                runs, var_names, short_names, include_layout=True, include_midi=False
+            )
+            midi_score_lines = self._assemble_score_lines(
+                runs, midi_var_names, short_names, include_layout=False, include_midi=True
+            )
+            parts.append("\n".join(variable_defs))
+            parts.append("\n".join(print_score_lines))
+            parts.append("\n".join(midi_variable_defs))
+            parts.append("\n".join(midi_score_lines))
+
+        return "\n\n".join(parts) + "\n"
+
+    def _build_variable_defs(
+        self, concert_pitch: bool, measure_numbers: bool, name_suffix: str = '',
+        concert_pitch_source: bool = False,
+    ) -> tuple[list[str], dict[int, str]]:
+        """Return (variable_defs, var_names) for every staff: `var_names`
+        maps `id(staff)` to its LilyPond variable name, and `variable_defs`
+        is the list of `name = ...` definition lines (including the
+        `\\transpose` wrapping `concert_pitch`/`concert_pitch_source` implies
+        -- see Score._wrap_transpose()). `name_suffix` is appended to each
+        derived variable name (e.g. 'Sounding') so a concert-pitch MIDI set
+        and a written-pitch print set can coexist in the same document
+        without colliding (see to_lilypond() above).
+        """
         variable_defs: list[str] = []
         var_names: dict[int, str] = {}
         used_names: set[str] = set()
 
         for staff in self.staves:
-            base_name = _music_variable_name(staff.name)
+            base_name = _music_variable_name(staff.name) + name_suffix
             var_name = base_name
             suffix = 2
             while var_name in used_names:
@@ -137,23 +191,41 @@ class OrchestraScore(Score):
                     start_pitch=start_pitch, include_clef=False, measure_numbers=measure_numbers
                 )
                 music_block = [f"\\relative {anchor} {{", staff_content, '}']
-            wrapped = self._wrap_transpose(staff, music_block, '', concert_pitch)
+            wrapped = self._wrap_transpose(staff, music_block, '', concert_pitch, concert_pitch_source)
             variable_defs.append(f'{var_name} = ' + wrapped[0])
             variable_defs.extend(wrapped[1:])
             variable_defs.append('')
 
-        runs = self._group_by_family(self.staves)
+        return variable_defs, var_names
 
+    @staticmethod
+    def _assemble_score_lines(
+        runs: list[tuple["InstrumentFamily | None", list[Staff]]],
+        var_names: dict[int, str],
+        short_names: bool,
+        include_layout: bool,
+        include_midi: bool,
+    ) -> list[str]:
+        """Return the full `\\score {...}` block referencing `var_names`
+        (see _build_variable_defs()), with `\\layout`/`\\midi` each included
+        only if their flag is set -- used by to_lilypond() to produce either
+        one combined \\score, or a \\layout-only print \\score plus a
+        \\midi-only one built from a different (concert-pitch) variable set.
+        """
         top_level_blocks: list[list[str]] = []
         for family, run_staves in runs:
             if len(run_staves) == 1:
                 staff = run_staves[0]
-                top_level_blocks.append(self._staff_with_block(staff, var_names[id(staff)], '  ', short_names))
+                top_level_blocks.append(
+                    OrchestraScore._staff_with_block(staff, var_names[id(staff)], '  ', short_names)
+                )
             else:
                 group_context = 'PianoStaff' if family == InstrumentFamily.KEYBOARD_HARP else 'StaffGroup'
                 block_lines = [f'\\new {group_context} <<']
                 for staff in run_staves:
-                    block_lines.extend(self._staff_with_block(staff, var_names[id(staff)], '    ', short_names))
+                    block_lines.extend(
+                        OrchestraScore._staff_with_block(staff, var_names[id(staff)], '    ', short_names)
+                    )
                 block_lines.append('>>')
                 top_level_blocks.append(block_lines)
 
@@ -162,14 +234,12 @@ class OrchestraScore(Score):
             score_lines.extend(block)
         score_lines.append('  >>')
         score_lines.append('')
-        score_lines.append('  \\layout { }')
-        score_lines.append('  \\midi { }')
+        if include_layout:
+            score_lines.append('  \\layout { }')
+        if include_midi:
+            score_lines.append('  \\midi { }')
         score_lines.append('}')
-
-        parts.append("\n".join(variable_defs))
-        parts.append("\n".join(score_lines))
-
-        return "\n\n".join(parts) + "\n"
+        return score_lines
 
     @staticmethod
     def _staff_with_block(staff: Staff, var_name: str, indent: str, short_names: bool = True) -> list[str]:

@@ -63,6 +63,14 @@
                             </select>
                         </div>
 
+                        <div class="form-group checkbox-group" id="group-concert-pitch-source">
+                            <label for="concert_pitch_source" class="checkbox-label">
+                                <input type="checkbox" id="concert_pitch_source" name="concert_pitch_source" value="true">
+                                <span>Input Is Already Concert Pitch</span>
+                            </label>
+                            <p class="help-text">By default, a transposing instrument's note cells are assumed to encode the performer's own written (transposed) pitch, per BANA convention — the full score is shown in concert pitch by transposing that up, and an individual part is shown in written pitch as-is. Check this if you instead wrote every instrument, including transposing ones, directly in concert pitch: the full score then needs no transposing at all, and an individual part instead derives that instrument's written/transposed notation from your concert-pitch input automatically. Only affects LilyPond output.</p>
+                        </div>
+
                         <div class="form-group" id="group-compression">
                             <label for="compression">Braille Compression</label>
                             <select id="compression" name="compression">

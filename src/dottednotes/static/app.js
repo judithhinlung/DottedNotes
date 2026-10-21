@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // UI Option Groups
     const groupCategory = document.getElementById('group-category');
+    const groupConcertPitchSource = document.getElementById('group-concert-pitch-source');
     const groupCompression = document.getElementById('group-compression');
     const groupPageNumbers = document.getElementById('group-page-numbers');
     const groupMeasureNumbering = document.getElementById('group-measure-numbering');
@@ -294,6 +295,14 @@ document.addEventListener('DOMContentLoaded', () => {
             groupCategory.classList.remove('hidden');
         } else {
             groupCategory.classList.add('hidden');
+        }
+
+        // Show/hide concert-pitch-source: only affects to_lilypond()'s
+        // \transpose direction, so it's meaningless for Braille/MusicXML output.
+        if (target === 'lilypond') {
+            groupConcertPitchSource.classList.remove('hidden');
+        } else {
+            groupConcertPitchSource.classList.add('hidden');
         }
 
         // Show/hide compression, page-number pagination, measure-numbering

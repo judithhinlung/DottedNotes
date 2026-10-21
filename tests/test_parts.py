@@ -292,8 +292,15 @@ def test_cli_part_of_transposing_instrument_uses_written_pitch(monkeypatch, tmp_
     horn_out = tmp_path / "horn_part.ly"
     _run_main(monkeypatch, ["convert", str(xml_path), str(horn_out), "--part", "Horn in F"])
     horn_content = horn_out.read_text(encoding="utf-8")
-    assert r"\transpose" not in horn_content
-    assert "c1" in horn_content.lower()  # written pitch, untouched
+    # The engraved (\layout) \score must stay in written pitch, but a second
+    # \midi-only \score is now added in concert pitch so playback sounds
+    # right -- splitting \transpose out of the printed notation doesn't mean
+    # dropping it everywhere (see Score.to_lilypond's concert_pitch docstring).
+    assert horn_content.count(r'\score {') == 2
+    print_block, midi_block = horn_content.split(r'\score {')[1:]
+    assert r"\transpose" not in print_block
+    assert "c1" in print_block.lower()  # written pitch, untouched
+    assert r"\transpose" in midi_block
 
 
 # Web API Tests
@@ -414,5 +421,11 @@ def test_web_part_of_transposing_instrument_uses_written_pitch(tmp_path):
 
     horn_response = client.get(f"/api/jobs/{job_id}/parts/1/ly")
     assert horn_response.status_code == 200
-    assert r"\transpose" not in horn_response.text
-    assert "c1" in horn_response.text.lower()  # written pitch, untouched
+    # See test_cli_part_of_transposing_instrument_uses_written_pitch: the
+    # \layout \score stays written-pitch, but a \midi-only \score in concert
+    # pitch is now added alongside it so playback sounds right.
+    assert horn_response.text.count(r'\score {') == 2
+    print_block, midi_block = horn_response.text.split(r'\score {')[1:]
+    assert r"\transpose" not in print_block
+    assert "c1" in print_block.lower()  # written pitch, untouched
+    assert r"\transpose" in midi_block

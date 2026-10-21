@@ -221,6 +221,7 @@ def _render_output(
     include_clef_sign: bool,
     lead_voice: Optional[str] = None,
     include_accompaniment_outline: bool = True,
+    concert_pitch_source: bool = False,
 ) -> dict:
     """Render `score` to `target_format` and (for LilyPond) attempt PDF/MIDI
     compilation, returning {"files", "compile_success", "compile_error"}.
@@ -236,7 +237,8 @@ def _render_output(
         rendered = score.to_lilypond(
             category_override=category,
             format_overrides=parsed_format_overrides,
-            measure_numbers=measure_numbers
+            measure_numbers=measure_numbers,
+            concert_pitch_source=concert_pitch_source,
         )
         output_ly = job_dir / f"{input_path.stem}.ly"
         output_ly.write_text(rendered, encoding="utf-8")
@@ -375,6 +377,7 @@ async def convert_file(
     include_clef_sign: bool = Form(False),
     lead_voice: Optional[str] = Form(None),
     no_accompaniment_outline: bool = Form(False),
+    concert_pitch_source: bool = Form(False),
 ):
     contents = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(contents) > MAX_UPLOAD_SIZE:
@@ -418,6 +421,7 @@ async def convert_file(
         "include_clef_sign": include_clef_sign,
         "lead_voice": lead_voice,
         "no_accompaniment_outline": no_accompaniment_outline,
+        "concert_pitch_source": concert_pitch_source,
     }
     with open(job_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(meta, f)
@@ -534,6 +538,7 @@ async def convert_file(
             full_measure_repeat, min_repeated_measures, include_clef_sign,
             lead_voice=lead_voice,
             include_accompaniment_outline=not no_accompaniment_outline,
+            concert_pitch_source=concert_pitch_source,
         )
 
         return {
@@ -610,6 +615,7 @@ async def set_instrument(job_id: str, instrument: str = Form(...)):
             meta.get("min_repeated_measures", 2), meta.get("include_clef_sign", False),
             lead_voice=meta.get("lead_voice"),
             include_accompaniment_outline=not meta.get("no_accompaniment_outline", False),
+            concert_pitch_source=meta.get("concert_pitch_source", False),
         )
         return {
             "job_id": job_id,
@@ -677,6 +683,7 @@ async def set_key_mode(job_id: str, mode: str = Form(...)):
             meta.get("min_repeated_measures", 2), meta.get("include_clef_sign", False),
             lead_voice=meta.get("lead_voice"),
             include_accompaniment_outline=not meta.get("no_accompaniment_outline", False),
+            concert_pitch_source=meta.get("concert_pitch_source", False),
         )
         return {
             "job_id": job_id,
@@ -804,6 +811,7 @@ async def set_part_instrument(job_id: str, part_idx: int, instrument: str = Form
             format_overrides=parsed_format_overrides,
             measure_numbers=meta.get("measure_numbers", False),
             concert_pitch=False,
+            concert_pitch_source=meta.get("concert_pitch_source", False),
         ),
         encoding="utf-8",
     )
@@ -897,6 +905,7 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
                 # (transposed) pitch, not concert pitch -- see
                 # Score.to_lilypond's concert_pitch docstring.
                 concert_pitch=False,
+                concert_pitch_source=meta.get("concert_pitch_source", False),
             )
             output_path.write_text(rendered, encoding="utf-8")
             
@@ -911,6 +920,7 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
                     format_overrides=parsed_format_overrides,
                     measure_numbers=meta.get("measure_numbers", False),
                     concert_pitch=False,
+                    concert_pitch_source=meta.get("concert_pitch_source", False),
                 )
                 ly_path.write_text(rendered, encoding="utf-8")
             
@@ -930,6 +940,7 @@ def get_part_file(job_id: str, part_idx: int, file_type: str):
                     format_overrides=parsed_format_overrides,
                     measure_numbers=meta.get("measure_numbers", False),
                     concert_pitch=False,
+                    concert_pitch_source=meta.get("concert_pitch_source", False),
                 )
                 ly_path.write_text(rendered, encoding="utf-8")
             

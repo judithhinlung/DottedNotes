@@ -166,29 +166,68 @@ class Score:
         return [f'{indent}\\set Staff.midiInstrument = "{midi_name}"']
 
     @staticmethod
+    def _has_transposing_staff(staves: list[Staff]) -> bool:
+        """True if any staff in `staves` is a recognized transposing
+        instrument whose written pitch actually differs from concert pitch
+        (a named non-transposing key, e.g. "Trumpet in C", does not count).
+        Drives the print/MIDI \\score split in to_lilypond() below: splitting
+        is only needed when a written-pitch rendering and a concert-pitch
+        rendering would actually produce different noteheads.
+        """
+        for staff in staves:
+            transposition = staff.resolved_transposition or get_transposition(staff.name)
+            if transposition is not None and transposition[0] != transposition[1]:
+                return True
+        return False
+
+    @staticmethod
     def _wrap_transpose(
-        staff: Staff, relative_block: list[str], indent: str, concert_pitch: bool
+        staff: Staff, relative_block: list[str], indent: str, concert_pitch: bool,
+        concert_pitch_source: bool = False,
     ) -> list[str]:
         """Wrap a \\relative-mode block in \\transpose (S5b-6) if `staff.name`
-        is a recognized transposing-instrument key and concert_pitch is True.
-        Returns relative_block unchanged otherwise (unknown/non-transposing
-        instrument, or concert_pitch=False for written-pitch output).
+        is a recognized transposing-instrument key and the requested output
+        pitch (`concert_pitch`) differs from how `staff`'s music is actually
+        stored. Returns relative_block unchanged for an unknown/non-
+        transposing instrument, or whenever the stored pitch already matches
+        what was asked for.
+
+        `concert_pitch_source` says which pitch `relative_block` is stored
+        in: False (default) is BANA's convention -- braille note cells
+        encode the performer's *written* pitch (CLAUDE.md Key Design
+        Decision #4) -- so concert_pitch=True wraps written->concert to
+        derive the sounding pitch, and concert_pitch=False is a no-op
+        (already written). concert_pitch_source=True is for a score
+        authored directly in concert pitch for every instrument, including
+        transposing ones (not the BANA performer-part convention, but a
+        valid composing workflow): concert_pitch=True is then the no-op
+        (already concert), and concert_pitch=False instead wraps
+        concert->written -- the reverse direction -- to *derive* the
+        instrument's written/transposed part for print.
 
         `staff.resolved_transposition` (S10b-2), when set by the MusicXML
         importer, takes priority over the name-string lookup -- it's derived
         from the source's own structured transposition data and isn't
         limited to `_TRANSPOSITIONS`' hardcoded instrument list.
         """
-        if not concert_pitch:
-            return relative_block
         transposition = staff.resolved_transposition or get_transposition(staff.name)
         if transposition is None:
             return relative_block
         written, concert = transposition
         if written == concert:
             return relative_block
+
+        if concert_pitch_source:
+            if concert_pitch:
+                return relative_block
+            from_pitch, to_pitch = concert, written
+        else:
+            if not concert_pitch:
+                return relative_block
+            from_pitch, to_pitch = written, concert
+
         return [
-            f"{indent}\\transpose {written} {concert} {{",
+            f"{indent}\\transpose {from_pitch} {to_pitch} {{",
             *(f"  {line}" for line in relative_block),
             f"{indent}}}",
         ]
@@ -200,6 +239,7 @@ class Score:
         category_override: Optional[str] = None,
         format_overrides: Optional[dict] = None,
         measure_numbers: bool = False,
+        concert_pitch_source: bool = False,
     ) -> str:
         """Return a complete LilyPond document string for this score.
 
@@ -215,6 +255,28 @@ class Score:
         parsed *written* pitch into concert (sounding) pitch. Pass
         concert_pitch=False to emit written pitch as-is (e.g. for
         generating an individual player's part).
+
+        That default assumes the input itself is in written (performer)
+        pitch, per BANA's own convention. Pass concert_pitch_source=True if
+        the input was instead authored in concert pitch for every
+        instrument, including transposing ones (not BANA's convention, but a
+        valid composing workflow) -- this inverts _wrap_transpose()'s
+        \\transpose direction so concert_pitch=True becomes the no-op (input
+        already matches) and concert_pitch=False instead *derives* each
+        transposing instrument's written/transposed part from the
+        concert-pitch input, for print.
+
+        When concert_pitch=False and at least one staff is a real
+        transposing instrument (_has_transposing_staff()), the written-pitch
+        notation and its correct sounding pitch are different -- a single
+        \\score with both \\layout and \\midi would play back the wrong
+        pitch, since \\midi has no notion of instrument transposition and
+        just plays the noteheads it's given. In that case this emits two
+        \\score blocks instead: one with \\layout only (today's written-pitch
+        body, for engraving/an individual part), and one with \\midi only
+        built fresh in concert pitch (so playback always sounds right).
+        concert_pitch=True keeps a single combined \\score, since the one
+        notation is already correct for both.
 
         measure_numbers=True (S8-6) threads through to every staff's
         Staff.to_lilypond(), prefixing each measure's line with a '% N'
@@ -263,6 +325,62 @@ class Score:
         if not self.staves:
             return "\n\n".join(parts) + "\n"
 
+        body = self._build_body(concert_pitch, measure_numbers, concert_pitch_source)
+
+        if concert_pitch or not self._has_transposing_staff(self.staves):
+            # Either already concert pitch (so the one notation is correct
+            # for both engraving and playback), or no transposing instrument
+            # is present at all (so written pitch *is* concert pitch) --
+            # either way a single combined \score serves both \layout and
+            # \midi correctly.
+            score_lines = [
+                r'\score {',
+                *self._indent_lines(body),
+                '  \\layout { }',
+                '  \\midi { }',
+                '}',
+            ]
+            parts.append("\n".join(score_lines))
+        else:
+            # Written pitch was requested (e.g. an individual performer's
+            # part, or a traditional full score with each transposing
+            # instrument notated in its own key) and at least one staff
+            # really does sound different from what's written. A single
+            # \score with both \layout and \midi would make \midi play back
+            # the untransposed noteheads literally -- audibly wrong pitch
+            # for any transposing instrument. Split into a print-only score
+            # (today's written-pitch body, unchanged) and a MIDI-only score
+            # built fresh in concert pitch, so playback always sounds right
+            # regardless of what's engraved.
+            midi_body = self._build_body(True, measure_numbers, concert_pitch_source)
+            print_score_lines = [
+                r'\score {',
+                *self._indent_lines(body),
+                '  \\layout { }',
+                '}',
+            ]
+            midi_score_lines = [
+                r'\score {',
+                *self._indent_lines(midi_body),
+                '  \\midi { }',
+                '}',
+            ]
+            parts.append("\n".join(print_score_lines))
+            parts.append("\n".join(midi_score_lines))
+
+        return "\n\n".join(parts) + "\n"
+
+    def _build_body(
+        self, concert_pitch: bool, measure_numbers: bool, concert_pitch_source: bool = False
+    ) -> list[str]:
+        """Return the LilyPond lines for this score's music content (the
+        part that goes inside \\score {...}, before \\layout/\\midi), with
+        `concert_pitch`/`concert_pitch_source` controlling whether and which
+        direction transposing-instrument staves are wrapped in \\transpose
+        (see _wrap_transpose()). Factored out of to_lilypond() so it can be
+        called twice -- once per pitch mode -- when a print/MIDI \\score
+        split is needed (see to_lilypond() above).
+        """
         if len(self.staves) == 1:
             staff = self.staves[0]
             anchor, start_pitch = staff.relative_anchor()
@@ -273,7 +391,7 @@ class Score:
                 # the chord-names-only and lyrics-only renderings below into
                 # one ChordNames + Voice + Lyrics stack.
                 relative_block = [f"    \\relative {anchor} {{", staff_content, '    }']
-                transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
+                transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch, concert_pitch_source)
                 voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
                 lyrics_lines = []
                 verses = staff.verses if staff.verses else [staff.lyrics]
@@ -296,7 +414,7 @@ class Score:
                 ]
             elif staff.lyrics:
                 relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
-                transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
+                transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch, concert_pitch_source)
                 voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
                 lyrics_lines = []
                 verses = staff.verses if staff.verses else [staff.lyrics]
@@ -316,7 +434,7 @@ class Score:
                 ]
             elif self.chord_names is not None:
                 relative_block = [f"  \\relative {anchor} {{", staff_content, '  }']
-                transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch)
+                transposed = self._wrap_transpose(staff, relative_block, '  ', concert_pitch, concert_pitch_source)
                 body = [
                     "<<",
                     "  " + self.chord_names.to_lilypond().replace('\n', '\n  '),
@@ -327,16 +445,8 @@ class Score:
                 ]
             else:
                 relative_block = [f"\\relative {anchor} {{", staff_content, '}']
-                body = self._wrap_transpose(staff, relative_block, '', concert_pitch)
-            score_lines = [
-                r'\score {',
-                *self._indent_lines(body),
-                '  \\layout { }',
-                '  \\midi { }',
-                '}',
-            ]
-            parts.append("\n".join(score_lines))
-            return "\n\n".join(parts) + "\n"
+                body = self._wrap_transpose(staff, relative_block, '', concert_pitch, concert_pitch_source)
+            return body
 
         from .instrument import InstrumentFamily
 
@@ -353,7 +463,7 @@ class Score:
                         staff.to_lilypond(start_pitch=start_pitch, measure_numbers=measure_numbers),
                         "    }",
                     ]
-                    transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch)
+                    transposed = self._wrap_transpose(staff, relative_block, '    ', concert_pitch, concert_pitch_source)
                     voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
                     lyrics_lines = []
                     verses = staff.verses if staff.verses else [staff.lyrics]
@@ -381,7 +491,7 @@ class Score:
                     block_lines = [
                         "\\new Staff {",
                         *self._midi_instrument_line(staff, '  '),
-                        *self._wrap_transpose(staff, relative_block, '  ', concert_pitch),
+                        *self._wrap_transpose(staff, relative_block, '  ', concert_pitch, concert_pitch_source),
                         "}"
                     ]
                 top_level_blocks.append(block_lines)
@@ -396,7 +506,7 @@ class Score:
                         for line in staff_ly.splitlines():
                             relative_block.append("        " + line.strip())
                         relative_block.append("      }")
-                        transposed = self._wrap_transpose(staff, relative_block, '      ', concert_pitch)
+                        transposed = self._wrap_transpose(staff, relative_block, '      ', concert_pitch, concert_pitch_source)
                         voice_name = f"vocals_{staff.name.lower().replace(' ', '_')}"
                         block_lines.append("  \\new Staff <<")
                         block_lines.append(f"    \\new Voice = \"{voice_name}\" {{")
@@ -419,7 +529,7 @@ class Score:
                         for line in staff_ly.splitlines():
                             relative_block.append("      " + line.strip())
                         relative_block.append("    }")
-                        block_lines.extend(self._wrap_transpose(staff, relative_block, '    ', concert_pitch))
+                        block_lines.extend(self._wrap_transpose(staff, relative_block, '    ', concert_pitch, concert_pitch_source))
                         block_lines.append("  }")
                 block_lines.append(">>")
                 top_level_blocks.append(block_lines)
@@ -432,15 +542,7 @@ class Score:
                 body.extend("  " + line if line.strip() else line for line in block)
             body.append(">>")
 
-        score_lines = [
-            r'\score {',
-            *self._indent_lines(body),
-            '  \\layout { }',
-            '  \\midi { }',
-            '}',
-        ]
-        parts.append("\n".join(score_lines))
-        return "\n\n".join(parts) + "\n"
+        return body
 
     def reconstruct_omitted_rests(self) -> None:
         """Fill in any missing measures across all staves with full-measure rests,

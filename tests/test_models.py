@@ -1946,11 +1946,14 @@ def test_score_staff_grouping():
 def test_get_transposition():
     from dottednotes.models.transposition import get_transposition
 
-    # Horn in F sounds a perfect 5th lower than written.
+    # Horn in F sounds a perfect 5th lower than written -- the one key
+    # where the nearest-interval rule below would pick "up" instead, so
+    # this also pins the horn-family forced-down override.
     assert get_transposition("Horn in F") == ("c'", 'f')
+    assert get_transposition("English Horn in F") == ("c'", 'f')
     # Clarinet in B-flat sounds a major 2nd lower than written.
     assert get_transposition("Clarinet in B-flat") == ("c'", 'bes')
-    # Alternate flat spellings normalize to the same entry.
+    # Alternate flat spellings resolve to the same pitch class.
     assert get_transposition("Clarinet in Bb") == ("c'", 'bes')
     # Clarinet in A sounds a minor 3rd lower than written.
     assert get_transposition("Clarinet in A") == ("c'", 'a')
@@ -1959,6 +1962,41 @@ def test_get_transposition():
     # Non-transposing / unrecognized instrument names.
     assert get_transposition("Violin I") is None
     assert get_transposition("Flute") is None
+
+
+def test_get_transposition_computes_new_keys_generically():
+    # S5b-6 follow-up: get_transposition() derives the interval from the
+    # key's pitch class instead of a hardcoded per-instrument table, so a
+    # key that was never in that old table (D) works with no new entry.
+    from dottednotes.models.transposition import get_transposition
+
+    # Trumpet in D sounds a major 2nd *higher* than written -- the nearest-
+    # interval rule picks "up" here (2 semitones) over "down" (10
+    # semitones), unlike the Bb/A cases above which pick "down".
+    assert get_transposition("Trumpet in D") == ("c'", "d'")
+    assert get_transposition("Clarinet in D") == ("c'", "d'")
+    # E-flat clarinet (a real, if uncommon, instrument): minor 3rd up.
+    assert get_transposition("Clarinet in E-flat") == ("c'", "ees'")
+    # Sharp-spelled keys parse too, not just flats.
+    assert get_transposition("Clarinet in F-sharp") is not None
+
+
+def test_get_transposition_alto_saxophone_forced_down():
+    # Alto saxophone in E-flat sounds a major 6th *lower* than written --
+    # the same key letter an E-flat clarinet uses for a minor 3rd *higher*
+    # (see test_get_transposition_computes_new_keys_generically). The
+    # nearest-interval rule alone would pick "up" (3 semitones) for both,
+    # since that's nearer than "down" (9 semitones) -- alto sax is a
+    # documented _FORCED_DOWN_FAMILIES exception, like horn, so it gets the
+    # farther-but-conventional 9-down option instead.
+    from dottednotes.models.transposition import get_transposition
+
+    assert get_transposition("Alto Saxophone in E-flat") == ("c'", 'ees')
+    # The abbreviated spelling resolves the same way.
+    assert get_transposition("Alto Sax in Eb") == ("c'", 'ees')
+    # Confirm it's really the farther interval, not accidentally the same
+    # answer an E-flat clarinet would get.
+    assert get_transposition("Alto Saxophone in E-flat") != get_transposition("Clarinet in E-flat")
 
 
 def test_transposition_from_interval():
@@ -1999,9 +2037,19 @@ def test_score_transposes_horn_to_concert_pitch_by_default():
     assert r"\transpose c' f {" in concert_ly
     assert "c4" in concert_ly  # written pitch is untouched; \transpose does the work
 
+    # concert_pitch=False prints written pitch (what the performer reads),
+    # but a transposing instrument's true sounding pitch differs from that
+    # -- so MIDI playback needs its own concert-pitch \score (S5b-6 follow-up)
+    # rather than reusing the written-pitch one, or it would play back a
+    # perfect 5th too high.
     written_ly = score.to_lilypond(concert_pitch=False)
-    assert r'\transpose' not in written_ly
-    assert "c4" in written_ly
+    assert written_ly.count(r'\score {') == 2
+    print_block, midi_block = written_ly.split(r'\score {')[1:]
+    assert r'\transpose' not in print_block
+    assert r'\layout { }' in print_block and r'\midi { }' not in print_block
+    assert "c4" in print_block
+    assert r"\transpose c' f {" in midi_block
+    assert r'\midi { }' in midi_block and r'\layout { }' not in midi_block
 
 
 def test_score_transposes_clarinet_in_bflat_to_concert_pitch():
@@ -2015,8 +2063,45 @@ def test_score_transposes_clarinet_in_bflat_to_concert_pitch():
     concert_ly = score.to_lilypond()
     assert r"\transpose c' bes {" in concert_ly
 
+    # See test_score_transposes_horn_to_concert_pitch_by_default's comment:
+    # written pitch prints without \transpose, but playback still needs the
+    # concert-pitch wrapping in a separate MIDI-only \score.
     written_ly = score.to_lilypond(concert_pitch=False)
-    assert r'\transpose' not in written_ly
+    assert written_ly.count(r'\score {') == 2
+    print_block, midi_block = written_ly.split(r'\score {')[1:]
+    assert r'\transpose' not in print_block
+    assert r"\transpose c' bes {" in midi_block
+
+
+def test_score_concert_pitch_source_inverts_transpose_direction():
+    # Regression test: a composer who authors everything (including
+    # transposing instruments) directly in concert pitch -- not BANA's own
+    # written-pitch-per-performer convention -- needs the opposite
+    # \transpose direction: concert_pitch=True (display concert pitch) is a
+    # no-op since the input already matches, and concert_pitch=False instead
+    # *derives* the clarinet's written/transposed part from that concert-
+    # pitch input, rather than assuming the input already is written pitch.
+    staff = Staff(name="Clarinet in B-flat")
+    m = Measure(number=1)
+    m.add_note(_make_note('C', 4, 4))
+    staff.add_measure(m)
+    score = Score()
+    score.add_staff(staff)
+
+    concert_ly = score.to_lilypond(concert_pitch=True, concert_pitch_source=True)
+    assert concert_ly.count(r'\score {') == 1
+    assert r'\transpose' not in concert_ly
+    assert "c4" in concert_ly
+
+    written_ly = score.to_lilypond(concert_pitch=False, concert_pitch_source=True)
+    assert written_ly.count(r'\score {') == 2
+    print_block, midi_block = written_ly.split(r'\score {')[1:]
+    # Reversed from the BANA-convention case above: \transpose now appears
+    # in the *print* block (deriving the written part from concert-pitch
+    # input), and the MIDI block is untouched (already concert pitch).
+    assert r"\transpose bes c' {" in print_block
+    assert r'\transpose' not in midi_block
+    assert "c4" in midi_block
 
 
 def test_score_prefers_resolved_transposition_over_name_lookup():

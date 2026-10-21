@@ -338,6 +338,7 @@ def _run_convert(args: argparse.Namespace) -> None:
                 # written (transposed) pitch, not concert pitch -- see
                 # Score.to_lilypond's concert_pitch docstring.
                 concert_pitch=not is_part_extraction,
+                concert_pitch_source=args.concert_pitch_source,
             )
 
         if args.compile and output_path is None:
@@ -425,6 +426,21 @@ def main() -> None:
     convert_parser.add_argument(
         "--format",
         help="Comma-separated formatting overrides (e.g. paper_size=a4,margin_mm=12)",
+    )
+    convert_parser.add_argument(
+        "--concert-pitch-source",
+        action="store_true",
+        help="Treat the input as already written in concert pitch for every "
+             "instrument, including transposing ones -- not BANA's own "
+             "convention (where braille note cells encode the performer's "
+             "written/transposed pitch), but a valid composing workflow for "
+             "someone who writes everything in concert pitch. With this "
+             "flag: the full score (concert pitch) needs no \\transpose at "
+             "all, since the input already matches; and an extracted "
+             "individual part (--part, always written pitch) instead "
+             "derives that instrument's written/transposed notation from "
+             "the concert-pitch input automatically -- no manual \\transpose "
+             "edit of the .ly file needed.",
     )
     convert_parser.add_argument(
         "--report",

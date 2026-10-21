@@ -100,6 +100,11 @@ dottednotes convert piece.brf piece.ly --category "Chamber"
 # Override specific formatting options using key=value pairs
 dottednotes convert piece.brf piece.ly --format "paper_size=a4,margin_mm=12,staff_size=18"
 
+# Treat the input as already written in concert pitch for every instrument,
+# including transposing ones, instead of BANA's own written-pitch convention
+dottednotes convert piece.brf piece.ly --concert-pitch-source
+dottednotes convert piece.brf clarinet_part.ly --concert-pitch-source --part "Clarinet in B-flat"
+
 # Print BANA validation report (corrections list) to stderr
 dottednotes convert piece.brf --report
 
@@ -152,6 +157,22 @@ dottednotes --version
   * `staff_size` (float, global staff size in points)
   * `basic_distance` (float, basic distance between systems)
   * `padding` (float, padding spacing between systems)
+
+* **`--concert-pitch-source`**:
+  Treats the input as already written in concert pitch for every
+  instrument, including transposing ones — not BANA's own convention
+  (where a transposing instrument's braille note cells encode the
+  performer's own written/transposed pitch), but a valid composing
+  workflow for someone who writes everything in concert pitch. Off by
+  default.
+
+  With this flag: the full score (shown in concert pitch) needs no
+  `\transpose` at all, since the input already matches; and an extracted
+  individual part (`--part`, always written pitch) instead *derives* that
+  instrument's written/transposed notation from the concert-pitch input
+  automatically, rather than assuming the input already is written pitch —
+  no manual `\transpose` edit of the `.ly` file needed either way. Only
+  affects LilyPond output.
 
 * **`--expressive-midi`**:
   When converting to MusicXML (`.musicxml` or `.mxl` output path), generates a companion **Expressive MIDI (DAW)** performance file (`<stem>_expressive.mid`) alongside the MusicXML score.
@@ -300,6 +321,8 @@ options mean?" link on the page points back to this section.
   choice of output file extension. When MusicXML is selected, an Expressive MIDI (DAW) file is generated alongside the score, available for download or immediate playback in the browser audio player.
 * **Layout Category**: same as `--category` — Default (auto-detect), Solo Piano, Art Song,
   Chamber, Orchestral, or Lead Sheet.
+* **Input Is Already Concert Pitch**: same as `--concert-pitch-source`. Only shown (and
+  only affects anything) when Target Format is LilyPond.
 * **Braille Compression**: same as `--compression` — Full Compression, Minimal
   Compression, or No Compression. Only affects Braille Music output.
 * **BANA Validation Profile**: Standard or Strict (extra checks). Controls which rules the
