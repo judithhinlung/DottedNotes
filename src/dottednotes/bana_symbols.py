@@ -66,6 +66,7 @@ class SymbolCategory(Enum):
     PEDAL = auto()
     CHORD_SYMBOL = auto()
     METRONOME_MARK = auto()
+    MUSIC_HYPHEN = auto()
     UNKNOWN = auto()
 
 
@@ -141,6 +142,13 @@ OCTAVE_MARKS: dict[str, int] = {
     '⠰': 6,  # dots 5,6        (three-line octave)
     '⠠': 7,  # dots 6          (four-line octave)
 }
+
+# Overlap warning: '⠐' (dots 5) is also BANA 1.11's music hyphen, which
+# marks a measure interrupted at the end of a braille line, to be continued
+# on the next. An octave mark is always immediately followed by a note, so
+# the tokenizer (tokenizer.py) disambiguates on that basis: a bare '⠐' with
+# nothing after it before the line break (or end of text) is read as
+# SymbolCategory.MUSIC_HYPHEN rather than OCTAVE_MARK.
 
 # ---------------------------------------------------------------------------
 # Key signature cells

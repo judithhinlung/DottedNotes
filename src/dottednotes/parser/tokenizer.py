@@ -122,6 +122,7 @@ class BrailleTokenizer:
     _CLEF_PREFIX: str = '⠜'       # U+281C  dots 3,4,5
     _NUMBER_SIGN: str = '⠼'       # U+283C  dots 3,4,5,6
     _SHARP_CELL: str = '⠩'        # U+2829  dots 1,4,6
+    _MUSIC_HYPHEN_CELL: str = '⠐'  # U+2810  dots 5 -- also OCTAVE_MARKS[4]
 
     def tokenize(
         self,
@@ -142,17 +143,32 @@ class BrailleTokenizer:
         # is emitted.  CAPITAL_INDICATOR (⠠) is only valid as a literary capital
         # in the piece header; after that point ⠠ reverts to the octave-7 mark.
         header_active = True
+        # BANA 1.11 music hyphen (see MUSIC_HYPHEN_CELL emission below): set
+        # once a dangling dot-5 is read at the end of a line, and cleared once
+        # real content resumes. While True, the upcoming line break must not
+        # become a BAR_LINE token, and that next line's own leading blank-cell
+        # indentation must not either -- both would otherwise split the
+        # measure that the hyphen says continues across the line break.
+        continuation_pending = False
 
         while i < len(text):
             char = text[i]
 
+            if continuation_pending:
+                if char in (' ', '⠀'):
+                    i += 1
+                    continue
+                if char not in ('\n', '\r', '\t'):
+                    continuation_pending = False
+
             # --- whitespace / control ---
             if char == '\n':
-                if not at_measure_start:
+                if not at_measure_start and not continuation_pending:
                     # In BANA music braille each physical line holds a segment of
                     # measures separated by blank cells within the line.  The line
                     # break itself is the bar-line separator between the last measure
-                    # on the line and the first measure on the next line.
+                    # on the line and the first measure on the next line -- unless a
+                    # music hyphen said this measure continues past the break.
                     tokens.append(BrailleToken('⠀', SymbolCategory.BAR_LINE, i, line))
                     at_measure_start = True
                 line += 1
@@ -680,6 +696,20 @@ class BrailleTokenizer:
                         at_measure_start = False
                         header_active = False
                         continue
+
+            # --- BANA 1.11 music hyphen: a dot-5 cell immediately followed
+            # by a line break can't be a real octave mark (those always
+            # precede a note on the same line) -- it's the hyphen marking
+            # that the current measure continues past the line break. A
+            # dot-5 at the bare end of the text (no following newline) is
+            # left as a plain OCTAVE_MARK -- that's not "the end of a
+            # braille line" in BANA 1.11's sense, just wherever a fragment
+            # of input happens to stop (e.g. in isolated tokenizer tests).
+            if char == self._MUSIC_HYPHEN_CELL and i + 1 < len(text) and text[i + 1] in ('\n', '\r'):
+                tokens.append(BrailleToken(char, SymbolCategory.MUSIC_HYPHEN, i, line))
+                continuation_pending = True
+                i += 1
+                continue
 
             # --- general single-cell classification ---
             cat = self._classify(char)

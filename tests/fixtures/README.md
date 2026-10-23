@@ -13,6 +13,7 @@ This directory holds `.brf` braille music files used as test inputs.
 | dichterliebe01.musicxml | Dichterliebe, Op. 48, No. 1 (Im wunderschönen Monat Mai) | Robert Schumann | Voice and piano | [MusicXML Example Set](https://www.musicxml.com/music-in-musicxml/example-set/) |
 | key_change_test.brf / .ly | (untitled exercise) | Judith Lung | Solo melody, 2 measures | Developer-authored, Sprint 11 |
 | percussion_ensemble_snare_bass_drum.brf | (untitled exercise) | Judith Lung | Snare drum + Bass drum (BANA Ch. 34 unpitched percussion ensemble) | Generated, not hand-transcribed |
+| strophic_song_pickup_continuation_test.brf / .ly | (untitled exercise) | Judith Lung | Solo voice, no chords (BANA Secs. 24.1.1, 35.1, 1.11) | Developer-authored, S11d |
 
 ## Notes
 
@@ -58,6 +59,18 @@ This directory holds `.brf` braille music files used as test inputs.
   restating them. Paired with `strophic_song_test.ly`
   as its ground truth (tests/test_strophic_integration.py).
 - `dichterliebe01.musicxml` is a MusicXML file containing the first song of Schumann's *Dichterliebe*, sourced from the MusicXML example set and used for testing MusicXML import/parsing integration.
+- `strophic_song_pickup_continuation_test.brf` is the S11d integration
+  fixture for two real-world conventions `strophic_song_test.brf` doesn't
+  exercise: a BANA 24.1.1-style margin pickup number ("#J' ", segment
+  number 0 with the dot-3 partial-measure mark) on the first lyric line,
+  and a BANA 1.11 music hyphen (dot 5) ending a melody line mid-measure so
+  it continues into the next group's melody line rather than starting a
+  fresh measure -- confirmed by the glued measure (measure 3) totaling the
+  same tick count as the surrounding full measures. Two expected
+  beat-count warnings (the opening pickup and the deliberately short final
+  measure), same convention as `lead_sheet_test.brf`. Paired with
+  `strophic_song_pickup_continuation_test.ly` as its ground truth
+  (tests/test_strophic_integration.py).
 - `key_change_test.ly` / `key_change_test.brf` are the Sprint 11 mid-piece
   key-signature-change fixture pair: a G major ascending quarter-note scale
   (measure 1) changing to D major (measure 2), the same shape as

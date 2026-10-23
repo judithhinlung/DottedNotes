@@ -832,6 +832,33 @@ def test_tokenizer_octave_mark():
     assert tokens[0].category == SymbolCategory.OCTAVE_MARK
 
 
+def test_tokenizer_music_hyphen_before_line_break():
+    # BANA 1.11: a dangling ⠐ immediately before a line break can't be a
+    # real octave mark (those always precede a note) -- it's the music
+    # hyphen, and the line break it precedes must not become a BAR_LINE.
+    tokens = BrailleTokenizer().tokenize('⠹⠐\n⠹')
+    categories = [tok.category for tok in tokens]
+    assert categories == [
+        SymbolCategory.NOTE,
+        SymbolCategory.MUSIC_HYPHEN,
+        SymbolCategory.NOTE,
+    ]
+
+
+def test_tokenizer_music_hyphen_swallows_next_line_indentation():
+    # The leading blank-cell indentation of the continuing line is pure
+    # layout, not a real bar line -- it must not split the measure either.
+    tokens = BrailleTokenizer().tokenize('⠹⠐\n⠀⠀⠐⠹')
+    categories = [tok.category for tok in tokens]
+    assert SymbolCategory.BAR_LINE not in categories
+    assert categories == [
+        SymbolCategory.NOTE,
+        SymbolCategory.MUSIC_HYPHEN,
+        SymbolCategory.OCTAVE_MARK,
+        SymbolCategory.NOTE,
+    ]
+
+
 def test_tokenizer_accidental_flat():
     # ⠣ after a note (not at measure start) → ACCIDENTAL, not KEY_SIGNATURE
     # At measure start ⠣ becomes KEY_SIGNATURE (1 flat); a preceding note clears that.

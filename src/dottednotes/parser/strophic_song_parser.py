@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..bana_symbols import LITERARY_DIGITS, NUMBER_SIGN, SymbolCategory
+from ..bana_symbols import END_WORD_SIGN, LITERARY_DIGITS, NUMBER_SIGN, SymbolCategory
 from ..exceptions import BrailleParseError
 from ..models.chord_names import ChordNamesTrack
 from ..models.chord_symbol import ChordSymbol
@@ -164,6 +164,48 @@ def _word_start_columns(line: str) -> list[int]:
     return cols
 
 
+# BANA 24.1.1's margin measure number: NUMBER_SIGN + one or more literary
+# digits, optionally followed by END_WORD_SIGN (dot 3) marking that the
+# segment begins with a partial measure, then a blank cell. §35.9 says
+# vocal word lines don't normally carry measure numbers at all, but real
+# transcriptions sometimes borrow this single-line-format convention to
+# flag a pickup measure (numbered 0, per 24.1.1: "When the first measure
+# of the movement is incomplete, it is assigned the number zero") at the
+# head of the first lyric line. Unlike §35.9's own bare-digit convention
+# (ambiguous with a short lyric word, see vocal_solo_parser.py's
+# `_strip_leading_measure_number`), the NUMBER_SIGN prefix can't collide
+# with real lyric text here (§35.1.1 lyrics are uncontracted literary
+# braille, which never starts a word with NUMBER_SIGN), so this is always
+# attempted, with no opt-in flag.
+_PARTIAL_MEASURE_MARK = END_WORD_SIGN
+
+
+def _strip_margin_measure_number(line: str) -> str:
+    """Strip a BANA 24.1.1-style margin measure number from the start of
+    `line`, if present; otherwise return `line` unchanged. The stripped
+    number itself isn't needed -- a pickup measure's `\\partial` is
+    inferred later from its actual note durations
+    (`Staff._resolve_partial()`), not from this marker."""
+    if not line.startswith(NUMBER_SIGN):
+        return line
+    i = 1
+    digit_values: list[int] = []
+    while i < len(line) and line[i] in LITERARY_DIGITS:
+        digit_values.append(LITERARY_DIGITS[line[i]])
+        i += 1
+    if not digit_values:
+        return line
+    if i < len(line) and line[i] == _PARTIAL_MEASURE_MARK:
+        i += 1
+    if i >= len(line) or line[i] != '⠀':
+        return line
+    while i < len(line) and line[i] == '⠀':
+        i += 1
+    if i >= len(line):
+        return line
+    return line[i:]
+
+
 def _split_lines(text: str) -> list[str]:
     lines = text.split('\n')
     while lines and lines[-1] == '':
@@ -239,7 +281,7 @@ def parse_strophic_song(text: str) -> Score:
     refrain_starts_at: int | None = None
     i = 0
     while i < len(main_lines):
-        line = main_lines[i]
+        line = _strip_margin_measure_number(main_lines[i])
         if not line.strip():
             i += 1
             continue
