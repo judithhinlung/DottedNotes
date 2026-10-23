@@ -27,6 +27,18 @@ def test_index_html_has_measure_numbers_checkbox_and_brl_option():
     assert '<option value="brl">' in response.text
 
 
+def test_index_html_has_strophic_song_category_option():
+    # Regression test: the "Layout Category" dropdown only ever listed
+    # Lead Sheet, not Strophic Song, even after the backend learned to
+    # parse it -- so a user could never actually select it from the web
+    # UI. The backend-only test (test_convert_strophic_song_category)
+    # wouldn't catch this, since it posts the category value directly
+    # rather than going through the rendered form.
+    response = client.get("/")
+    assert response.status_code == 200
+    assert '<option value="Strophic Song">' in response.text
+
+
 def test_index_html_links_to_readme_documentation():
     # The header, footer, and post-translation instrument dialog should
     # each link out to the README's own documentation rather than leaving
@@ -95,6 +107,37 @@ def test_convert_braille_to_braille_reformat():
     job_id = data["job_id"]
     download_response = client.get(f"/api/jobs/{job_id}/brf")
     assert download_response.status_code == 200
+
+def test_convert_strophic_song_category():
+    # Regression test: _parse_score() previously had no "Strophic Song"
+    # branch at all, so a vocal lyric/melody .brf uploaded with that
+    # category fell through to the generic solo parser, which misreads
+    # lyric lines as note data. Confirms the fix routes through
+    # parse_strophic_song() and actually produces \addlyrics content.
+    file_content = (FIXTURES / "strophic_song_pickup_continuation_test.brf").read_bytes()
+    file_obj = io.BytesIO(file_content)
+
+    response = client.post(
+        "/api/convert",
+        files={"file": ("strophic_song_pickup_continuation_test.brf", file_obj, "text/plain")},
+        data={
+            "target_format": "lilypond",
+            "category": "Strophic Song",
+            "profile": "standard",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "ly" in data["files"]
+
+    job_id = data["job_id"]
+    download_response = client.get(f"/api/jobs/{job_id}/ly")
+    assert download_response.status_code == 200
+    ly_text = download_response.text
+    assert "\\new Lyrics \\lyricsto" in ly_text
+    assert "Hello little song" in ly_text
+
 
 def test_convert_invalid_file_limit():
     large_content = b"a" * (10 * 1024 * 1024 + 10) # slightly larger than 10MB

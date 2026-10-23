@@ -106,6 +106,9 @@ def _parse_score(text: str, category_override: str | None = None):
     if category_override == "Lead Sheet":
         from .parser.lead_sheet_parser import parse_lead_sheet
         return parse_lead_sheet(text)
+    if category_override == "Strophic Song":
+        from .parser.strophic_song_parser import parse_strophic_song
+        return parse_strophic_song(text)
     if has_ensemble_header(text):
         return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)
@@ -364,7 +367,7 @@ def list_instruments():
 async def convert_file(
     file: UploadFile = File(...),
     target_format: str = Form("lilypond"),  # "lilypond", "brf", "brl", "musicxml"
-    category: Optional[str] = Form(None),   # "Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet"
+    category: Optional[str] = Form(None),   # "Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet", "Strophic Song"
     format_overrides: Optional[str] = Form(None),  # e.g., "paper_size=a4,margin_mm=12"
     compression: str = Form("full"),        # "none", "minimal", "full"
     profile: str = Form("standard"),        # "standard", "strict"
@@ -433,7 +436,7 @@ async def convert_file(
         input_type = "lilypond"
 
     # Category validation
-    valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet"}
+    valid_categories = {"Solo Piano", "Art Song", "Chamber", "Orchestral", "Lead Sheet", "Strophic Song"}
     if category and category not in valid_categories:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of {valid_categories}")
 

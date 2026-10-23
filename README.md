@@ -145,9 +145,34 @@ dottednotes --version
   * `Art Song` (Default for voice + keyboard scores; staff size 18.0 pt, margins 18 mm)
   * `Chamber` (Default for 3–6 staves; staff size 16.0 pt, margins 15 mm)
   * `Orchestral` (Default for >6 staves; staff size 14.1 pt, margins 12 mm)
+  * `Lead Sheet` (**Required**, not a layout default — see below)
+  * `Strophic Song` (**Required**, not a layout default — see below)
 
   > [!NOTE]
   > Overriding a score's category to a non-vocal category (e.g. `Chamber` or `Solo Piano`) prevents the parser from extracting vocal lyrics from literary braille lines, suppressing lyric mapping and `\addlyrics` rendering.
+
+  > [!IMPORTANT]
+  > `Solo Piano`, `Art Song`, `Chamber`, and `Orchestral` only change layout
+  > (staff size/margins) — the parser itself is auto-detected from staff
+  > count and instrument names, so `--category` is optional for these.
+  >
+  > `Lead Sheet` and `Strophic Song` are different: they also switch which
+  > *parser* is used, and there's no way to auto-detect either from the
+  > braille content alone, so **the flag is required**, not just cosmetic:
+  > * `--category "Lead Sheet"` for a BANA Sec. 27 two-line melody/chord-symbol score.
+  > * `--category "Strophic Song"` for a BANA Secs. 35/36 solo vocal
+  >   lyric/chord/melody score (lyric lines alternating with melody lines).
+  >
+  > The same applies to `--single-line` (BANA Sec. 24 single-line
+  > instrumental format) — it's a separate flag, not a `--category` value,
+  > but it's the same situation: the braille gives no structural signal
+  > that it's single-line format, so it must be stated explicitly.
+  >
+  > Omitting a required flag doesn't just mis-format the output — the
+  > generic solo parser will try to read lyric or chord-symbol lines as
+  > note data, which typically produces a beat-count warning on nearly
+  > every measure and can crash outright (e.g. an out-of-range octave)
+  > rather than degrading gracefully.
 
 * **`--format "key1=value1,key2=value2"`**:
   Applies specific, comma-separated layout/formatting overrides on top of the template defaults.
@@ -320,7 +345,9 @@ options mean?" link on the page points back to this section.
   Braille Music (`.brl`), or MusicXML (`.musicxml` + Expressive MIDI). Corresponds to `dottednotes convert`'s
   choice of output file extension. When MusicXML is selected, an Expressive MIDI (DAW) file is generated alongside the score, available for download or immediate playback in the browser audio player.
 * **Layout Category**: same as `--category` — Default (auto-detect), Solo Piano, Art Song,
-  Chamber, Orchestral, or Lead Sheet.
+  Chamber, Orchestral, Lead Sheet, or Strophic Song. As on the CLI, Lead Sheet and
+  Strophic Song are required (not just a layout choice) for those two formats — see the
+  `--category` note above.
 * **Input Is Already Concert Pitch**: same as `--concert-pitch-source`. Only shown (and
   only affects anything) when Target Format is LilyPond.
 * **Braille Compression**: same as `--compression` — Full Compression, Minimal
