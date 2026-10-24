@@ -107,8 +107,8 @@ def _parse_score(text: str, category_override: str | None = None):
         from .parser.lead_sheet_parser import parse_lead_sheet
         return parse_lead_sheet(text)
     if category_override == "Strophic Song":
-        from .parser.strophic_song_parser import parse_strophic_song
-        return parse_strophic_song(text)
+        from .parser.strophic_song_parser import parse_strophic_song_with_accompaniment
+        return parse_strophic_song_with_accompaniment(text)
     if has_ensemble_header(text):
         return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)

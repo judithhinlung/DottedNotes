@@ -4,11 +4,18 @@ import warnings
 from pathlib import Path
 
 import pytest
+from dottednotes.models import Duration, Measure, Note, Score, Staff, TimeSignature
 from dottednotes.parser.input_pipeline import BRLInputPipeline
 from dottednotes.parser.strophic_song_parser import (
-    _strip_margin_measure_number, _verse_marker, parse_strophic_song,
+    _is_no_words_marker, _strip_margin_measure_number, _verse_marker,
+    parse_strophic_song, parse_strophic_song_with_accompaniment,
 )
 from dottednotes.renderers.braille_renderer import BrailleRenderer, encode_lyric_line
+
+
+def _note(name: str, octave: int, **kwargs) -> Note:
+    return Note(dots=frozenset(), category=None, raw_brl="", note_name=name, octave=octave,
+                duration=Duration(value=4), **kwargs)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -256,3 +263,124 @@ def test_pickup_continuation_fixture_compiles_cleanly(tmp_path: Path):
 
     ly_output = score.to_lilypond(category_override="Strophic Song")
     _compile_and_check_no_warnings(ly_output, tmp_path, "strophic_song_pickup_continuation_test")
+
+
+# ---------------------------------------------------------------------------
+# BANA 36.3.6/35.7.2 "NO WORDS" marker: a fully-capitalized (or italicized)
+# word line reading literally "no words" stands in for real lyrics during
+# an instrumental passage with nothing to sing.
+# ---------------------------------------------------------------------------
+
+
+def test_is_no_words_marker_matches_case_insensitively():
+    assert _is_no_words_marker(BRLInputPipeline()._ascii_to_unicode(",,NO ,,WORDS"))
+    assert _is_no_words_marker(BRLInputPipeline()._ascii_to_unicode("no words"))
+
+
+def test_is_no_words_marker_rejects_ordinary_lyric_text():
+    assert not _is_no_words_marker(BRLInputPipeline()._ascii_to_unicode(",HELLO WORLD"))
+    assert not _is_no_words_marker(BRLInputPipeline()._ascii_to_unicode(",,NO WAY"))
+
+
+def test_no_words_group_excluded_from_lyric_alignment():
+    # A "NO WORDS" group inserted between two sung groups must contribute
+    # no syllables of its own, and must not shift the real syllables that
+    # follow it out of alignment with their notes (BANA 36.3.6/35.7.2 --
+    # it's an instrumental passage, not a lyric to sing).
+    ascii_text = (
+        '                  <<#C4\n'
+        ',FLY AWAY OH MY FRIEND1\n'
+        ',B<      ,B<\n'
+        '  "W[W    W?:\n'
+        ',,NO ,,WORDS\n'
+        '  "W[W\n'
+        ',PLE-ASE GO QUICKLY4\n'
+        ',F#G        ,B<\n'
+        '  $C:?      ?T<K'
+    )
+    text = BRLInputPipeline()._ascii_to_unicode(ascii_text)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = parse_strophic_song(text)
+    assert not caught, [str(w.message) for w in caught]
+
+    assert score.staves[0].lyrics == [
+        "Fly", "away", "oh", "my", "friend,",
+        "Ple --", "ase", "go", "quickly.",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# BANA 29.8 keyboard accompaniment, appended to a strophic vocal part.
+# ---------------------------------------------------------------------------
+
+
+def _strophic_score_with_piano() -> Score:
+    score = Score(title="")
+    vocal = Staff(name="Soprano")
+    vocal.time_signature = TimeSignature(
+        dots=frozenset(), category=None, raw_brl="", numerator=4, denominator=4
+    )
+    m = Measure(number=1)
+    for note in (_note("C", 5), _note("D", 5), _note("E", 5), _note("F", 5)):
+        m.add_note(note)
+    vocal.add_measure(m)
+    vocal.lyrics = ["Sing", "a", "song", "now"]
+    vocal.verses = [["Sing", "a", "song", "now"], ["Verse", "two", "words", "here"]]
+    vocal.verse_prefixes = [None, "2."]
+
+    rh = Staff(name="Piano right hand")
+    rh.time_signature = vocal.time_signature
+    m2 = Measure(number=1)
+    for note in (_note("G", 4), _note("G", 4), _note("G", 4), _note("G", 4)):
+        m2.add_note(note)
+    rh.add_measure(m2)
+
+    lh = Staff(name="Piano left hand")
+    lh.time_signature = vocal.time_signature
+    m3 = Measure(number=1)
+    for note in (_note("C", 3), _note("C", 3), _note("C", 3), _note("C", 3)):
+        m3.add_note(note)
+    lh.add_measure(m3)
+
+    score.add_staff(vocal)
+    score.add_staff(rh)
+    score.add_staff(lh)
+    return score
+
+
+def test_strophic_song_with_accompaniment_round_trips_through_parser():
+    score = _strophic_score_with_piano()
+    output = BrailleRenderer(line_width=40).render(score)
+
+    parsed = parse_strophic_song_with_accompaniment(output)
+
+    assert len(parsed.staves) == 3
+    vocal, rh, lh = parsed.staves
+    assert vocal.lyrics == ["Sing", "a", "song", "now"]
+    assert vocal.verses == [["Sing", "a", "song", "now"], ["Verse", "two", "words", "here"]]
+    assert [(n.note_name, n.octave) for n in vocal.measures[0].notes] == [
+        ("C", 5), ("D", 5), ("E", 5), ("F", 5),
+    ]
+    assert [(n.note_name, n.octave) for n in rh.measures[0].notes] == [
+        ("G", 4), ("G", 4), ("G", 4), ("G", 4),
+    ]
+    assert [(n.note_name, n.octave) for n in lh.measures[0].notes] == [
+        ("C", 3), ("C", 3), ("C", 3), ("C", 3),
+    ]
+
+
+def test_strophic_song_without_blank_line_still_parses_vocal_only():
+    # No accompaniment block present -- must behave exactly like a direct
+    # parse_strophic_song() call, not require a blank line that isn't there.
+    text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf")
+    assert len(parse_strophic_song_with_accompaniment(text).staves) == 1
+
+
+def test_strophic_song_with_accompaniment_ignores_trailing_newline():
+    # A source file's own trailing "\n" must not be mistaken for the blank
+    # line that separates the vocal block from an accompaniment block --
+    # otherwise every ordinary vocal-only .brf (which always ends in a
+    # newline) would be misrouted into expecting a keyboard block.
+    text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf").rstrip("\n") + "\n"
+    assert len(parse_strophic_song_with_accompaniment(text).staves) == 1

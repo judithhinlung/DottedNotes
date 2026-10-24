@@ -36,6 +36,7 @@ from .braille_parser import BrailleParser
 from .chord_symbol_parser import parse_chord_symbol_line
 from .ensemble_parser import extract_stanza_prefix, parse_lyrics
 from .input_pipeline import ASCII_TO_DOTS
+from .keyboard_accompaniment_parser import parse_keyboard_accompaniment
 from .tokenizer import BrailleTokenizer
 
 # BANA 35.7's verse-number marker: literary open-parenthesis (ASCII '"<'),
@@ -117,6 +118,22 @@ def _refrain_label(syllables: list[tuple[str, bool]]) -> tuple[str | None, list[
     if prefix is not None and prefix.rstrip('.').lower() in ('refrain', 'chorus'):
         return prefix, remaining
     return None, syllables
+
+
+def _is_no_words_marker(lyric_text: str) -> bool:
+    """True if `lyric_text` is BANA 36.3.6/35.7.2's "no words" marker: a
+    word line reading literally "NO WORDS" (fully capitalized or
+    italicized in the source, per those sections -- `parse_lyrics()`
+    decodes either into the same plain text, so this just checks the
+    decoded words case-insensitively, the same way `_refrain_label` checks
+    for "REFRAIN"/"CHORUS"), used in place of real lyrics for a passage
+    where there is nothing to sing (BANA 36.3.6: "chord changes... where
+    there are no lyrics"; 35.7.2 describes the identical convention for a
+    reused refrain). Matches only the bare 2-word phrase -- a lyric line
+    that happens to contain "no" and "words" alongside other text is not
+    this marker."""
+    words = [s.strip('.:,;()[]').lower() for s, _hyphen in parse_lyrics(lyric_text)]
+    return words == ['no', 'words']
 
 
 def _strip_trailing_refrain_marker(
@@ -457,14 +474,35 @@ def parse_strophic_song(text: str) -> Score:
 
     # -- Split flat_notes (and their note-groups) at the verse1/refrain
     # boundary, using each group's own already-partitioned notes
-    # (per_group_notes) to know exactly where that boundary falls.
-    verse1_notes = [n for grp in per_group_notes[:refrain_starts_at] for n in grp]
-    refrain_notes = [n for grp in per_group_notes[refrain_starts_at:] for n in grp]
+    # (per_group_notes) to know exactly where that boundary falls. A
+    # BANA 36.3.6 "NO WORDS" group contributes no syllables at all (it's
+    # an instrumental passage, not a sung one) -- its notes are excluded
+    # here too, not just its lyric text, since `_map_syllables` pairs
+    # syllables and note-groups purely by position: leaving its (rest)
+    # notes in would silently absorb/misalign every real syllable that
+    # follows.
+    no_words_group_indices = {
+        gi for gi, group in enumerate(groups) if _is_no_words_marker(group.lyric_text)
+    }
+    verse1_notes = [
+        n for gi, grp in enumerate(per_group_notes[:refrain_starts_at])
+        if gi not in no_words_group_indices for n in grp
+    ]
+    refrain_notes = [
+        n for gi, grp in enumerate(per_group_notes[refrain_starts_at:], start=refrain_starts_at)
+        if gi not in no_words_group_indices for n in grp
+    ]
     verse1_note_groups = _group_notes_by_slur(verse1_notes)
     refrain_note_groups = _group_notes_by_slur(refrain_notes)
 
-    verse1_syllables = parse_lyrics(' '.join(g.lyric_text for g in groups[:refrain_starts_at]))
-    refrain_lyric_text = ' '.join(g.lyric_text for g in groups[refrain_starts_at:])
+    verse1_syllables = parse_lyrics(' '.join(
+        g.lyric_text for gi, g in enumerate(groups[:refrain_starts_at])
+        if gi not in no_words_group_indices
+    ))
+    refrain_lyric_text = ' '.join(
+        g.lyric_text for gi, g in enumerate(groups[refrain_starts_at:], start=refrain_starts_at)
+        if gi not in no_words_group_indices
+    )
     refrain_syllables = parse_lyrics(refrain_lyric_text)
     if refrain_starts_at < len(groups):
         _, refrain_syllables = _refrain_label(refrain_syllables)
@@ -508,3 +546,42 @@ def parse_strophic_song(text: str) -> Score:
     staff.verses = verses
     staff.verse_prefixes = verse_prefixes
     return score
+
+
+def parse_strophic_song_with_accompaniment(text: str) -> Score:
+    """Parse a BANA strophic vocal song (Secs. 35.1/35.7/35.7.2/36) that is
+    optionally followed by a blank line and a Sec. 29.8 keyboard-
+    accompaniment block -- the same two-block convention
+    `solo_with_accompaniment_parser.parse_solo_with_accompaniment()` already
+    implements for a plain (non-strophic) vocal solo, since Sec. 35.1 says
+    accompaniments are "not included in the transcription and are brailled
+    separately, as described in Par. 29.8," regardless of whether the vocal
+    part itself is strophic. Falls back to a plain `parse_strophic_song()`
+    call when the input has no blank line, so existing vocal-only strophic
+    input is unaffected."""
+    lines = text.split('\n')
+    while lines and lines[-1] == '':
+        lines.pop()  # a file's own trailing newline is not an accompaniment separator
+    try:
+        blank_idx = lines.index('')
+    except ValueError:
+        return parse_strophic_song(text)
+
+    vocal_text = '\n'.join(lines[:blank_idx])
+    accompaniment_text = '\n'.join(lines[blank_idx + 1:])
+
+    vocal_score = parse_strophic_song(vocal_text)
+    if len(vocal_score.staves) != 1:
+        raise BrailleParseError(
+            "Strophic-song-with-accompaniment parsing expected a single "
+            f"vocal staff, got {len(vocal_score.staves)}."
+        )
+
+    accompaniment_score = parse_keyboard_accompaniment(accompaniment_text)
+
+    combined = Score(title=vocal_score.title)
+    combined.add_staff(vocal_score.staves[0])
+    for staff in accompaniment_score.staves:
+        combined.add_staff(staff)
+    combined.chord_names = vocal_score.chord_names
+    return combined

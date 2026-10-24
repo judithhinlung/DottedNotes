@@ -14,7 +14,7 @@ from .models.instrument import GENERAL_MIDI_INSTRUMENTS, infer_instrument_from_t
 from .parser.braille_parser import BrailleParser
 from .parser.ensemble_parser import EnsembleParser, has_ensemble_header
 from .parser.lead_sheet_parser import parse_lead_sheet
-from .parser.strophic_song_parser import parse_strophic_song
+from .parser.strophic_song_parser import parse_strophic_song_with_accompaniment
 from .parser.tokenizer import BrailleTokenizer
 from .parser.input_pipeline import BRLInputPipeline
 
@@ -26,12 +26,13 @@ def _parse_score(text: str, category_override: str | None = None, single_line: b
     An explicit `category_override == "Lead Sheet"` always wins and routes
     to `parse_lead_sheet()` (BANA Sec. 27's two-line melody/chord-symbol
     parallel); `category_override == "Strophic Song"` routes to
-    `parse_strophic_song()` (BANA Secs. 35/36's solo vocal lyric/chord/
-    melody format) -- there's no unambiguous structural marker to
-    auto-detect either format the way an instrument-list header marks an
-    ensemble score, so the caller must ask for them explicitly. Otherwise,
-    choose the ensemble or solo parser based on whether an instrument-list
-    header (BANA §33.2) is present.
+    `parse_strophic_song_with_accompaniment()` (BANA Secs. 35/36's solo
+    vocal lyric/chord/melody format, optionally followed by a blank line
+    and a Sec. 29.8 keyboard-accompaniment block) -- there's no
+    unambiguous structural marker to auto-detect either format the way an
+    instrument-list header marks an ensemble score, so the caller must ask
+    for them explicitly. Otherwise, choose the ensemble or solo parser
+    based on whether an instrument-list header (BANA §33.2) is present.
 
     single_line=True (--single-line, BANA Sec. 24) skips that ensemble
     auto-detection entirely and always routes to the solo parser: a
@@ -43,7 +44,7 @@ def _parse_score(text: str, category_override: str | None = None, single_line: b
     if category_override == "Lead Sheet":
         return parse_lead_sheet(text)
     if category_override == "Strophic Song":
-        return parse_strophic_song(text)
+        return parse_strophic_song_with_accompaniment(text)
     if not single_line and has_ensemble_header(text):
         return EnsembleParser(category_override=category_override).parse(text)
     tokens = BrailleTokenizer().tokenize(text)

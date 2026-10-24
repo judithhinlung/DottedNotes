@@ -7796,6 +7796,48 @@ With both fixes in place, verse 1 now round-trips correctly end to end (verified
 
 ---
 
+### [x] S11c-26: Strophic Song category has no §29.8 keyboard-accompaniment support -- a strophic vocal line with a piano part can't be converted at all
+
+**Why:** Discovered converting the developer's own `Hard_Ground_Shopping_Rush_Song.brf` (strophic vocal line + a newly-added piano accompaniment section, separated by a blank line, same shape `solo_with_accompaniment_parser.py` already handles for a *plain* vocal solo). `--category "Strophic Song"` routes to `parse_strophic_song()`, which has no concept of an accompaniment block at all -- it has no blank-line split, so it feeds the piano section's own key-signature line (`%%#F8`, dots 1-4-6 = the sharp sign) through the strophic lyric/melody grouping logic as if it were more verse text, and crashes with "Unrecognized braille cell in lyric text: ASCII braille '%'" the moment it hits a cell outside the literary-lyric alphabet. Confirmed by reproducing directly against the real file before touching any code.
+
+**Steps taken:**
+1. Added `parse_strophic_song_with_accompaniment(text)` to `parser/strophic_song_parser.py`, mirroring `solo_with_accompaniment_parser.parse_solo_with_accompaniment()` exactly: split `text` on the first blank line, parse the head with `parse_strophic_song()` and the tail with `keyboard_accompaniment_parser.parse_keyboard_accompaniment()`, combine into one `Score` (vocal staff first, then 1-2 keyboard staves), carrying over `chord_names` too (the plain vocal-solo version has none to carry, so it never needed this). Falls back to a plain `parse_strophic_song(text)` call when there's no blank line, so ordinary vocal-only strophic input is untouched.
+2. First attempt used `lines.index('')` directly on the raw split, same as `parse_solo_with_accompaniment` -- but every real file ends in a trailing newline, so `text.split('\n')`'s last element is always `''`, which `lines.index('')` finds *first*, misrouting every ordinary vocal-only strophic file into "has an accompaniment block" with an empty accompaniment text (caught by the existing `tests/test_web.py::test_convert_strophic_song_category` regression test going from pass to fail). Fixed by popping trailing blank lines before searching for the real separator -- `solo_with_accompaniment_parser.py` has this same latent bug, but it's never hit it because nothing wires it into `cli.py`/`web.py` yet (S11c-24 is the ticket for that); flagging here rather than fixing there since fixing an unreachable code path isn't this ticket's job.
+3. Wired `cli.py`'s and `web.py`'s `_parse_score()` to call `parse_strophic_song_with_accompaniment()` instead of `parse_strophic_song()` for `category_override == "Strophic Song"`.
+4. Added `test_strophic_song_with_accompaniment_round_trips_through_parser` (builds a small vocal+piano `Score` with 2 verses, renders it via `BrailleRenderer`, re-parses, confirms all 3 staves and both verses survive), `test_strophic_song_without_blank_line_still_parses_vocal_only`, and `test_strophic_song_with_accompaniment_ignores_trailing_newline` (the regression for step 2's bug) to `tests/test_strophic_integration.py`.
+5. Verified end to end against the developer's actual `Hard_Ground_Shopping_Rush_Song.brf`: converts cleanly to a 3-staff (vocal + RH + LH) LilyPond score once the file's own "no words" line (S11c-27 below) uses the correct BANA convention instead of the word sign.
+
+**Known scope gap:** `solo_with_accompaniment_parser.parse_solo_with_accompaniment()`'s own identical `lines.index('')` has the same trailing-newline bug described in step 2, latent until something calls it with real file input (S11c-24). Not fixed here -- flagged for whoever picks that up.
+
+**Definition of Done:**
+- [x] Root cause confirmed against the developer's real file, not guessed.
+- [x] `--category "Strophic Song"` converts a strophic-vocal-plus-piano-accompaniment `.brf` end to end.
+- [x] Ordinary vocal-only strophic input (no accompaniment block, with or without a trailing newline) is unaffected.
+- [x] `pytest tests/` passes with no regressions (1352 passed).
+
+---
+
+### [x] S11c-27: Strophic/vocal-solo lyric parsing has no way to represent an instrumental passage with no lyrics at all
+
+**Why:** The developer tried to mark an instrumental pickup measure in `Hard_Ground_Shopping_Rush_Song.brf` by writing each word of "NO WORDS" prefixed with the word sign (dots 3-4-5, `⠜`/ASCII `>`) -- `"#J >NO >WORDS"` -- which crashes immediately in `parse_lyrics()` ("Unrecognized braille cell in lyric text: ASCII braille '>'"), since the word sign isn't part of the literary-lyric alphabet at all (it's reserved for tempo/expression text, Par. 1.8, and instrument abbreviations -- a different convention). Fetched the real BANA manual (`pdftotext -layout`, not memory) to find the actual mechanism rather than guess one: §36.3.6 ("Chord Changes in Interludes and Introductions") and §35.7.2 (a reused refrain) both independently specify the same thing -- a lyrics-free passage is marked by a literal phrase (e.g. "NO WORDS", "REFRAIN") written **fully capitalized or italicized**, placed at the margin where the word line would go, with rests in the melody line. Never the word sign.
+
+**Steps taken:**
+1. Added `_is_no_words_marker(lyric_text)` to `parser/strophic_song_parser.py`: decodes `lyric_text` via the existing `parse_lyrics()` and checks (case-insensitively, the same way `_refrain_label` already matches "REFRAIN"/"CHORUS") whether it reads exactly the two words "no words" -- works whether the source used full capitalization or italics, since both decode to the same plain text.
+2. `parse_strophic_song()`'s syllable-to-note-group alignment (`_map_syllables`) pairs syllables and note-groups purely by flat positional index across the whole verse-1-plus-refrain span -- simply skipping a "NO WORDS" group's *text* while leaving its (rest) notes in the count would still shift every later real syllable onto the wrong note-group. Fixed by excluding a "NO WORDS" group's notes from `verse1_notes`/`refrain_notes` (and its text from the syllable string) at the same point, so its note-groups never consume a position in the sequential mapping at all -- confirmed this doesn't regress the normal (no "NO WORDS") case since nothing changes when `no_words_group_indices` is empty.
+3. Added `test_is_no_words_marker_matches_case_insensitively`, `test_is_no_words_marker_rejects_ordinary_lyric_text`, and `test_no_words_group_excluded_from_lyric_alignment` (a 3-group strophic snippet with a "NO WORDS" group in the middle, confirming the real lyrics on either side of it stay correctly aligned to their own notes) to `tests/test_strophic_integration.py`.
+4. Verified against the developer's real file: with `"#J >NO >WORDS"` corrected to `"#J ,,NO ,,WORDS"` (full capitalization, the BANA-correct form), the pickup measure's "NO WORDS" marker no longer leaks into `staff.lyrics`, and the real lyrics starting at "A bottle of lotion..." are correctly aligned from the first real note onward.
+
+**Known scope gap:** Only `parse_strophic_song()` was given this fix. `parse_vocal_solo()` (plain, non-strophic §35.1) has the analogous structural problem (one global syllable string mapped positionally against one global note-group list) but wasn't touched -- the developer's immediate need was the strophic case. A plain vocal solo with an instrumental passage would need the same fix applied there, as a follow-up.
+
+**Definition of Done:**
+- [x] BANA's actual "no lyrics" convention (§36.3.6/§35.7.2) verified against the real manual, not guessed -- and confirmed to be different from what the developer had tried.
+- [x] A "NO WORDS" group no longer crashes `parse_strophic_song()` and contributes no stray syllables.
+- [x] A "NO WORDS" group does not shift the alignment of real syllables/notes that follow it.
+- [x] Verified end to end against the developer's real file (once its one non-conforming line was corrected).
+- [x] `pytest tests/` passes with no regressions (1352 passed).
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 
