@@ -126,6 +126,53 @@ def _skip_balanced_block(tokens: list[str], start_idx: int) -> int:
     return i
 
 
+def _extract_lyrics_blocks(tokens: list[str]) -> tuple[list[list[str]], list[Optional[str]], list[str]]:
+    """Pull every `\\new Lyrics \\lyricsto "voiceName" { ... }` block --
+    the only lyrics syntax `Score.to_lilypond()`/`OrchestraScore.to_lilypond()`
+    emit -- out of `tokens`, returning the parsed verses, their `\\set
+    stanza = "N. "` prefixes (or None), and the remaining tokens with those
+    blocks removed.
+
+    This must run before `_parse_music_tokens` sees the tokens: lyric
+    syllables look like plain identifiers to that loop, and any syllable
+    starting with 'r'/'R' (e.g. "Row", "rock") is otherwise misread as a
+    LilyPond rest (`r4`, `R1`), corrupting the melody in addition to
+    silently dropping every verse.
+    """
+    verses: list[list[str]] = []
+    prefixes: list[Optional[str]] = []
+    remaining: list[str] = []
+    i = 0
+    n = len(tokens)
+    while i < n:
+        if tokens[i] == '\\new' and i + 1 < n and tokens[i + 1] == 'Lyrics':
+            j = i + 2
+            if j < n and tokens[j] == '\\lyricsto':
+                j += 1
+            if j < n and tokens[j].startswith('"'):
+                j += 1  # voice name -- unused, lyrics attach to whichever staff they trail
+            block_end = _skip_balanced_block(tokens, j)
+            if block_end != j:
+                k = j + 1  # first token inside the { }
+                prefix = None
+                if (
+                    k + 2 < block_end and tokens[k] == '\\set'
+                    and tokens[k + 1] == 'stanza' and tokens[k + 2] == '='
+                ):
+                    k += 3
+                    if k < block_end and tokens[k].startswith('"'):
+                        prefix = tokens[k].strip('"').strip()
+                        k += 1
+                words = [tokens[m].strip('"') for m in range(k, block_end - 1)]
+                verses.append([w for w in words if w])
+                prefixes.append(prefix)
+                i = block_end
+                continue
+        remaining.append(tokens[i])
+        i += 1
+    return verses, prefixes, remaining
+
+
 class LilypondParser:
     def __init__(self):
         self.variables = {}
@@ -266,7 +313,15 @@ class LilypondParser:
                 # The tokens for this staff block go from idx until the next \new Staff or end
                 end_idx = new_staff_indices[s_idx + 1] if s_idx + 1 < len(new_staff_indices) else len(score_tokens)
                 staff_tokens = score_tokens[idx:end_idx]
-                
+
+                # Strip out any \new Lyrics \lyricsto {...} blocks before
+                # anything below looks for a variable reference or slices
+                # out a \relative block -- otherwise their lyric syllables
+                # either get silently discarded alongside a variable-token
+                # override, or ride along into _parse_music_tokens and get
+                # misread as spurious rests (see _extract_lyrics_blocks).
+                verses, verse_prefixes, staff_tokens = _extract_lyrics_blocks(staff_tokens)
+
                 # Find instrumentName
                 staff_name = None
                 for j in range(len(staff_tokens)):
@@ -310,10 +365,19 @@ class LilypondParser:
                             music_tokens = staff_tokens
                             
                 staff = self._parse_music_tokens(music_tokens, staff_name=staff_name)
+                if verses:
+                    staff.verses = verses
+                    staff.verse_prefixes = verse_prefixes
+                    staff.lyrics = verses[0]
                 self.score.add_staff(staff)
         else:
             # Single staff
+            verses, verse_prefixes, score_tokens = _extract_lyrics_blocks(score_tokens)
             staff = self._parse_music_tokens(score_tokens)
+            if verses:
+                staff.verses = verses
+                staff.verse_prefixes = verse_prefixes
+                staff.lyrics = verses[0]
             self.score.add_staff(staff)
 
         return i

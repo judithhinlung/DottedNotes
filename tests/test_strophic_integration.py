@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 from dottednotes.parser.input_pipeline import BRLInputPipeline
-from dottednotes.parser.strophic_song_parser import _strip_margin_measure_number, parse_strophic_song
+from dottednotes.parser.strophic_song_parser import (
+    _strip_margin_measure_number, _verse_marker, parse_strophic_song,
+)
+from dottednotes.renderers.braille_renderer import BrailleRenderer, encode_lyric_line
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -114,6 +117,60 @@ def test_strophic_fixture_compiles_cleanly(tmp_path: Path):
     assert '\\new Lyrics \\lyricsto' in ly_output
 
     _compile_and_check_no_warnings(ly_output, tmp_path, "strophic_song_test")
+
+
+def test_strophic_fixture_braille_render_includes_overflow_verse_text():
+    # S11c-25: BrailleRenderer used to read only staff.lyrics (verse 1),
+    # silently dropping every further verse of a strophic song from the
+    # BRF output. strophic_song_test.brf/.ly has 2 verses -- verse 2's
+    # own text ("Everyone has gone to sleep, Tarry no more.") must now
+    # appear in the rendered BRF, introduced by its BANA §35.7
+    # verse-number marker ("<#b">" for verse 2), not just verse 1's.
+    text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf")
+    score = parse_strophic_song(text)
+
+    brf_output = BrailleRenderer().render(score)
+    lines = brf_output.rstrip("\n").split("\n")
+
+    verse2_lines = [l for l in lines if _verse_marker(l) is not None]
+    assert len(verse2_lines) == 1, lines
+    verse_num, rest = _verse_marker(verse2_lines[0])
+    assert verse_num == 2
+    assert rest.startswith(encode_lyric_line(["Everyone", "has", "gone"]))
+
+    # The remainder of verse 2's text (wrapped onto a run-over line, cell
+    # 3) must also be present, not truncated.
+    verse2_text_lines = lines[lines.index(verse2_lines[0]):]
+    joined = "".join(l.lstrip("⠀") for l in verse2_text_lines)
+    assert encode_lyric_line(["more."]) in joined
+
+    # Verse 1 must still be present and unaffected by this change.
+    assert encode_lyric_line(["Fly", "away"]) in brf_output
+
+
+def test_encode_overflow_verses_round_trips_verse_number_marker():
+    from dottednotes.models.staff import Staff
+    staff = Staff(name="Voice")
+    staff.verses = [["Verse", "one"], ["Verse", "two"], ["Verse", "three"]]
+    staff.verse_prefixes = [None, "2.", "3."]
+
+    from dottednotes.renderers.braille_renderer import encode_overflow_verses
+    lines = encode_overflow_verses(staff, line_width=40)
+    assert len(lines) == 2
+
+    for line, expected_num in zip(lines, [2, 3]):
+        verse_num, rest = _verse_marker(line)
+        assert verse_num == expected_num
+        assert rest == encode_lyric_line(staff.verses[expected_num - 1])
+
+
+def test_encode_overflow_verses_empty_for_single_verse():
+    from dottednotes.models.staff import Staff
+    from dottednotes.renderers.braille_renderer import encode_overflow_verses
+    staff = Staff(name="Voice")
+    staff.verses = [["Only", "verse"]]
+    staff.verse_prefixes = [None]
+    assert encode_overflow_verses(staff, line_width=40) == []
 
 
 def test_strip_margin_measure_number_pickup_with_partial_mark():

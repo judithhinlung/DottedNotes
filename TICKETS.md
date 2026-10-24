@@ -7773,6 +7773,29 @@ Verified against the actual BANA Music Braille Code 2015 manual (not memory, per
 
 ---
 
+### [x] S11c-25: `BrailleRenderer` never emits verses 2+ of a multi-verse/strophic song -- only `staff.lyrics` (verse 1) is ever read
+
+**Why:** Discovered while fixing a LilyPond -> BRF round-trip bug where a strophic song lost its lyrics entirely. That fix (in `parser/lilypond_parser.py`, new `_extract_lyrics_blocks()`) made the parser correctly recover `Score.to_lilypond()`'s `\new Lyrics \lyricsto "voice" { \set stanza = "N. " ... }` blocks into `staff.verses`/`staff.verse_prefixes`/`staff.lyrics` instead of silently dropping them (or worse, misreading an `r`/`R`-initial syllable as a LilyPond rest). A second fix (in `renderers/braille_renderer.py`'s `_detect_transcription_mode()`) made the single-staff vocal-solo check trigger on lyrics alone, since a solo staff is routinely named "Melody" rather than something `get_instrument_family()` resolves to `VOCAL`.
+
+With both fixes in place, verse 1 now round-trips correctly end to end (verified against the real `tests/fixtures/strophic_song_test.ly` fixture, which has 2 verses: `\set stanza = "2. "` for verse 2). But verse 2 still never appears in the BRF output, because `grep -n "staff.verses" src/dottednotes/renderers/braille_renderer.py` returns nothing -- every render path (`_render_vocal_solo`, `_render_choral_ensemble`, `_render_solo_with_accompaniment`, `_render_choral_with_accompaniment`, `_render_choral_with_orchestra`) reads only `staff.lyrics`, which always holds verse 1 by convention (set that way by `strophic_song_parser.py`, `musicxml_parser.py`, `ensemble_parser.py`, and now `lilypond_parser.py` too). `staff.verses`/`staff.verse_prefixes` are written by every parser but read by none of the braille renderers -- this is a one-directional gap: BRF-with-overflow-verses -> `Score` -> LilyPond already works (`Score.to_lilypond()` emits one `\new Lyrics` block per verse, S8b-8/S8b-11), but `Score` -> BRF does not emit BANA §35.7's overflow-verse format at all. In effect, a strophic song can only ever round-trip its first verse back to braille.
+
+**Steps taken:**
+1. Fetched the real BANA Music Braille Code 2015 PDF (`pdftotext -layout`, not memory) and read §35.7/§35.7.2 directly (lines ~10657-10744 of the extracted text). Confirmed: each overflow verse is introduced *at the margin* by its number between literary parentheses and a blank cell (e.g. `"<#b"> ` for verse 2 -- `_verse_marker()`'s existing decoder already matched this exactly), its text "follows continuously, all lines indented to cell 3" (unlike a word/music line's own cell-5 run-over), and no blank line separates it from the preceding music line (confirmed directly against Example 35.7-1's and 35.7.2-1's verbatim transcriptions in the manual, not inferred).
+2. Added `encode_overflow_verses(staff, line_width)`, `_encode_verse_marker(verse_num)`, and `_verse_number(prefix, fallback)` to `renderers/braille_renderer.py`. `_encode_verse_marker` imports `_VERSE_PAREN_OPEN`/`_VERSE_PAREN_CLOSE` directly from `parser/strophic_song_parser.py` (rather than re-deriving them) so the encoder and `_verse_marker()`'s decoder can't drift apart. Continuation wrapping reuses the existing `wrap_run_over_line(..., indent_cells=2)` helper (cell 3, per the manual text above), the same function already used for every other run-over line in this file.
+3. Wired `encode_overflow_verses()` into `_render_vocal_solo()` only, appended after its main parallel loop. **Not yet extended** to `_render_choral_ensemble`/`_render_solo_with_accompaniment`/`_render_choral_with_accompaniment`/`_render_choral_with_orchestra` -- a multi-staff vocal ensemble's overflow-verse layout (one shared block after all voices' parallels? per-voice blocks? BANA doesn't obviously say, and this pass didn't verify it against the manual) is a distinct question left for a further pass, per this ticket's own Definition of Done allowance.
+4. Added `test_strophic_fixture_braille_render_includes_overflow_verse_text`, `test_encode_overflow_verses_round_trips_verse_number_marker`, and `test_encode_overflow_verses_empty_for_single_verse` to `tests/test_strophic_integration.py`. The first renders the real `strophic_song_test.brf` fixture (2 verses) through `BrailleRenderer` and confirms verse 2's text ("Everyone has gone to sleep... Tarry no more...") appears in the BRF output behind a correctly-decoding `"<#b">` marker, not just in `staff.verses`.
+
+**Known scope gap (documented in `encode_overflow_verses`'s docstring, not silently left):** §35.7.2 says a refrain reused in an overflow verse should be *replaced* by the word "Refrain"/"Chorus" rather than restated. `strophic_song_parser.parse_strophic_song()` already bakes the actual refrain words back into `staff.verses[v]` for v >= 1 at parse time (no "this came from a reused refrain" bit survives onto `Staff`), so this pass's encoder always writes the refrain text out again in full rather than collapsing it back to a label. Fixing that needs the refrain boundary preserved on the model first -- a separate, smaller follow-up if exact §35.7.2 fidelity on the output side matters.
+
+**Definition of Done:**
+- [x] BANA §35.7 overflow-verse output format verified against the real manual (cited in code comments), not guessed.
+- [x] `_render_vocal_solo()` emits every verse in `staff.verses`, not just `staff.lyrics`.
+- [ ] At least the choral-ensemble path emits multiple verses too (solo-with-accompaniment/choral-with-accompaniment/orchestra can follow in a further pass if the core mechanism is shared) -- **not done this pass**, see Steps taken #3.
+- [x] A round-trip test on a real multi-verse fixture confirms verse 2+ text appears in the BRF output.
+- [x] `pytest tests/` passes with no regressions (1346 passed).
+
+---
+
 
 ### [Shelved] S12-1: Integrate Audiveris as a subprocess PDF -> MusicXML import step
 

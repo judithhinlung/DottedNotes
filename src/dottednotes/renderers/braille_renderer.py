@@ -15,12 +15,14 @@ from dottednotes.models.in_accord import InAccord
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
 from dottednotes.bana_symbols import (
     TABLE_29_ALL_LANGUAGES, ITALIC_WORD_INDICATOR, ITALIC_PASSAGE_INDICATOR, ITALIC_TERMINATOR,
+    NUMBER_SIGN,
 )
 from dottednotes.exceptions import BrailleParseError
 from dottednotes.parser.ensemble_parser import (
     group_pitched_elements_by_slur, _LYRIC_PUNCTUATION, _ACCENT_MODIFIERS,
 )
 from dottednotes.parser.input_pipeline import ASCII_TO_DOTS
+from dottednotes.parser.strophic_song_parser import _VERSE_PAREN_OPEN, _VERSE_PAREN_CLOSE
 
 _HAIRPIN_END_LEVELS = (DynamicLevel.CRESCENDO_END, DynamicLevel.DECRESCENDO_END)
 
@@ -254,6 +256,58 @@ def encode_lyric_line(lyrics: list[str]) -> str:
         parts.append(_encode_lyric_word(text))
         pending_continuation = continues
     return ''.join(parts)
+
+
+def _encode_verse_marker(verse_num: int) -> str:
+    """BANA §35.7's margin verse-number marker: literary open-parenthesis,
+    the numeral sign, one or more literary digits, literary close-
+    parenthesis -- e.g. verse 2 is `"<#b">`. Mirrors
+    `strophic_song_parser._verse_marker()`'s decoder exactly (same
+    `_VERSE_PAREN_OPEN`/`_VERSE_PAREN_CLOSE` constants), so encode and
+    decode can't drift apart."""
+    digit_cells = ''.join(_INT_TO_LITERARY_DIGIT[int(d)] for d in str(verse_num))
+    return _VERSE_PAREN_OPEN + NUMBER_SIGN + digit_cells + _VERSE_PAREN_CLOSE
+
+
+def _verse_number(prefix: Optional[str], fallback: int) -> int:
+    """Recover the integer verse number from a stored `verse_prefixes`
+    entry (plain text like "2." -- the same format `Score.to_lilypond()`'s
+    `\\set stanza = "N. "` writer reads), or `fallback` (the verse's
+    1-based position in `staff.verses`) if no prefix was stored."""
+    if prefix:
+        digits = ''.join(c for c in prefix if c.isdigit())
+        if digits:
+            return int(digits)
+    return fallback
+
+
+def encode_overflow_verses(staff: Staff, line_width: int) -> list[str]:
+    """BANA §35.7: verses 2+ of a strophic song are lyrics-only, each
+    introduced at the margin by its verse-number marker and a blank cell,
+    continuing wrapped at cell 3 (not cell 5, unlike a word/music line's
+    own run-over) -- `staff.verses[0]` (verse 1, paired with the melody)
+    is never included here.
+
+    Known scope gap (S11c-25): §35.7.2 says a refrain that recurs in an
+    overflow verse should be *replaced* by the word "Refrain" (or
+    "Chorus") rather than restated -- but `staff.verses[v]` for v >= 1
+    already has the actual refrain words baked back in by
+    `strophic_song_parser.parse_strophic_song()` (which verse's syllables
+    came from a reused refrain isn't retained on `Staff` at all), so this
+    always writes the full text out again rather than collapsing it back
+    to a "Refrain" marker. Faithful §35.7.2 round-tripping needs that
+    boundary preserved on the model first.
+    """
+    if len(staff.verses) <= 1:
+        return []
+    blank_cell = chr(0x2800)
+    lines: list[str] = []
+    for v_idx in range(1, len(staff.verses)):
+        prefix = staff.verse_prefixes[v_idx] if v_idx < len(staff.verse_prefixes) else None
+        verse_num = _verse_number(prefix, v_idx + 1)
+        verse_line = _encode_verse_marker(verse_num) + blank_cell + encode_lyric_line(staff.verses[v_idx])
+        lines.extend(wrap_run_over_line(verse_line, line_width, indent_cells=2))
+    return lines
 
 
 def encode_italic_phrase(text: str) -> str:
@@ -1250,10 +1304,17 @@ class BrailleRenderer:
         # line-by-line format (words at cell 1, music at cell 3), never the
         # generic instrumental SINGLE_LINE layout -- checked before the
         # ENSEMBLE/staff-count branch below since it's a 1-staff case.
-        if (
-            len(score.staves) == 1
-            and get_instrument_family(score.staves[0].name) == InstrumentFamily.VOCAL
-            and score.staves[0].lyrics
+        # Lyrics alone are the reliable signal (same reasoning as
+        # _leading_vocal_group_length above): a solo BRF/LilyPond staff is
+        # routinely named "Melody" rather than "Voice"/"Soprano", so
+        # requiring get_instrument_family(...) == VOCAL *and* lyrics would
+        # silently fall through to the generic instrumental layout -- and
+        # drop the lyrics entirely -- for exactly that common case. A
+        # vocal-family name with no lyrics (a wordless vocalise) still
+        # qualifies on its own.
+        if len(score.staves) == 1 and (
+            score.staves[0].lyrics
+            or get_instrument_family(score.staves[0].name) == InstrumentFamily.VOCAL
         ):
             return TranscriptionMode.VOCAL_SOLO
         if isinstance(score, OrchestraScore) or len(score.staves) > 2:
@@ -1588,6 +1649,8 @@ class BrailleRenderer:
             prev_note = tmp_prev
             idx += fit_size
             parallel_index += 1
+
+        lines.extend(encode_overflow_verses(staff, self.line_width))
 
         return "\n".join(lines) + "\n"
 
