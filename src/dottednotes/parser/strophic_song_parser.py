@@ -23,6 +23,7 @@ explicitly -- `dottednotes convert` does so via `--category "Strophic Song"`
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 from ..bana_symbols import END_WORD_SIGN, LITERARY_DIGITS, NUMBER_SIGN, SymbolCategory
@@ -578,6 +579,31 @@ def parse_strophic_song_with_accompaniment(text: str) -> Score:
         )
 
     accompaniment_score = parse_keyboard_accompaniment(accompaniment_text)
+
+    # A piece has one key signature throughout -- the vocal part's own
+    # header (BANA requires it be restated at the top of every part, Par.
+    # 6.1) is the trustworthy one here; the accompaniment's restated
+    # header is a second, independently-transcribed copy of the *same*
+    # fact, not a different fact, so a transcription slip there (e.g. one
+    # sharp sign short of the vocal's) should not produce a staff in a
+    # different key. Overriding keeps every staff consistent; any staff
+    # whose own header actually disagreed is a transcription issue to
+    # flag separately, not something to silently honor per-staff.
+    vocal_key = vocal_score.staves[0].key_signature
+    for staff in accompaniment_score.staves:
+        if vocal_key is not None and staff.key_signature is not None and (
+            staff.key_signature.sharps_or_flats != vocal_key.sharps_or_flats
+        ):
+            warnings.warn(
+                f"Accompaniment staff {staff.name!r} header key signature "
+                f"({staff.key_signature.sharps_or_flats} sharps/flats) disagrees "
+                f"with the vocal part's ({vocal_key.sharps_or_flats}); using the "
+                "vocal part's key signature for every staff.",
+                stacklevel=2,
+            )
+        staff.key_signature = vocal_key
+        for measure in staff.measures:
+            measure.key_signature = vocal_key.sharps_or_flats if vocal_key is not None else None
 
     combined = Score(title=vocal_score.title)
     combined.add_staff(vocal_score.staves[0])

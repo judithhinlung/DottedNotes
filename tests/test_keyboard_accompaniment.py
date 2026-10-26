@@ -1,6 +1,10 @@
+import warnings
+
 from dottednotes.models import Score, Staff, Note, Duration, Measure, TimeSignature
 from dottednotes.models.dynamic import Dynamic, DynamicLevel
 from dottednotes.models.fermata import Fermata
+from dottednotes.parser.input_pipeline import BRLInputPipeline
+from dottednotes.parser.keyboard_accompaniment_parser import parse_keyboard_accompaniment
 from dottednotes.renderers.braille_renderer import (
     BrailleRenderer,
     TranscriptionMode,
@@ -157,3 +161,95 @@ def test_solo_with_accompaniment_round_trips_with_single_hand_only():
     assert [(n.note_name, n.octave) for n in rh.measures[0].notes] == [
         ("G", 4), ("G", 4), ("G", 4), ("G", 4),
     ]
+
+
+# ---------------------------------------------------------------------------
+# §29.8 outline-prefixed groups: the outline line's own margin number used
+# to be discarded along with the rest of its content, disarming
+# `BrailleParser`'s own measure-number cross-check for every group after
+# the first; each hand also used to be parsed from one interleaved token
+# stream, so a measure dividing across a line boundary (§29.3.1) bled a
+# hand's leftover notes into the *other* hand's next measure instead of
+# gluing onto its own next line. A right-hand-silent group (no asterisk/
+# footnote per §29.6) is backfilled with a whole-measure rest so both
+# staves stay the same length, rather than desyncing their measure counts.
+# ---------------------------------------------------------------------------
+
+def test_outline_margin_number_is_cross_checked_against_running_count():
+    # Group "C" (margin 3) following group "A" (margin 1) skips the real
+    # margin 2 -- BrailleParser's own mismatch warning must fire, proving
+    # the margin number is actually read from the outline line rather than
+    # discarded with the rest of its content.
+    ascii_text = (
+        '        %%%#F8\n'
+        'A .>"F"F"F"F"F"F\n'
+        '  _>"F"F"F"F"F"F\n'
+        'C ">"F"F"F"F"F"F\n'
+        '  .>"F"F"F"F"F"F\n'
+        '  _>"F"F"F"F"F"F'
+    )
+    text = BRLInputPipeline()._ascii_to_unicode(ascii_text)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        parse_keyboard_accompaniment(text)
+    messages = [str(w.message) for w in caught]
+    assert any("measure number 3 found, expected 2" in m for m in messages), messages
+
+
+def test_right_hand_silent_group_backfills_a_whole_measure_rest():
+    # Group "B" has an outline and a left hand but no right-hand line at
+    # all (the right hand rests for that measure, with no §29.6 asterisk/
+    # footnote) -- the right hand must still end up with a measure there,
+    # as a flagged rest, so both staves stay the same length.
+    ascii_text = (
+        '        %%%#F8\n'
+        'A .>"F"F"F"F"F"F\n'
+        '  _>"F"F"F"F"F"F\n'
+        'B ">"F"F"F"F"F"F\n'
+        '  _>"F"F"F"F"F"F\n'
+        'C ">"F"F"F"F"F"F\n'
+        '  .>"F"F"F"F"F"F\n'
+        '  _>"F"F"F"F"F"F'
+    )
+    text = BRLInputPipeline()._ascii_to_unicode(ascii_text)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        score = parse_keyboard_accompaniment(text)
+
+    rh, lh = score.staves
+    assert [m.number for m in rh.measures] == [1, 2, 3]
+    assert [m.number for m in lh.measures] == [1, 2, 3]
+    backfilled = rh.measures[1]
+    assert backfilled.total_ticks() == lh.measures[1].total_ticks()
+    assert len(backfilled.notes) == 1
+    assert type(backfilled.notes[0]).__name__ == "Rest"
+    assert backfilled.notes[0].is_full_measure is True
+
+
+def test_measure_divided_across_group_boundary_glues_into_one_measure():
+    # A real BANA §29.3.1 case: the right hand's first group (margin 1)
+    # closes a full measure, then starts a second one with 3 of its 6
+    # eighths, ending mid-measure with a trailing music hyphen (dot 5,
+    # last sign of the line) -- group "B" (margin 2) supplies the
+    # remaining 3 eighths. That second measure must glue into one 6/8
+    # measure (not bleed into the intervening left-hand line, and not be
+    # double-counted), with no beat-count mismatch warning for it.
+    rh_a = 'A .>' + '"F' * 6 + ' ' + '"F' * 3 + '"'
+    lh_a = '  _>' + '"F' * 6 + ' ' + '"F' * 6
+    rh_b_outline = 'B ">' + '"F' * 3
+    rh_b = '  .>' + '"F' * 3
+    lh_b = '  _>' + '"F' * 6
+    ascii_text = '\n'.join([
+        '        %%%#F8', rh_a, lh_a, rh_b_outline, rh_b, lh_b,
+    ])
+    text = BRLInputPipeline()._ascii_to_unicode(ascii_text)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = parse_keyboard_accompaniment(text)
+    messages = [str(w.message) for w in caught]
+    assert not any("measure 2" in m.lower() and "beats" in m for m in messages), messages
+
+    rh, lh = score.staves
+    assert rh.measures[0].total_ticks() == 72
+    assert rh.measures[1].total_ticks() == lh.measures[1].total_ticks() == 72
+    assert len(rh.measures[1].notes) == 6

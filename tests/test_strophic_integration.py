@@ -384,3 +384,24 @@ def test_strophic_song_with_accompaniment_ignores_trailing_newline():
     # newline) would be misrouted into expecting a keyboard block.
     text = BRLInputPipeline().load(FIXTURES / "strophic_song_test.brf").rstrip("\n") + "\n"
     assert len(parse_strophic_song_with_accompaniment(text).staves) == 1
+
+
+def test_strophic_song_with_accompaniment_overrides_disagreeing_piano_key_signature():
+    # A piece has one key signature throughout -- if the accompaniment's
+    # own (independently restated) header disagrees with the vocal's
+    # (e.g. one sharp short, a transcription slip), every staff
+    # must still end up in the vocal's key, flagged with a warning rather
+    # than silently producing a staff in the wrong key (which also throws
+    # off that key's own implied accidentals, e.g. a scale degree that's
+    # sharped in the true key but not in the staff's own wrong one).
+    vocal = '        %%%#F8\n,SING1\n  "F"F"F"F"F"F'
+    piano = '        %%#F8\nA .>"F"F"F"F"F"F\n  _>"F"F"F"F"F"F'
+    text = BRLInputPipeline()._ascii_to_unicode(vocal + '\n\n' + piano)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = parse_strophic_song_with_accompaniment(text)
+
+    assert all(s.key_signature.sharps_or_flats == 3 for s in score.staves)
+    messages = [str(w.message) for w in caught]
+    assert any("key signature" in m and "disagrees" in m for m in messages), messages
